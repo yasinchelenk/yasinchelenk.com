@@ -1,0 +1,14 @@
+{
+    "name": "yasinchelenk/website",
+    "description": "Gemi acentesi web sitesi",
+    "type": "project",
+    "require": {
+        "php": ">=8.4"
+    },
+    "scripts": {
+        "serve": [
+            "Composer\\Config::disableProcessTimeout",
+            "php -S localhost:8000 -t public public/index.php"
+        ]
+    }
+}

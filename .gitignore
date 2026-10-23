@@ -1,0 +1,16 @@
+# Çalışma zamanı verileri
+storage/panel.sqlite*
+storage/initial-admin-password.txt
+storage/messages/*.jsonl
+storage/outbox/*
+storage/uploads/*
+!storage/**/.gitkeep
+
+# Kaynak notlar (herkese açık repoya girmez)
+artanis-*.md
+bogaz-resmi-tarifeler.md
+proforma-v78-netship.md
+
+.DS_Store
+.vscode/
+.idea/
