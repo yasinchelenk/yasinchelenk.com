@@ -2,13 +2,6 @@
 
 declare(strict_types=1);
 
-const CONTACT_SUBJECTS = [
-    'job'        => ['tr' => 'İş fırsatı', 'en' => 'Job opportunity'],
-    'collab'     => ['tr' => 'İş birliği', 'en' => 'Collaboration'],
-    'operations' => ['tr' => 'Acentelik / operasyon sorusu', 'en' => 'Agency / operations question'],
-    'other'      => ['tr' => 'Diğer', 'en' => 'Other'],
-];
-
 const CONTACT_MESSAGES = [
     'expired' => ['tr' => 'Oturum süresi doldu, lütfen formu tekrar gönderin.', 'en' => 'Your session expired, please submit the form again.'],
     'name'    => ['tr' => 'Lütfen adınızı yazın.', 'en' => 'Please enter your name.'],
@@ -49,7 +42,8 @@ function handle_contact(): never
     if (!filter_var($input['email'], FILTER_VALIDATE_EMAIL)) {
         $errors['email'] = t(CONTACT_MESSAGES['email']);
     }
-    if (!array_key_exists($input['subject'], CONTACT_SUBJECTS)) {
+    // Konu, Site Yönetimi'ndeki konu listesindeki sıra numarasıdır.
+    if (contact_subject($input['subject']) === null) {
         $errors['subject'] = t(CONTACT_MESSAGES['subject']);
     }
     if (mb_strlen($input['message']) < 10) {
@@ -72,12 +66,19 @@ function handle_contact(): never
     redirect($back);
 }
 
+/** @return array{tr: string, en: string}|null */
+function contact_subject(string $index): ?array
+{
+    return ctype_digit($index) ? (content('contact.subjects')[(int) $index] ?? null) : null;
+}
+
 /** @param array<string, string> $input */
 function store_message(array $input): void
 {
     $record = [
+        'id'            => bin2hex(random_bytes(6)),
         ...$input,
-        'subject_label' => CONTACT_SUBJECTS[$input['subject']]['tr'],
+        'subject_label' => contact_subject($input['subject'])['tr'],
         'lang'          => lang(),
         'ip'            => $_SERVER['REMOTE_ADDR'] ?? null,
         'created_at'    => date(DATE_ATOM),
@@ -94,7 +95,7 @@ function send_mail_notification(array $input): void
         return;
     }
 
-    $subject = CONTACT_SUBJECTS[$input['subject']]['tr'];
+    $subject = contact_subject($input['subject'])['tr'];
     $body = implode("\n", [
         "Ad Soyad: {$input['name']}",
         "E-posta: {$input['email']}",
@@ -111,5 +112,6 @@ function send_mail_notification(array $input): void
         'Content-Type' => 'text/plain; charset=UTF-8',
     ];
 
-    @mail(config('mail.to'), '=?UTF-8?B?' . base64_encode("yasinchelenk.com: {$subject}") . '?=', $body, $headers);
+    $host = parse_url(config('site.url'), PHP_URL_HOST);
+    @mail(config('mail.to'), '=?UTF-8?B?' . base64_encode("{$host}: {$subject}") . '?=', $body, $headers);
 }

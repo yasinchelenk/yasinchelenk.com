@@ -36,6 +36,14 @@ if ($path === '/panel' || str_starts_with($path, '/panel/') || str_starts_with($
     handle_panel($path, $method);
 }
 
+require dirname(__DIR__) . '/app/site/store.php';
+
+// Site Yönetimi (kişisel sitenin içeriği; operasyon panelinden bağımsız)
+if ($path === '/admin' || str_starts_with($path, '/admin/')) {
+    require dirname(__DIR__) . '/app/site/admin.php';
+    handle_site_admin($path, $method);
+}
+
 // Dil öneki: "/en" ve altı İngilizce, geri kalan her şey varsayılan dilde.
 $prefix = explode('/', $path)[1] ?? '';
 if ($prefix !== config('site.langs')[0] && in_array($prefix, config('site.langs'), true)) {

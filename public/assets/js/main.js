@@ -17,7 +17,7 @@ onScroll();
 
 if ('IntersectionObserver' in window) {
     // Görünür olunca beliren bloklar
-    const revealables = document.querySelectorAll('.stat, .split > *, .entry, .vessel, .duty, .edu, .skill, .info-item, .form');
+    const revealables = document.querySelectorAll('.stat, .split > *, .entry, .vessel, .duty, .edu, .skill, .card, .info-item, .form');
     const observer = new IntersectionObserver((entries) => {
         entries.forEach((entry) => {
             if (entry.isIntersecting) {

@@ -4,7 +4,12 @@ storage/initial-admin-password.txt
 storage/messages/*.jsonl
 storage/outbox/*
 storage/uploads/*
+storage/site/*
 !storage/**/.gitkeep
+
+# Site Yönetimi'nden yüklenen dosyalar (sunucuda kalır)
+public/uploads/*
+!public/uploads/.htaccess
 
 # Kaynak notlar (herkese açık repoya girmez)
 artanis-*.md

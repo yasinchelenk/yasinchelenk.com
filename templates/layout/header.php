@@ -2,27 +2,23 @@
 /** @var string $title */
 /** @var string $page */
 $home = home_url();
-$nav = [
-    'about'      => ui('nav.about'),
-    'experience' => ui('nav.experience'),
-    'education'  => ui('nav.education'),
-    'skills'     => ui('nav.skills'),
-];
+$profile = content('profile');
+$theme = content('theme');
+$menu = array_filter(content('sections'), fn($s) => $s['visible'] && $s['menu'] && !in_array($s['type'], ['hero', 'stats'], true));
 $otherLang = current(array_diff(config('site.langs'), [lang()]));
-$fullTitle = $page === 'home' ? $title : $title . ' | ' . config('site.name');
+$fullTitle = $page === 'home' ? $title : $title . ' | ' . $profile['name'];
 $description = t(content('meta.description'));
-$person = [
-    '@context'    => 'https://schema.org',
-    '@type'       => 'Person',
-    'name'        => config('site.name'),
-    'jobTitle'    => t(content('hero.role')),
-    'url'         => config('site.url'),
-    'email'       => 'mailto:' . config('profile.email'),
-    'sameAs'      => [config('profile.linkedin')],
-    'worksFor'    => ['@type' => 'Organization', 'name' => content('jobs.0.company')],
-    'alumniOf'    => ['@type' => 'CollegeOrUniversity', 'name' => 'Karadeniz Technical University'],
-    'address'     => ['@type' => 'PostalAddress', 'addressLocality' => 'Istanbul', 'addressCountry' => 'TR'],
-];
+$person = array_filter([
+    '@context'  => 'https://schema.org',
+    '@type'     => 'Person',
+    'name'      => $profile['name'],
+    'jobTitle'  => t(content('hero.role')),
+    'url'       => config('site.url'),
+    'image'     => $profile['photo'] ? config('site.url') . $profile['photo'] : null,
+    'email'     => $profile['email'] ? 'mailto:' . $profile['email'] : null,
+    'telephone' => $profile['phone'] ?: null,
+    'sameAs'    => $profile['linkedin'] ? [$profile['linkedin']] : null,
+]);
 ?>
 <!doctype html>
 <html lang="<?= e(lang()) ?>">
@@ -46,20 +42,22 @@ $person = [
     <meta property="og:description" content="<?= e($description) ?>">
     <meta property="og:url" content="<?= e(config('site.url') . $home) ?>">
     <meta property="og:locale" content="<?= lang() === 'tr' ? 'tr_TR' : 'en_US' ?>">
-    <meta name="theme-color" content="#0a2540">
+    <?php if ($profile['photo']): ?><meta property="og:image" content="<?= e(config('site.url') . $profile['photo']) ?>"><?php endif; ?>
+    <meta name="theme-color" content="<?= e($theme['dark']) ?>">
     <link rel="icon" href="<?= asset('img/monogram.svg') ?>" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=<?= e(str_replace(' ', '+', $theme['font'])) ?>:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="<?= asset('css/style.css') ?>">
+    <style>:root { --primary: <?= e($theme['primary']) ?>; --accent: <?= e($theme['accent']) ?>; --dark: <?= e($theme['dark']) ?>; --font: "<?= e($theme['font']) ?>"; }</style>
 </head>
 <body class="page-<?= e($page) ?>">
 
 <header class="header" id="header">
     <div class="container header__inner">
         <a href="<?= e($home) ?>" class="logo">
-            <img src="<?= asset('img/monogram.svg') ?>" alt="" width="36" height="36">
-            <span><?= e(config('site.name')) ?></span>
+            <span class="logo__mark"><?= e($profile['initials']) ?></span>
+            <span><?= e($profile['name']) ?></span>
         </a>
 
         <button class="nav-toggle" aria-label="<?= e(ui('nav.menu')) ?>" aria-expanded="false" aria-controls="nav">
@@ -67,11 +65,17 @@ $person = [
         </button>
 
         <nav class="nav" id="nav">
-            <?php foreach ($nav as $id => $label): ?>
-                <a href="<?= e($home) ?>#<?= e($id) ?>"><?= e($label) ?></a>
+            <?php foreach ($menu as $item): ?>
+                <?php if ($item['type'] !== 'contact'): ?>
+                    <a href="<?= e($home) ?>#<?= e($item['id']) ?>"><?= e(t($item['label'])) ?></a>
+                <?php endif; ?>
             <?php endforeach; ?>
             <a href="<?= e(home_url($otherLang)) ?>" class="lang-switch" hreflang="<?= e($otherLang) ?>" lang="<?= e($otherLang) ?>" title="<?= e(ui('nav.switch')) ?>"><?= icon('globe') ?> <?= e(strtoupper($otherLang)) ?></a>
-            <a href="<?= e($home) ?>#contact" class="btn btn--primary btn--sm"><?= e(ui('nav.contact')) ?></a>
+            <?php foreach ($menu as $item): ?>
+                <?php if ($item['type'] === 'contact'): ?>
+                    <a href="<?= e($home) ?>#<?= e($item['id']) ?>" class="btn btn--primary btn--sm"><?= e(t($item['label'])) ?></a>
+                <?php endif; ?>
+            <?php endforeach; ?>
         </nav>
     </div>
 </header>

@@ -3,24 +3,14 @@
 declare(strict_types=1);
 
 /**
- * Site genel ayarları. Sayfa içerikleri (deneyim, eğitim vb.) app/content.php'de.
+ * Teknik ayarlar. Sitenin içeriği (metinler, fotoğraf, iletişim bilgileri, renkler, bölümler)
+ * Site Yönetimi'nden (/admin) düzenlenir; başlangıç değerleri app/content.php'de.
  */
 return [
     'site' => [
-        'name' => 'Yasin Çelenk',
         'url'  => 'https://yasinchelenk.com',
         // Desteklenen diller; ilki varsayılan ve "/" adresinde açılır, diğerleri "/en" gibi önekle.
         'langs' => ['tr', 'en'],
-    ],
-    'profile' => [
-        // Profil fotoğrafı: public/assets/img/ altına koyup dosya adını yazın (ör. 'profile.jpg').
-        // Boş kalırsa baş harflerden oluşan bir yer tutucu görünür.
-        'photo'    => '',
-        // CV indirme butonu: public/ altına konan PDF'in adresi (ör. '/cv-yasin-celenk.pdf'). Boşsa buton görünmez.
-        // Not: Pasaport/kimlik numarası içeren CV'yi buraya koymayın.
-        'cv_url'   => '',
-        'email'    => 'yasincelenk@outlook.com',
-        'linkedin' => 'https://www.linkedin.com/in/ychelenk/',
     ],
     'mail' => [
         // İletişim formu mesajları e-posta ile de gönderilsin mi? (sunucuda mail() ayarlı olmalı)

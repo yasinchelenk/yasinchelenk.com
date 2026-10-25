@@ -3,8 +3,11 @@
 İki parça:
 
 1. **Kişisel site** (`/` Türkçe, `/en` İngilizce): Yasin Çelenk'in tek sayfalık özgeçmiş sitesi; hakkımda, deneyim,
-   eğitim/sertifikalar, uzmanlık ve iletişim formu. Tüm metinler `app/content.php` içinde, iki dilde.
-2. **Operasyon paneli** (`/panel`): `artanis-ozellik-haritasi.md` şartnamesine göre gemi acentesi operasyon yazılımı.
+   eğitim/sertifikalar, uzmanlık ve iletişim formu.
+2. **Site Yönetimi** (`/admin`): kişisel sitenin tüm içeriğini düzenler (metinler TR/EN, fotoğraf, CV, iletişim bilgileri,
+   bölüm sırası/görünürlüğü/menü, özel bölümler, renkler ve yazı tipi), gelen mesajları ve yedekleri gösterir.
+   Operasyon panelinden tamamen ayrıdır: kendi hesabı ve kendi veri dosyası vardır.
+3. **Operasyon paneli** (`/panel`): `artanis-ozellik-haritasi.md` şartnamesine göre gemi acentesi operasyon yazılımı.
    Sitede bağlantısı yoktur; acente bilgileri `app/config.php` → `agency` bölümünden gelir.
 
 PHP 8.4+, framework yok. Veritabanı SQLite (`storage/panel.sqlite`, ilk istekte otomatik kurulur).
@@ -20,6 +23,9 @@ php -S localhost:8000 -t public public/index.php
 Hata ayrıntılarını görmek için sunucuyu `APP_DEBUG=1` ortam değişkeniyle başlatın (PowerShell: `$env:APP_DEBUG='1'`).
 
 - Site: http://localhost:8000 ve http://localhost:8000/en
+- Site Yönetimi: http://localhost:8000/admin — kullanıcı `yasin`; şifre ilk açılışta rastgele üretilip
+  `storage/site/admin-password.txt` dosyasına yazılır. Hesap sekmesinden şifre değiştirilince dosya silinir.
+  Şifreyi unutursanız: `php bin/site-admin.php yasin 'YeniSifre123'`
 - Panel: http://localhost:8000/panel — ilk kullanıcı `admin`; şifresi ilk çalıştırmada rastgele üretilip
   `storage/initial-admin-password.txt` dosyasına yazılır. Girişten sonra şifreyi değiştirip dosyayı silin.
 
@@ -51,9 +57,14 @@ Tüm tablolarda arama, sütun sürükleme, genişlik ayarı (tarayıcıda hatır
 ## Yapı
 
 ```
-app/config.php            site/profil bilgileri (fotoğraf, CV, e-posta), acente bilgileri, panel kısayolları, mail ayarı
-app/content.php           sitedeki tüm metinler (TR/EN): deneyim, gemiler, eğitim, sertifikalar, uzmanlık, arayüz
-templates/pages/home.php  kişisel sitenin tek sayfası
+app/config.php            teknik ayarlar: site adresi, diller, mail, acente bilgileri, panel kısayolları
+app/content.php           sitenin başlangıç içeriği (CV'den); Site Yönetimi'nde kaydedilince storage/site/content.json esas alınır
+app/site/schema.php       düzenlenebilir içeriğin yapısı: yönetim formları buradan çizilir, kaydedilen veri buna göre temizlenir
+app/site/store.php        içerik okuma/kaydetme, yedekler (storage/site/history/, son 30), mesajlar
+app/site/admin.php        Site Yönetimi girişi ve API'si
+templates/sections/       sitenin bölümleri; ana sayfa Site yapısı'ndaki sırayla bunları çizer
+public/assets/admin/      Site Yönetimi arayüzü (vanilla JS)
+public/uploads/           yönetimden yüklenen fotoğraf/CV (repoya girmez)
 app/contact.php           iletişim formu; mesajlar storage/messages/ altına kaydedilir
 app/panel/schema.sql      veritabanı şeması
 app/panel/resources.php   tablolar ve düzenlenebilir alanlar (genel CRUD buradan beslenir)
@@ -88,5 +99,6 @@ Panelin şartname, tasarım, tarife ve proforma notları yerel çalışma kopyas
 - Document root `public/` olmalı; `storage/` web'den erişilemez olmalı.
 - `debug` canlıda kendiliğinden kapalıdır (`APP_DEBUG` tanımlı değilse).
 - İletişim formu mesajlarının e-postaya gelmesi için `mail.enabled` → `true` (sunucuda `mail()` çalışmalı).
-- `storage/` web sunucusu tarafından yazılabilir olmalı; `storage/panel.sqlite` düzenli yedeklenmeli.
+- `storage/` ve `public/uploads/` web sunucusu tarafından yazılabilir olmalı; `storage/panel.sqlite` ve
+  `storage/site/` düzenli yedeklenmeli. Kod güncellenirken bu klasörlerin üzerine yazılmamalı (site içeriği ve hesaplar orada).
 - HTTPS zorunlu (oturum çerezi HTTPS'te `secure` olur).
