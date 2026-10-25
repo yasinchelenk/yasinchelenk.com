@@ -1,146 +1,257 @@
-import { h, get, post, toast, modal, field, input, formData, refreshPortList } from './ui.js';
-import { openPorts, openUsers } from './admin.js';
+// Uygulama kabuğu (spec §4): açılış, oturum, üst çubuk ve sekme grupları, hesap menüsü, Ctrl+Z.
+import { h, icon, store, toast } from './core/dom.js';
+import { post } from './core/api.js';
+import { live } from './core/live.js';
+import { notes } from './core/notes.js';
+import { popover, anyModalOpen } from './core/ui.js';
+import { undoTab } from './core/undo.js';
+import { renderLogin, renderForcedTotp, loadSession } from './auth.js';
+import { changePassword, changeColor, twoStep, usersDialog, backupsDialog, securityDialog, settingsDialog } from './account.js';
 
-// Sekmeler arası paylaşılan veri (gemiler, limanlar, kullanıcılar, kasa bakiyesi)
-export const store = {
-    user: null,
-    users: [],
-    vessels: [],
-    ports: [],
-    categories: {},
-    agency: {},
-    shortcuts: [],
-    async loadVessels() {
-        this.vessels = await get('vessels');
-        return this.vessels;
-    },
-    async loadPorts() {
-        this.ports = await get('ports');
-        refreshPortList(this);
-        return this.ports;
-    },
-    vessel(id) {
-        return this.vessels.find((v) => v.id === Number(id));
-    },
-    port(name) {
-        return this.ports.find((p) => p.name.toLocaleLowerCase('tr') === String(name ?? '').toLocaleLowerCase('tr'));
-    },
-};
+export const TABS = [
+    { code: 'positions', label: 'Positions', group: 'ops' },
+    { code: 'tasks', label: 'Tasks', group: 'ops' },
+    { code: 'transits', label: 'Transits', group: 'ops' },
+    { code: 'vessels', label: 'Vessels', group: 'ops' },
+    { code: 'customs', label: 'Customs', group: 'ops', tip: 'Gemiye gönderilen gümrüklü yedek parçalar; antrepoda 49 günlük bekleme süresi' },
+    { code: 'cash', label: 'Cash', group: 'ops', tip: 'Nakit kasa defteri: acenteye bırakılan para ve gemilere verilen cash to master' },
+    { code: 'supply', label: 'Supply', group: 'ops', tip: 'Aracılık ettiğimiz yağ, yakıt ve tatlı su ikmalleri; satıcıya vadesinde ödeme' },
+    { code: 'talepname', label: 'Petitions', group: 'ops', tip: 'Yakıt / yağ / su talepnamelerinin şablonları, tedarikçiler, barçlar ve Ek1; talepname Positions’taki pompa ikonundan hazırlanır' },
+    { code: 'tariffs', label: 'Tariffs', group: 'ops', tip: 'Fiyat listesi ve DA hesabını yapan tarifeler: fener, kılavuzluk, römorkör, sağlık, acente ücreti' },
+    { code: 'dues', label: 'Dues & Payments', group: 'acc', tip: 'Fener ve kılavuzluk tahakkukları, ödeme takibi' },
+    { code: 'da', label: 'Final DA', group: 'acc' },
+    { code: 'account', label: 'Account', group: 'acc', tip: 'Armatöre gönderilmiş DA’lerin son kontrolü ve muhasebe çıktısı' },
+    { code: 'gecmis', label: 'History', tip: 'Kim ne zaman neyi değiştirdi; silinen kayıtlar ve geri alma' },
+];
+const GROUPS = { ops: 'Operations', acc: 'Account' };
+const KEEP_ALIVE = ['transits', 'positions', 'tasks', 'da', 'vessels', 'customs', 'cash'];
 
-const TABS = ['positions', 'tasks', 'transits', 'vessels', 'customs', 'cash', 'supply', 'petitions', 'da', 'tariffs', 'history'];
-const view = document.getElementById('view');
-let cleanup = null;
+const root = document.getElementById('app');
+const mounted = new Map(); // code → { body, inst }
+let ctx = null;
+let current = null;
+let info = null;
 
-async function show(tab) {
-    if (!TABS.includes(tab)) tab = 'positions';
-    document.querySelectorAll('#tabs a').forEach((a) => a.classList.toggle('is-active', a.dataset.tab === tab));
-    cleanup?.();
-    cleanup = null;
-    // Her yükleme kendi kapsayıcısına çizer; arkadan biten eski bir yükleme ekrana karışmaz
-    const container = h('div.tab-root');
-    view.replaceChildren(container);
-    container.append(h('div.loading', 'Yükleniyor…'));
+// ---------------------------------------------------------------- Açılış
+
+async function boot() {
+    const firma = window.OPS_FIRMA ?? {};
+    root.replaceChildren(h('div.splash', h('div.splash__logo', firma.logo ? h('img', { src: firma.logo, alt: '' }) : firma.kisa ?? '')));
     try {
-        const mod = await import(`./tabs/${tab}.js`);
-        container.replaceChildren();
-        const dispose = (await mod.mount(container, store)) ?? null;
-        if (container.isConnected) cleanup = dispose;
-        else dispose?.();
-    } catch (e) {
-        console.error(e);
-        container.replaceChildren(h('div.loading', 'Sekme yüklenemedi: ' + e.message));
-    }
-}
-
-/** Başka bir sekmeye geçip oradaki bir kaydı açmak için (ör. DA numarası) */
-export function go(tab, param) {
-    const hash = '#' + tab + (param ? '/' + param : '');
-    if (location.hash === hash) show(tab);
-    else location.hash = hash;
-}
-
-export const hashParam = () => location.hash.split('/')[1] ?? null;
-
-document.querySelectorAll('#tabs a').forEach((a) => a.setAttribute('href', '#' + a.dataset.tab));
-window.addEventListener('hashchange', () => show(location.hash.slice(1).split('/')[0]));
-
-// ---- çevrimiçi kullanıcılar
-
-async function heartbeat() {
-    try {
-        const { online } = await post('heartbeat');
-        document.getElementById('online').replaceChildren(...online.map((u) => h('span.user-chip', { style: { '--c': u.color }, title: u.name + ' çevrimiçi' }, u.name)));
-    } catch { /* sessiz */ }
-}
-
-// ---- hesap menüsü
-
-const menu = document.getElementById('accountMenu');
-document.getElementById('accountBtn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    menu.hidden = !menu.hidden;
-});
-document.addEventListener('click', (e) => {
-    if (!menu.contains(e.target)) menu.hidden = true;
-});
-
-menu.addEventListener('click', (e) => {
-    const action = e.target.dataset.account;
-    if (!action) return;
-    menu.hidden = true;
-    ({ password: changePassword, color: changeColor, totp: twoStep, users: () => openUsers(store), ports: () => openPorts(store) })[action]?.();
-});
-
-function changePassword() {
-    const body = h('div.form', field('Mevcut şifre', input('current', '', { type: 'password' })), field('Yeni şifre', input('new', '', { type: 'password' }), 'En az 8 karakter'));
-    modal({ title: 'Şifre değiştir', body, actions: [{ label: 'Vazgeç' }, { label: 'Kaydet', primary: true, onClick: async () => {
-        await post('account/password', formData(body));
-        toast('Şifre değiştirildi');
-    } }] });
-}
-
-function changeColor() {
-    const body = h('div.form', field('Renk', input('color', store.user.color, { type: 'color' }), 'Çevrimiçi listesinde ve History\'de görünür'));
-    modal({ title: 'Rengim', body, actions: [{ label: 'Vazgeç' }, { label: 'Kaydet', primary: true, onClick: async () => {
-        const { color } = formData(body);
-        await post('account/color', { color });
-        store.user.color = color;
-        document.getElementById('accountBtn').style.setProperty('--c', color);
-        heartbeat();
-    } }] });
-}
-
-async function twoStep() {
-    if (Number(store.user.has_totp)) {
-        modal({ title: 'İki adımlı doğrulama', body: h('p', 'İki adımlı doğrulama açık.'), actions: [{ label: 'Kapat' }, { label: 'Devre dışı bırak', danger: true, onClick: async () => {
-            await post('account/totp-disable');
-            store.user.has_totp = 0;
-            toast('İki adımlı doğrulama kapatıldı');
-        } }] });
+        info = await loadSession();
+    } catch {
+        root.replaceChildren(h('div.auth', h('div.auth__card', h('p', 'Sunucuya ulaşılamadı. Bağlantınızı kontrol edip sayfayı yenileyin.'), h('button.primary', { on: { click: () => location.reload() } }, 'Yenile'))));
         return;
     }
-    const { secret, uri } = await post('account/totp-setup');
-    const body = h('div.form',
-        h('p', 'Google Authenticator, Authy vb. uygulamada "anahtar ile ekle" seçip bu anahtarı girin:'),
-        h('code.secret', secret.replace(/(.{4})/g, '$1 ').trim()),
-        h('p.hint', h('a', { href: uri }, 'Bu cihazda uygulamayla aç')),
-        field('Uygulamadaki 6 haneli kod', input('code', '', { inputmode: 'numeric', maxlength: 6 })),
-    );
-    modal({ title: 'İki adımlı doğrulamayı aç', body, actions: [{ label: 'Vazgeç' }, { label: 'Etkinleştir', primary: true, onClick: async () => {
-        await post('account/totp-enable', formData(body));
-        store.user.has_totp = 1;
-        toast('İki adımlı doğrulama açıldı');
-    } }] });
+    if (!info.user) return renderLogin(root, info, afterLogin);
+    start();
 }
 
-// ---- başlat
+async function afterLogin() {
+    info = await loadSession();
+    start();
+}
 
-(async () => {
-    const boot = await get('bootstrap');
-    Object.assign(store, { user: boot.user, users: boot.users, categories: boot.categories, agency: boot.agency, shortcuts: boot.shortcuts });
-    await Promise.all([store.loadVessels(), store.loadPorts()]);
-    heartbeat();
-    setInterval(heartbeat, 45_000);
-    show(location.hash.slice(1).split('/')[0] || 'positions');
-})();
+function allowed(code) {
+    const u = info.user;
+    return u.role === 'yonetici' || u.pages === null || u.pages.includes(code);
+}
 
+function start() {
+    if (info.ikiAdimZorunlu && !info.user.totp) {
+        return renderForcedTotp(root, info, info.user, afterLogin);
+    }
+    mounted.forEach((m) => m.inst?.dispose?.());
+    mounted.clear();
+    current = null;
+
+    ctx = {
+        user: info.user,
+        info,
+        firma: info.firma,
+        open: (code, param) => show(code, param),
+        allowed,
+        setUser: (u) => {
+            Object.assign(ctx.user, u);
+            drawMe();
+        },
+        refreshMe: async () => {
+            const fresh = await loadSession();
+            info.bekleyen = fresh.bekleyen;
+            drawMe();
+        },
+    };
+
+    document.title = info.firma.ad ?? 'Operasyon';
+    root.replaceChildren(buildShell());
+    live.start(info.user);
+    notes.load().catch(() => {});
+
+    const visible = TABS.filter((t) => allowed(t.code));
+    if (!visible.length) {
+        host.replaceChildren(h('div.empty-state', 'Hiçbir sayfaya erişim yetkiniz yok. Yöneticiden sayfa yetkisi isteyin.'));
+        return;
+    }
+    const saved = store.get('tab', null, true);
+    show(visible.some((t) => t.code === saved) ? saved : visible[0].code);
+}
+
+// ---------------------------------------------------------------- Kabuk
+
+let host;
+let tabsNav;
+let meWrap;
+let onlineWrap;
+let connChip;
+const openGroups = new Set(store.get('gruplar', [], true));
+
+function buildShell() {
+    const logo = h('a.topbar__logo', { href: '#', title: info.firma.baslik ?? '', on: { click: (e) => e.preventDefault() } },
+        info.firma.logo ? h('img', { src: info.firma.logo, alt: info.firma.kisa ?? '' }) : info.firma.kisa);
+    tabsNav = h('nav.tabs');
+    onlineWrap = h('div.topbar__online', { style: { display: 'flex', gap: '4px' } });
+    connChip = h('span.conn-lost', { hidden: true, title: 'Sunucuyla bağlantı koptu — yeniden bağlanılıyor. Ekrandaki veriler güncel olmayabilir.' }, '● Bağlantı yok');
+    meWrap = h('div');
+    host = h('main.host');
+    drawTabs();
+    drawMe();
+    live.onUsers(drawOnline);
+    return h('div.app', h('header.topbar', logo, tabsNav, h('div.topbar__right', connChip, onlineWrap, meWrap)), host);
+}
+
+function drawTabs() {
+    const tabBtn = (t, i) => h('button.tab', {
+        type: 'button', title: t.tip ?? '', class: t.code === current ? 'is-active' : '', style: { '--sira': i },
+        on: { click: () => show(t.code) },
+    }, t.label);
+
+    const parts = [];
+    for (const [g, label] of Object.entries(GROUPS)) {
+        const items = TABS.filter((t) => t.group === g && allowed(t.code));
+        if (!items.length) continue;
+        const isOpen = openGroups.has(g) || items.some((t) => t.code === current);
+        const wrap = h('div.tab-group', { class: isOpen ? 'is-open' : '' },
+            h('button.tab.tab-group__head', { type: 'button', on: { click: () => {
+                openGroups.has(g) ? openGroups.delete(g) : openGroups.add(g);
+                if (!openGroups.has(g) && items.some((t) => t.code === current)) openGroups.add(g);
+                store.set('gruplar', [...openGroups], true);
+                wrap.classList.toggle('is-open', openGroups.has(g) || items.some((t) => t.code === current));
+            } } }, label, icon('chevron')),
+            h('div.tab-group__inner', h('div.tab-group__track', items.map(tabBtn))));
+        parts.push(wrap);
+    }
+    TABS.filter((t) => !t.group && allowed(t.code)).forEach((t, i) => parts.push(tabBtn(t, i)));
+    tabsNav.replaceChildren(...parts);
+}
+
+function drawMe() {
+    const u = ctx.user;
+    const chip = h('button.user-chip.me-chip', { type: 'button', style: { '--c': u.color }, title: `${u.name} (@${u.username})` },
+        u.name.split(' ')[0],
+        u.role === 'yonetici' && info.bekleyen ? h('span.badge-count', info.bekleyen) : null);
+    chip.onclick = () => accountMenu(chip);
+    meWrap.replaceChildren(chip);
+}
+
+function drawOnline(users) {
+    const seen = new Set();
+    const others = users.filter((x) => x.userId !== ctx.user.id && !seen.has(x.userId) && seen.add(x.userId));
+    onlineWrap.replaceChildren(...others.map((x) => h('span.user-chip', { style: { '--c': x.color }, title: `${x.name} çevrimiçi` }, x.name.split(' ')[0])));
+}
+
+function accountMenu(anchor) {
+    const u = ctx.user;
+    const admin = u.role === 'yonetici';
+    let pop;
+    const item = (label, fn, opts = {}) => h('button.ctx-menu__item' + (opts.danger ? '.is-danger' : ''), { type: 'button', on: { click: () => { pop.close(); fn(); } } },
+        h('span.ctx-menu__label', label), opts.hint ? h('small.ctx-menu__hint', opts.hint) : null);
+    pop = popover(anchor, h('div',
+        h('div.acc-menu__who', h('strong', u.name), h('small', '@' + u.username + (admin ? ' · yönetici' : ''))),
+        item('Change my password', changePassword),
+        item('My colour', () => changeColor(ctx)),
+        item('Two-step verification', () => twoStep(ctx), { hint: u.totp ? 'açık' : 'kapalı' }),
+        admin ? h('div.ctx-menu__sep') : null,
+        admin ? item('Users', () => usersDialog(ctx), { hint: info.bekleyen ? `${info.bekleyen} bekliyor` : '' }) : null,
+        admin ? item('Firma Ayarları', settingsDialog) : null,
+        admin ? item('Backups', backupsDialog) : null,
+        admin ? item('Security', securityDialog) : null,
+        h('div.ctx-menu__sep'),
+        item('Sign out', signOut, { danger: true }),
+    ), { align: 'right', className: 'acc-menu' });
+}
+
+async function signOut() {
+    await post('oturum/cikis').catch(() => {});
+    live.stop();
+    store.del('tab', true);
+    location.reload();
+}
+
+// ---------------------------------------------------------------- Sekmeler
+
+async function show(code, param) {
+    if (!allowed(code)) code = TABS.find((t) => allowed(t.code))?.code;
+    if (!code) return;
+    const prev = current;
+    current = code;
+    store.set('tab', code, true);
+    drawTabs();
+
+    if (prev && prev !== code) {
+        const m = mounted.get(prev);
+        if (m) {
+            m.body.classList.add('is-hidden');
+            m.inst?.hide?.();
+            if (!KEEP_ALIVE.includes(prev)) {
+                m.inst?.dispose?.();
+                m.body.remove();
+                mounted.delete(prev);
+            }
+        }
+    }
+
+    let m = mounted.get(code);
+    if (m) {
+        m.body.classList.remove('is-hidden');
+        m.inst?.show?.(param);
+        return;
+    }
+    const body = h('section.tab-body', { dataset: { tab: code } }, h('div.empty-state', 'Yükleniyor…'));
+    host.append(body);
+    m = { body, inst: null };
+    mounted.set(code, m);
+    try {
+        const mod = await import(`./tabs/${code}.js`);
+        body.replaceChildren();
+        m.inst = (await mod.mount(body, ctx, param)) ?? null;
+    } catch (e) {
+        console.error(e);
+        body.replaceChildren(h('div.empty-state', e.message?.includes('Failed to fetch dynamically') || e.message?.includes('error loading')
+            ? 'Bu sayfa henüz hazırlanıyor.' : 'Sayfa yüklenemedi: ' + e.message));
+    }
+}
+
+// ---------------------------------------------------------------- Olaylar
+
+window.addEventListener('ops:oturum-dustu', () => {
+    live.stop();
+    toast('Oturum sona erdi, tekrar giriş yapın.', 'error');
+    setTimeout(() => location.reload(), 900);
+});
+window.addEventListener('ops:iki-adim', () => afterLogin());
+window.addEventListener('ops:baglanti', (e) => connChip && (connChip.hidden = e.detail));
+window.addEventListener('ops:gecmis', (e) => show('gecmis', e.detail));
+window.addEventListener('ops:ise-git', (e) => show('tasks', e.detail));
+live.on('user', () => ctx?.user.role === 'yonetici' && ctx.refreshMe());
+
+document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'z') return;
+    const t = e.target;
+    if (t.closest?.('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]')) return;
+    if (anyModalOpen() || document.querySelector('.cell-float, .da-editor.is-open, .tpl-editor')) return;
+    if (!current) return;
+    e.preventDefault();
+    undoTab(current).catch(() => {});
+});
+
+boot();

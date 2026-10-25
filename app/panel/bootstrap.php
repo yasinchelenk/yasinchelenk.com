@@ -2,111 +2,71 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/db.php';
-require __DIR__ . '/auth.php';
-require __DIR__ . '/resources.php';
-require __DIR__ . '/api.php';
-require __DIR__ . '/proforma.php';
-require __DIR__ . '/petitions.php';
+require __DIR__ . '/core/db.php';
+require __DIR__ . '/core/router.php';
+require __DIR__ . '/core/auth.php';
+require __DIR__ . '/core/entity.php';
+require __DIR__ . '/core/history.php';
+require __DIR__ . '/core/live.php';
+require __DIR__ . '/core/settings.php';
 
+foreach (glob(__DIR__ . '/modules/*.php') ?: [] as $module) {
+    require $module;
+}
+
+/** /panel (tek sayfa uygulama), /panel/belge/* (yazdırılabilir belgeler) ve /api/* */
 function handle_panel(string $path, string $method): never
 {
     date_default_timezone_set('Europe/Istanbul');
     header('Cache-Control: no-store');
+    header('X-Robots-Tag: noindex, nofollow');
+
+    auth_routes();
+    history_routes();
+    live_routes();
+    settings_routes();
+    foreach (get_defined_functions()['user'] as $fn) {
+        if (str_starts_with($fn, 'module_routes_')) {
+            $fn();
+        }
+    }
 
     if (str_starts_with($path, '/api/')) {
-        handle_api($path, $method);
+        dispatch_api($method, $path);
     }
 
-    match (true) {
-        $path === '/panel/login' && $method === 'POST' => panel_login_post(),
-        $path === '/panel/login'                       => panel_page('login', ['error' => flash('login_error'), 'need_code' => flash('need_code'), 'username' => flash('login_username')]),
-        $path === '/panel/logout' && $method === 'POST' => panel_logout(),
-        (bool) preg_match('#^/panel/print/(sp1|petition|da)/(\d+)$#', $path, $m) => panel_print($m[1], (int) $m[2]),
-        $path === '/panel'                             => panel_page('shell', ['user' => require_user()]),
-        default                                        => redirect('/panel'),
-    };
-}
-
-function panel_page(string $template, array $data = []): never
-{
-    render("panel/{$template}", $data);
-    exit;
-}
-
-function panel_login_post(): never
-{
-    if (!verify_csrf()) {
-        flash('login_error', 'Oturum süresi doldu, tekrar deneyin.');
-        redirect('/panel/login');
+    if (str_starts_with($path, '/panel/belge/')) {
+        if (!current_user()) {
+            redirect('/panel');
+        }
+        panel_document(substr($path, strlen('/panel/belge/')));
     }
 
-    // Basit kaba kuvvet freni: oturum başına 5 hatalı denemeden sonra 30 sn bekleme
-    $fails = $_SESSION['login_fails'] ?? ['count' => 0, 'until' => 0];
-    if ($fails['until'] > time()) {
-        flash('login_error', 'Çok fazla deneme. Lütfen biraz bekleyin.');
-        redirect('/panel/login');
-    }
-
-    $username = trim((string) ($_POST['username'] ?? ''));
-    $result = attempt_login($username, (string) ($_POST['password'] ?? ''), $_POST['code'] ?? null);
-
-    if ($result === true) {
-        unset($_SESSION['login_fails']);
+    if ($path !== '/panel') {
         redirect('/panel');
     }
 
-    if ($result === 'totp') {
-        flash('need_code', true);
-        flash('login_username', $username);
-        flash('login_error', 'İki adımlı doğrulama kodunu girin.');
-        redirect('/panel/login');
-    }
-
-    $fails['count']++;
-    if ($fails['count'] >= 5) {
-        $fails = ['count' => 0, 'until' => time() + 30];
-    }
-    $_SESSION['login_fails'] = $fails;
-    flash('login_error', $result);
-    flash('login_username', $username);
-    flash('need_code', !empty($_POST['code']));
-    redirect('/panel/login');
+    db(); // ilk açılışta şemayı kurar
+    render('panel/shell', []);
+    exit;
 }
 
-function panel_logout(): never
+/** Yazdırılabilir belgeler modüllerden kaydedilir: document_handler('da', fn(array $parts): never) */
+$GLOBALS['PANEL_DOCUMENTS'] = [];
+
+function document_handler(string $kind, callable $fn): void
 {
-    if (verify_csrf()) {
-        unset($_SESSION['panel_user']);
-        session_regenerate_id(true);
-    }
-    redirect('/panel/login');
+    $GLOBALS['PANEL_DOCUMENTS'][$kind] = $fn;
 }
 
-function panel_print(string $kind, int $id): never
+function panel_document(string $rest): never
 {
-    require_user();
-
-    $data = match ($kind) {
-        'sp1' => (function () use ($id) {
-            $position = fetch_record('positions', $id) ?? redirect('/panel');
-            return ['position' => $position, 'vessel' => row('SELECT * FROM vessels WHERE id = ?', [$position['vessel_id']])];
-        })(),
-        'petition' => (function () use ($id) {
-            $petition = fetch_record('petitions', $id) ?? redirect('/panel');
-            $data = json_decode((string) $petition['data'], true);
-            if (!$data) {
-                return ['petition' => $petition]; // eski düz metin dilekçeler
-            }
-            $docs = petition_documents($data)['docs'];
-            if (!empty($_GET['doc'])) {
-                $docs = array_values(array_filter($docs, fn($d) => $d['key'] === $_GET['doc']));
-            }
-            echo document_page($docs, (string) $petition['title'], toolbar: true);
-            exit;
-        })(),
-        'da'       => da_detail($id),
-    };
-
-    panel_page("print/{$kind}", $data);
+    $parts = explode('/', trim($rest, '/'));
+    $handler = $GLOBALS['PANEL_DOCUMENTS'][$parts[0]] ?? null;
+    if (!$handler) {
+        http_response_code(404);
+        exit('Belge bulunamadı');
+    }
+    $handler(array_slice($parts, 1));
+    exit;
 }
