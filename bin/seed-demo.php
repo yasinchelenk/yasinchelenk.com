@@ -97,10 +97,10 @@ insert('supply', ['date' => $d(-20), 'vessel_id' => $ids[2], 'product' => 'oil',
 insert('supply', ['date' => $d(-400), 'vessel_id' => $ids[1], 'product' => 'oil', 'product_name' => 'Demo Cyl Oil 70', 'supplier_id' => $oilSup, 'invoice_no' => 'DL-0007', 'unit' => 'LT', 'currency' => 'USD', 'buy_qty' => 1000, 'buy_price' => 2.4, 'sell_qty' => 1000, 'sell_price' => 2.9, 'paid' => 1]);
 insert('supply', ['date' => $d(-8), 'vessel_id' => $ids[3], 'product' => 'fuel', 'product_name' => 'MGO', 'supplier_id' => $fuelSup, 'barge_id' => $barge, 'invoice_no' => 'DF-0003', 'unit' => 'MT', 'currency' => 'USD', 'buy_qty' => 50, 'buy_price' => 720, 'sell_qty' => 50, 'sell_price' => 760, 'barge_cost' => 400, 'paid' => 1]);
 q("UPDATE settings SET value = ? WHERE key = 'ek1_contact'", ['Operasyon (7/24)']);
-q("UPDATE settings SET value = ? WHERE key = 'ek1_agent'", [config('site.name')]);
-q("UPDATE settings SET value = ? WHERE key = 'ek1_agent_tel'", [config('contact.phone_24h')]);
-q("UPDATE settings SET value = ? WHERE key = 'ek1_tel'", [config('contact.phone_24h')]);
-q("UPDATE settings SET value = ? WHERE key = 'ek1_address'", [config('contact.address')]);
+q("UPDATE settings SET value = ? WHERE key = 'ek1_agent'", [config('agency.name')]);
+q("UPDATE settings SET value = ? WHERE key = 'ek1_agent_tel'", [config('agency.phone_24h')]);
+q("UPDATE settings SET value = ? WHERE key = 'ek1_tel'", [config('agency.phone_24h')]);
+q("UPDATE settings SET value = ? WHERE key = 'ek1_address'", [config('agency.address')]);
 
 // Fiyat listesi bölümleri (ticari fiyatlar girilmedi)
 foreach (['Motor boat prices by anchorage area', 'Kartal & Tuzla boat and permissions', 'Cargo and crane expenses', 'Fresh water by delivery place (with barging)', 'Clearing & forwarding of AWB cargo', 'Zeyport crew change & technician fees', 'Istanbul / Zeyport expenses for off-signers', 'Crew transport & airport transfers by group size', 'CTM delivery expenses by amount bracket'] as $i => $title) {

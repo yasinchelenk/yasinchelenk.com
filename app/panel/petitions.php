@@ -42,7 +42,7 @@ function petition_values(array $data, bool $sample = false): array
 {
     if ($sample) {
         $values = array_map(fn($f) => $f[1], PETITION_FIELDS);
-        $values['ACENTE'] = config('site.name');
+        $values['ACENTE'] = config('agency.name');
         return $values;
     }
 
@@ -82,7 +82,7 @@ function petition_values(array $data, bool $sample = false): array
         'ROB_FO'         => $withUnit($fob['rob_fo'] ?? ''),
         'IKINCI_YAKIT'   => (string) ($fob['second_fuel'] ?? ''),
         'BARC'           => (string) ($barge['name'] ?? ''),
-        'ACENTE'         => config('site.name'),
+        'ACENTE'         => config('agency.name'),
     ];
 }
 
@@ -253,11 +253,11 @@ function document_page(array $docs, string $title, bool $toolbar = false): strin
 <?php foreach ($docs as $d): ?>
     <section class="page">
         <?php if ($d['letterhead']): ?>
-            <div class="lh"><strong><?= e(config('site.name')) ?></strong><span><?= e(config('contact.email')) ?></span></div>
+            <div class="lh"><strong><?= e(config('agency.name')) ?></strong><span><?= e(config('agency.email')) ?></span></div>
         <?php endif; ?>
         <?= $d['html'] ?>
         <?php if ($d['letterhead']): ?>
-            <div class="ft"><?= e(config('contact.address')) ?> · <?= e(config('contact.phone')) ?> · <?= e(config('contact.phone_24h')) ?></div>
+            <div class="ft"><?= e(config('agency.address')) ?> · <?= e(config('agency.phone')) ?> · <?= e(config('agency.phone_24h')) ?></div>
         <?php endif; ?>
     </section>
 <?php endforeach; ?>

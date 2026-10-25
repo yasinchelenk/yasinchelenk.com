@@ -6,7 +6,7 @@ $lines = array_values(array_filter(array_map('trim', (array) ($in['lines'] ?? []
 ?>
 <div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;border:1px solid #e3e8ef;border-radius:8px;overflow:hidden">
     <div style="background:#0a2540;color:#fff;padding:16px 22px">
-        <div style="font-size:11px;letter-spacing:3px;color:#1fb5ad"><?= e(config('site.name')) ?></div>
+        <div style="font-size:11px;letter-spacing:3px;color:#1fb5ad"><?= e(config('agency.name')) ?></div>
         <div style="font-size:19px;font-weight:700;margin-top:4px">Yapılacak İşler – <?= e($vessel['name']) ?></div>
     </div>
     <?php if (trim((string) ($in['description'] ?? '')) !== ''): ?>

@@ -1,9 +1,11 @@
-# Çelenk Shipping Agency
+# yasinchelenk.com
 
 İki parça:
 
-1. **Tanıtım sitesi** (`/`): Ana sayfa, hizmetler, limanlar, iletişim formu.
+1. **Kişisel site** (`/` Türkçe, `/en` İngilizce): Yasin Çelenk'in tek sayfalık özgeçmiş sitesi; hakkımda, deneyim,
+   eğitim/sertifikalar, uzmanlık ve iletişim formu. Tüm metinler `app/content.php` içinde, iki dilde.
 2. **Operasyon paneli** (`/panel`): `artanis-ozellik-haritasi.md` şartnamesine göre gemi acentesi operasyon yazılımı.
+   Sitede bağlantısı yoktur; acente bilgileri `app/config.php` → `agency` bölümünden gelir.
 
 PHP 8.4+, framework yok. Veritabanı SQLite (`storage/panel.sqlite`, ilk istekte otomatik kurulur).
 
@@ -15,7 +17,9 @@ composer serve
 php -S localhost:8000 -t public public/index.php
 ```
 
-- Site: http://localhost:8000
+Hata ayrıntılarını görmek için sunucuyu `APP_DEBUG=1` ortam değişkeniyle başlatın (PowerShell: `$env:APP_DEBUG='1'`).
+
+- Site: http://localhost:8000 ve http://localhost:8000/en
 - Panel: http://localhost:8000/panel — ilk kullanıcı `admin`; şifresi ilk çalıştırmada rastgele üretilip
   `storage/initial-admin-password.txt` dosyasına yazılır. Girişten sonra şifreyi değiştirip dosyayı silin.
 
@@ -47,7 +51,10 @@ Tüm tablolarda arama, sütun sürükleme, genişlik ayarı (tarayıcıda hatır
 ## Yapı
 
 ```
-app/config.php            site bilgileri, panel kısayol adresleri, mail ayarı
+app/config.php            site/profil bilgileri (fotoğraf, CV, e-posta), acente bilgileri, panel kısayolları, mail ayarı
+app/content.php           sitedeki tüm metinler (TR/EN): deneyim, gemiler, eğitim, sertifikalar, uzmanlık, arayüz
+templates/pages/home.php  kişisel sitenin tek sayfası
+app/contact.php           iletişim formu; mesajlar storage/messages/ altına kaydedilir
 app/panel/schema.sql      veritabanı şeması
 app/panel/resources.php   tablolar ve düzenlenebilir alanlar (genel CRUD buradan beslenir)
 app/panel/api.php         JSON API, History/undo, DA ve tarife hesapları, mailler
@@ -79,6 +86,7 @@ Panelin şartname, tasarım, tarife ve proforma notları yerel çalışma kopyas
 ## Canlıya alırken
 
 - Document root `public/` olmalı; `storage/` web'den erişilemez olmalı.
-- `app/config.php` içinde `debug` → `false`.
+- `debug` canlıda kendiliğinden kapalıdır (`APP_DEBUG` tanımlı değilse).
+- İletişim formu mesajlarının e-postaya gelmesi için `mail.enabled` → `true` (sunucuda `mail()` çalışmalı).
 - `storage/` web sunucusu tarafından yazılabilir olmalı; `storage/panel.sqlite` düzenli yedeklenmeli.
 - HTTPS zorunlu (oturum çerezi HTTPS'te `secure` olur).

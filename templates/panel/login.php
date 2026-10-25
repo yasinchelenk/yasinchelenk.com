@@ -8,14 +8,14 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Giriş | <?= e(config('site.short_name')) ?> Operasyon</title>
+    <title>Giriş | <?= e(config('agency.short_name')) ?> Operasyon</title>
     <link rel="icon" href="<?= asset('img/favicon.svg') ?>" type="image/svg+xml">
     <link rel="stylesheet" href="<?= asset('panel/panel.css') ?>">
 </head>
 <body class="login-page">
     <form class="login" method="post" action="/panel/login">
         <img src="<?= asset('img/logo.svg') ?>" alt="" width="48" height="48">
-        <h1><?= e(config('site.short_name')) ?> <span>Operasyon</span></h1>
+        <h1><?= e(config('agency.short_name')) ?> <span>Operasyon</span></h1>
         <?php if ($error): ?><div class="login__error"><?= e($error) ?></div><?php endif; ?>
         <?= csrf_field() ?>
         <label>Kullanıcı adı<input name="username" value="<?= e($username ?? '') ?>" autocomplete="username" required autofocus></label>

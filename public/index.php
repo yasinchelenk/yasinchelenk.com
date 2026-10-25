@@ -11,9 +11,9 @@ if (PHP_SAPI === 'cli-server') {
 }
 
 require dirname(__DIR__) . '/app/helpers.php';
-require dirname(__DIR__) . '/app/data.php';
 require dirname(__DIR__) . '/app/contact.php';
 
+date_default_timezone_set('Europe/Istanbul');
 ini_set('display_errors', config('debug') ? '1' : '0');
 error_reporting(E_ALL);
 
@@ -36,31 +36,21 @@ if ($path === '/panel' || str_starts_with($path, '/panel/') || str_starts_with($
     handle_panel($path, $method);
 }
 
+// Dil öneki: "/en" ve altı İngilizce, geri kalan her şey varsayılan dilde.
+$prefix = explode('/', $path)[1] ?? '';
+if ($prefix !== config('site.langs')[0] && in_array($prefix, config('site.langs'), true)) {
+    lang($prefix);
+}
+
 match (true) {
-    $path === '/' => view('home', [
-        'title'    => config('site.tagline'),
-        'services' => array_slice(services(), 0, 4),
-        'stats'    => stats(),
-    ]),
+    $path === home_url() && $method === 'POST' => handle_contact(),
 
-    $path === '/hakkimizda' => view('about', ['title' => 'Hakkımızda', 'stats' => stats()]),
-
-    $path === '/hizmetler' => view('services', ['title' => 'Hizmetlerimiz', 'services' => services()]),
-
-    (bool) preg_match('#^/hizmetler/([a-z0-9-]+)$#', $path, $m) => ($service = find_service($m[1]))
-        ? view('service', ['title' => $service->title, 'service' => $service, 'others' => services()])
-        : view('404', ['title' => 'Sayfa Bulunamadı'], 404),
-
-    $path === '/limanlar' => view('ports', ['title' => 'Hizmet Verdiğimiz Limanlar', 'ports' => ports()]),
-
-    $path === '/iletisim' && $method === 'POST' => handle_contact(),
-
-    $path === '/iletisim' => view('contact', [
-        'title'   => 'İletişim',
+    $path === home_url() => view('home', [
+        'title'   => t(content('meta.title')),
         'errors'  => flash('errors') ?? [],
         'old'     => flash('old') ?? [],
         'success' => flash('success'),
     ]),
 
-    default => view('404', ['title' => 'Sayfa Bulunamadı'], 404),
+    default => view('404', ['title' => ui('notfound.title')], 404),
 };

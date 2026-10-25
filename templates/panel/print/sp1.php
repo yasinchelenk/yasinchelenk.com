@@ -6,7 +6,7 @@ ob_start();
 $v = fn(string $k) => e((string) ($vessel[$k] ?? ''));
 ?>
 <div class="head">
-    <div><h1>SP-1 · Polis Bildirim Formu</h1><small><?= e(config('site.name')) ?></small></div>
+    <div><h1>SP-1 · Polis Bildirim Formu</h1><small><?= e(config('agency.name')) ?></small></div>
     <small><?= date('d.m.Y H:i') ?></small>
 </div>
 <table>
@@ -22,7 +22,7 @@ $v = fn(string $k) => e((string) ($vessel[$k] ?? ''));
     <tr><th>Mevki / Tarih</th><td><?= e($position['position'] ?? '') ?> <?= $position['position_at'] ? date('d.m.Y H:i', strtotime($position['position_at'])) : '' ?></td></tr>
     <tr><th>Yük</th><td><?= e($position['cargo'] ?? '') ?></td></tr>
     <tr><th>Armatör</th><td><?= $v('owner') ?></td></tr>
-    <tr><th>Acente</th><td><?= e(config('site.name')) ?> · <?= e(config('contact.phone_24h')) ?></td></tr>
+    <tr><th>Acente</th><td><?= e(config('agency.name')) ?> · <?= e(config('agency.phone_24h')) ?></td></tr>
 </table>
 <div class="sign"><span>Acente imza / kaşe</span><span>Kaptan imza</span></div>
 <?php render('panel/print/_layout', ['doc_title' => 'SP1 ' . $vessel['name'], 'content' => ob_get_clean()]); ?>

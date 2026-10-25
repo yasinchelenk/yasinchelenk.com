@@ -161,7 +161,7 @@ function api_bootstrap(array $user): never
         'csrf'       => csrf_token(),
         'users'      => rows('SELECT id, name, username, color FROM users ORDER BY name'),
         'categories' => POSITION_CATEGORIES,
-        'agency'     => ['name' => config('site.name'), 'email' => config('contact.email')],
+        'agency'     => ['name' => config('agency.name'), 'email' => config('agency.email')],
         'shortcuts'  => config('shortcuts', []),
     ]);
 }
@@ -281,7 +281,7 @@ function api_mail(string $type, string $action, array $in): never
         $headers = [
             'MIME-Version' => '1.0',
             'Content-Type' => 'text/html; charset=UTF-8',
-            'From'         => config('contact.email'),
+            'From'         => config('agency.email'),
         ];
         if (!empty($in['cc'])) {
             $headers['Cc'] = $in['cc'];
@@ -538,7 +538,7 @@ function api_account(array $user, string $action, array $in): never
         'totp-setup' => (function () use ($user) {
             $secret = base32_encode(random_bytes(20));
             $_SESSION['totp_pending'] = $secret;
-            $issuer = rawurlencode(config('site.short_name'));
+            $issuer = rawurlencode(config('agency.short_name'));
             json_response(['secret' => $secret, 'uri' => "otpauth://totp/{$issuer}:" . rawurlencode($user['username']) . "?secret={$secret}&issuer={$issuer}"]);
         })(),
         'totp-enable' => (function () use ($user, $in) {

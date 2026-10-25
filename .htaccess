@@ -1,0 +1,9 @@
+# Yalnızca hosting'de site kökü public/ olarak ayarlanamadığında devreye girer:
+# tüm istekleri public/ altına yönlendirir; app/, storage/, templates/ gibi klasörlere doğrudan erişilemez.
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>

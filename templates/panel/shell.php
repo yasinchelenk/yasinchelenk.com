@@ -5,13 +5,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf" content="<?= e(csrf_token()) ?>">
-    <title><?= e(config('site.short_name')) ?> Operasyon</title>
+    <title><?= e(config('agency.short_name')) ?> Operasyon</title>
     <link rel="icon" href="<?= asset('img/favicon.svg') ?>" type="image/svg+xml">
     <link rel="stylesheet" href="<?= asset('panel/panel.css') ?>">
 </head>
 <body>
 <header class="bar">
-    <a class="bar__logo" href="/panel"><img src="<?= asset('img/logo.svg') ?>" alt="" width="26" height="26"><?= e(config('site.short_name')) ?></a>
+    <a class="bar__logo" href="/panel"><img src="<?= asset('img/logo.svg') ?>" alt="" width="26" height="26"><?= e(config('agency.short_name')) ?></a>
     <nav class="tabs" id="tabs">
         <a data-tab="positions" title="Canlı gemi panosu">Positions</a>
         <a data-tab="tasks" title="İş kalemleri, DA'nın ham maddesi">Tasks</a>

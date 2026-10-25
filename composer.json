@@ -1,6 +1,6 @@
 {
     "name": "yasinchelenk/website",
-    "description": "Gemi acentesi web sitesi",
+    "description": "Yasin Çelenk kişisel web sitesi ve gemi acentesi operasyon paneli",
     "type": "project",
     "require": {
         "php": ">=8.4"

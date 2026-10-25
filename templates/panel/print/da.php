@@ -7,7 +7,7 @@ ob_start();
 $money = fn(float $n) => number_format($n, 2, ',', '.');
 ?>
 <div class="head">
-    <div><h1>DISBURSEMENT ACCOUNT · DA <?= e((string) $da['da_no']) ?></h1><small><?= e(config('site.name')) ?></small></div>
+    <div><h1>DISBURSEMENT ACCOUNT · DA <?= e((string) $da['da_no']) ?></h1><small><?= e(config('agency.name')) ?></small></div>
     <small><?= date('d.m.Y', strtotime($da['created_at'])) ?></small>
 </div>
 <table>

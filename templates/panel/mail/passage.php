@@ -10,7 +10,7 @@ $row = fn(string $k, string $v) => '<tr><td style="padding:6px 10px;color:#6b7a8
 ?>
 <div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;border:1px solid #e3e8ef;border-radius:8px;overflow:hidden">
     <div style="background:#0a2540;color:#fff;padding:18px 22px">
-        <div style="font-size:11px;letter-spacing:3px;color:#1fb5ad"><?= e(config('site.name')) ?></div>
+        <div style="font-size:11px;letter-spacing:3px;color:#1fb5ad"><?= e(config('agency.name')) ?></div>
         <div style="font-size:20px;font-weight:700;letter-spacing:1px;margin-top:4px">SHIP PASSAGE INFORMATION</div>
     </div>
     <?php if ($photo): ?><img src="<?= $photo ?>" alt="" style="display:block;width:100%;max-height:260px;object-fit:cover"><?php endif; ?>
@@ -37,6 +37,6 @@ $row = fn(string $k, string $v) => '<tr><td style="padding:6px 10px;color:#6b7a8
         <div style="padding:10px;font-size:14px;white-space:pre-wrap;color:#0a2540"><?= e($in['supply']) ?></div>
     <?php endif; ?>
     <div style="padding:14px 22px;font-size:12px;color:#6b7a8c;border-top:1px solid #e3e8ef">
-        <?= e(config('site.name')) ?> · <?= e(config('contact.phone_24h')) ?> · <?= e(config('contact.email')) ?>
+        <?= e(config('agency.name')) ?> · <?= e(config('agency.phone_24h')) ?> · <?= e(config('agency.email')) ?>
     </div>
 </div>
