@@ -42,5 +42,5 @@ return [
         ['key' => 'gisis',  'label' => 'GISIS',       'title' => 'IMO GISIS', 'url' => 'https://gisis.imo.org'],
         ['key' => 'waste',  'label' => 'Atık ücreti', 'title' => 'Atık ücreti hesaplayıcı', 'url' => ''],
     ],
-    'debug' => true,
+    'debug' => false, // yerelde app/config.local.php ile açın
 ];

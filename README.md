@@ -76,9 +76,31 @@ Panelin şartname, tasarım, tarife ve proforma notları yerel çalışma kopyas
 - Mail gönderimi kapalı (`mail.enabled`); gönderilen mailler `storage/outbox/` altına kaydedilir.
 - Veritabanı değişiklikleri `app/panel/migrations.php` ile sürümlenir (mevcut veri silinmeden güncellenir).
 
+## Yayına alma (Natro cPanel – yasinchelenk.com)
+
+Proje `public_html` köküne kurulur; kök `.htaccess` blokları tüm istekleri `public/` klasörüne yönlendirir,
+`app/`, `storage/`, `templates/` gibi klasörlere dışarıdan erişim kapalıdır.
+
+**İlk kurulum (bir kez):**
+
+1. cPanel → **Select PHP Version / MultiPHP Manager**: alan adı için **PHP 8.4** seçin; `pdo_sqlite`, `sqlite3`, `mbstring` eklentileri açık olmalı.
+2. cPanel → **Git™ Version Control** → *Create* → *Clone a Repository*:
+   - Clone URL: `https://github.com/yasinchelenk/yasinchelenk.com.git`
+   - Repository Path: `repositories/yasinchelenk.com` (public_html değil)
+3. Depo sayfasında **Manage → Pull or Deploy → Deploy HEAD Commit**. `.cpanel.yml` kodu `public_html`'e kopyalar
+   (Natro'nun varsayılan sayfası silinir; `storage/`, `.well-known`, `app/config.local.php` ve cPanel'in PHP satırları korunur).
+4. `https://yasinchelenk.com/panel` adresini bir kez açın; ilk yönetici şifresi `public_html/storage/initial-admin-password.txt`
+   dosyasına yazılır (cPanel → Dosya Yöneticisi). Girişten sonra şifreyi değiştirin, dosyayı silin, iki adımlı doğrulamayı açın.
+5. cPanel → **SSL/TLS Status → Run AutoSSL**. Sertifika çıkınca `deploy/htaccess-root.conf` içindeki HTTPS satırlarının başındaki `#`
+   işaretini kaldırıp commit'leyin ve yeniden yayınlayın.
+6. İsteğe bağlı: `public_html/app/config.local.php` oluşturup (örnek: `app/config.local.example.php`) sunucuya özel ayarları girin.
+
+**Güncelleme:** GitHub'a push → cPanel Git™ Version Control → *Update from Remote* → *Deploy HEAD Commit*.
+Veritabanı değişiklikleri ilk istekte `app/panel/migrations.php` ile otomatik uygulanır.
+
 ## Canlıya alırken
 
 - Document root `public/` olmalı; `storage/` web'den erişilemez olmalı.
-- `app/config.php` içinde `debug` → `false`.
+- `debug` varsayılan olarak kapalı; yerelde `app/config.local.php` içinde `'debug' => true` ile açılır.
 - `storage/` web sunucusu tarafından yazılabilir olmalı; `storage/panel.sqlite` düzenli yedeklenmeli.
 - HTTPS zorunlu (oturum çerezi HTTPS'te `secure` olur).

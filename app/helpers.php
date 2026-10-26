@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 function config(string $key, mixed $default = null): mixed
 {
-    static $config = require __DIR__ . '/config.php';
+    // config.local.php (repoya girmez) sunucuya / makineye özel değerleri ezer
+    static $config = array_replace_recursive(
+        require __DIR__ . '/config.php',
+        is_file(__DIR__ . '/config.local.php') ? require __DIR__ . '/config.local.php' : [],
+    );
 
     $value = $config;
     foreach (explode('.', $key) as $part) {

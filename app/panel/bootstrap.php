@@ -13,6 +13,7 @@ function handle_panel(string $path, string $method): never
 {
     date_default_timezone_set('Europe/Istanbul');
     header('Cache-Control: no-store');
+    db(); // ilk açılışta veritabanını kurar ve yönetici şifresini storage/ altına yazar
 
     if (str_starts_with($path, '/api/')) {
         handle_api($path, $method);
