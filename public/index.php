@@ -38,7 +38,7 @@ if ($path === '/panel' || str_starts_with($path, '/panel/') || str_starts_with($
 
 match (true) {
     $path === '/' => view('home', [
-        'title'    => config('site.tagline'),
+        'title'    => null, // ana sayfa sekmesinde yalnızca site adı
         'services' => array_slice(services(), 0, 4),
         'stats'    => stats(),
     ]),

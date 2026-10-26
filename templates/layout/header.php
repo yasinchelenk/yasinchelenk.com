@@ -1,5 +1,5 @@
 <?php
-/** @var string $title */
+/** @var string|null $title  boşsa sekmede yalnızca site adı görünür */
 /** @var string $page */
 $nav = [
     '/'           => 'Ana Sayfa',
@@ -14,9 +14,9 @@ $nav = [
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title><?= e($title) ?> | <?= e(config('site.name')) ?></title>
+    <title><?= $title ? e($title) . ' | ' : '' ?><?= e(config('site.name')) ?></title>
     <meta name="description" content="<?= e($description ?? config('site.description')) ?>">
-    <meta property="og:title" content="<?= e($title) ?>">
+    <meta property="og:title" content="<?= e($title ?: config('site.name')) ?>">
     <meta property="og:description" content="<?= e(config('site.description')) ?>">
     <meta property="og:image" content="<?= e(config('site.url')) ?>/assets/img/hero-ship.svg">
     <link rel="icon" href="<?= asset('img/favicon.svg') ?>" type="image/svg+xml">
