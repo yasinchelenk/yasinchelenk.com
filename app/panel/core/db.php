@@ -70,9 +70,10 @@ function panel_connect(string $file): PDO
 function panel_migrations(): array
 {
     require_once dirname(__DIR__) . '/seed.php';
+    require_once dirname(__DIR__) . '/seed_tariffs.php';
 
     return [
-        // 101 => fn(PDO $pdo) => ...,
+        101 => 'seed_tariffs',
     ];
 }
 
