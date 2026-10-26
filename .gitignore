@@ -26,3 +26,6 @@ proforma-v78-netship.md
 .DS_Store
 .vscode/
 .idea/
+
+# Makineye / sunucuya özel ayarlar
+app/config.local.php

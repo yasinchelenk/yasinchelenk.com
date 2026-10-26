@@ -80,7 +80,7 @@ function store_message(array $input): void
         ...$input,
         'subject_label' => contact_subject($input['subject'])['tr'],
         'lang'          => lang(),
-        'ip'            => $_SERVER['REMOTE_ADDR'] ?? null,
+        'ip'            => client_ip(),
         'created_at'    => date(DATE_ATOM),
     ];
 

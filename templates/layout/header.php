@@ -1,5 +1,5 @@
 <?php
-/** @var string $title */
+/** @var string|null $title  boşsa sekmede yalnızca site adı görünür */
 /** @var string $page */
 $home = home_url();
 $profile = content('profile');

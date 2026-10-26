@@ -1,0 +1,8 @@
+---
+# cPanel Git Version Control "Deploy HEAD Commit" bu adımları çalıştırır.
+# Asıl iş bin/deploy.sh + bin/deploy.php içinde (rsync gerekmez).
+# Not: buradaki komutlarda "iki nokta + boşluk" kullanmayın; YAML onu anahtar sanar.
+deployment:
+  tasks:
+    - export DEPLOYPATH=$HOME/public_html
+    - /bin/bash bin/deploy.sh $DEPLOYPATH

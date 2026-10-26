@@ -91,11 +91,45 @@ bin/                        komut satırı araçları
 - TCMB kuru sunucudan `www.tcmb.gov.tr`'ye erişim ister; ulaşılamazsa son kayıtlı bülten ya da elle kur kullanılır.
 - `app/config.php` → `shortcuts`: LYBS, e-Denizcilik, Tek Pencere, atık ücreti adresleri boş.
 
+## Yayına alma (Natro cPanel – yasinchelenk.com)
+
+Proje `public_html` köküne kurulur; kök `.htaccess` blokları tüm istekleri `public/` klasörüne yönlendirir,
+`app/`, `storage/`, `templates/` gibi klasörlere dışarıdan erişim kapalıdır.
+
+**İlk kurulum (bir kez):**
+
+1. cPanel → **Select PHP Version / MultiPHP Manager**: alan adı için **PHP 8.4** seçin; `pdo_sqlite`, `sqlite3`, `mbstring`,
+   `iconv`, `curl`, `openssl`, `fileinfo` (ve varsa `zip`) eklentileri açık olmalı.
+2. cPanel → **Git™ Version Control** → *Create* → *Clone a Repository*:
+   - Clone URL: `https://github.com/yasinchelenk/yasinchelenk.com.git`
+   - Repository Path: `repositories/yasinchelenk.com` (public_html değil)
+3. Depo sayfasında **Manage → Pull or Deploy → Deploy HEAD Commit**. `.cpanel.yml`, `bin/deploy.php` ile kodu `public_html`e kopyalar
+   (Natro'nun varsayılan sayfası silinir; `storage/`, `public/uploads/`, `.env`, `.well-known`, `app/config.local.php`
+   ve cPanel'in PHP satırları korunur).
+4. `https://yasinchelenk.com/panel` adresini bir kez açın; ilk hesabın kurulum kodu `public_html/storage/panel-kurulum-kodu.txt`
+   dosyasına yazılır (cPanel → Dosya Yöneticisi). "Kayıt ol" ekranında bu kodla ilk (yönetici) hesabı açın, ardından iki adımlı
+   doğrulamayı açın. Site Yönetimi (`/admin`) şifresi `storage/site/admin-password.txt` dosyasındadır.
+5. Mail için `public_html/.env` dosyasını oluşturun (SMTP ayarları, yukarıdaki "Gizli ayarlar" bölümü).
+6. HTTPS Cloudflare üzerinden sağlanır (aşağıya bakın); `deploy/htaccess-root.conf` içindeki HTTPS satırları kapalı kalabilir.
+7. İsteğe bağlı: `public_html/app/config.local.php` oluşturup (örnek: `app/config.local.example.php`) sunucuya özel ayarları girin.
+
+**DNS ve HTTPS (Cloudflare, ücretsiz plan):**
+
+- Nameserver'lar Cloudflare'de (`josephine` / `logan.ns.cloudflare.com`); hosting Natro'da kalır.
+- `yasinchelenk.com` ve `www` → Proxied; `ftp`, `autodiscover`, MX, SRV, SPF → DNS only (e-posta Natro kurumsal e-posta).
+- SSL/TLS modu **Full (strict)**; sunucuda Cloudflare Origin sertifikası kurulu (cPanel → SSL/TLS → SSL sitelerini yönetin,
+  CA paketi: Cloudflare Origin RSA kök sertifikası). **Always Use HTTPS** açık.
+- Uygulama ziyaretçi IP'sini `CF-Connecting-IP` başlığından yalnızca istek Cloudflare IP aralığından geldiğinde okur (`client_ip()`).
+
+**Güncelleme:** GitHub'a push → cPanel Git™ Version Control → *Update from Remote* → *Deploy HEAD Commit*.
+Veritabanı değişiklikleri ilk istekte `app/panel/core/db.php` → `panel_migrations()` ile otomatik uygulanır.
+
 ## Canlıya alırken
 
-- Document root `public/` olmalı; `storage/` web'den erişilemez olmalı (`storage/.htaccess`).
-- `debug` canlıda kendiliğinden kapalıdır (`APP_DEBUG` tanımlı değilse).
-- `.env` sunucuda oluşturulmalı (SMTP). İletişim formu mesajlarının e-postaya gelmesi için `mail.enabled` → `true`.
+- Document root `public/` olmalı (ya da yukarıdaki kök `.htaccess` yönlendirmesi); `storage/` web'den erişilemez olmalı (`storage/.htaccess`).
+- `debug` canlıda kapalıdır; yerelde `APP_DEBUG=1` ya da `app/config.local.php` içinde `'debug' => true` ile açılır.
+- `.env` sunucuda oluşturulmalı (SMTP). İletişim formu mesajlarının e-postaya gelmesi için `mail.enabled` → `true`
+  (`app/config.local.php` ile).
 - `storage/` ve `public/uploads/` web sunucusu tarafından yazılabilir olmalı; `storage/panel.sqlite`, `storage/site/` ve
-  `storage/backups/` düzenli yedeklenmeli. Kod güncellenirken bu klasörlerin üzerine yazılmamalı.
+  `storage/backups/` düzenli yedeklenmeli. Yayın betiği bu klasörlere dokunmaz.
 - HTTPS zorunlu (oturum çerezi HTTPS'te `secure` olur).

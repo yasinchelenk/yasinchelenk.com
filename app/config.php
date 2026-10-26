@@ -59,6 +59,6 @@ return [
         ['key' => 'gisis',  'label' => 'GISIS',       'title' => 'IMO GISIS', 'url' => 'https://gisis.imo.org'],
         ['key' => 'waste',  'label' => 'Atık ücreti', 'title' => 'Atık ücreti hesaplayıcı', 'url' => ''],
     ],
-    // Hata ayrıntılarını göster. Canlıda kapalı kalır; yerelde APP_DEBUG=1 ile açılır.
+    // Hata ayrıntılarını göster. Canlıda kapalı kalır; yerelde APP_DEBUG=1 ya da app/config.local.php → 'debug' => true ile açılır.
     'debug' => getenv('APP_DEBUG') === '1',
 ];

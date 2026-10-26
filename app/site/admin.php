@@ -102,7 +102,7 @@ function site_admin_throttle(?bool $success = null): bool
 {
     $file = site_dir('login-throttle.json');
     $now = time();
-    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $ip = client_ip();
     $all = is_file($file) ? (json_decode((string) file_get_contents($file), true) ?: []) : [];
     $all = array_filter($all, fn($r) => max($r['until'], $r['last'] + SITE_ADMIN_LOCK) > $now);
     $record = $all[$ip] ?? ['fails' => 0, 'until' => 0, 'last' => 0];

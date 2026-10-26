@@ -59,11 +59,6 @@ function auth_routes(): void
 
 // ---------------------------------------------------------------- Oturum
 
-function client_ip(): string
-{
-    return (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
-}
-
 /** Adres engelli mi? Engel tam adres ya da önek ("1.2.3.") olabilir. */
 function ip_blocked(string $ip): ?array
 {
@@ -86,7 +81,7 @@ function set_cookie(string $name, string $value, int $expires): void
         'path'     => '/',
         'httponly' => true,
         'samesite' => 'Lax',
-        'secure'   => !empty($_SERVER['HTTPS']),
+        'secure'   => is_https(),
     ]);
 }
 

@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 function config(string $key, mixed $default = null): mixed
 {
-    static $config = require __DIR__ . '/config.php';
+    // config.local.php (repoya girmez) sunucuya / makineye özel değerleri ezer
+    static $config = array_replace_recursive(
+        require __DIR__ . '/config.php',
+        is_file(__DIR__ . '/config.local.php') ? require __DIR__ . '/config.local.php' : [],
+    );
 
     $value = $config;
     foreach (explode('.', $key) as $part) {
@@ -164,4 +168,63 @@ function icon(string $name): string
 {
     return '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
         . (SITE_ICONS[$name] ?? '') . '</svg>';
+}
+
+// ---- Cloudflare arkasında çalışma
+
+/** Cloudflare'in yayımladığı IP aralıkları (https://www.cloudflare.com/ips, 2026-10-26) */
+const CLOUDFLARE_RANGES = [
+    '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18',
+    '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
+    '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+    '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32', '2405:8100::/32', '2a06:98c0::/29', '2c0f:f248::/32',
+];
+
+function ip_in_range(string $ip, string $cidr): bool
+{
+    [$subnet, $bits] = explode('/', $cidr);
+    $ipBin = @inet_pton($ip);
+    $subnetBin = @inet_pton($subnet);
+    if ($ipBin === false || $subnetBin === false || strlen($ipBin) !== strlen($subnetBin)) {
+        return false;
+    }
+    $bytes = intdiv((int) $bits, 8);
+    $rest = (int) $bits % 8;
+    if (substr($ipBin, 0, $bytes) !== substr($subnetBin, 0, $bytes)) {
+        return false;
+    }
+    if ($rest === 0) {
+        return true;
+    }
+    $mask = (0xff << (8 - $rest)) & 0xff;
+
+    return (ord($ipBin[$bytes]) & $mask) === (ord($subnetBin[$bytes]) & $mask);
+}
+
+/** İstek gerçekten Cloudflare sunucusundan mı geldi? (başlıklar ancak o zaman güvenilir) */
+function via_cloudflare(): bool
+{
+    $remote = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+
+    return $remote !== '' && array_any(CLOUDFLARE_RANGES, fn($cidr) => ip_in_range($remote, $cidr));
+}
+
+/** Ziyaretçinin gerçek IP'si: Cloudflare'den geliyorsa CF-Connecting-IP, değilse REMOTE_ADDR */
+function client_ip(): string
+{
+    $cf = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? null;
+    if ($cf && via_cloudflare() && filter_var($cf, FILTER_VALIDATE_IP)) {
+        return $cf;
+    }
+
+    return (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+}
+
+function is_https(): bool
+{
+    if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+        return true;
+    }
+
+    return via_cloudflare() && str_contains((string) ($_SERVER['HTTP_CF_VISITOR'] ?? ''), '"https"');
 }
