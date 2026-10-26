@@ -155,7 +155,7 @@ export function openEditor(host, { year, no, ctx, onClose }) {
             status,
             h('b.de-total', usd(h_?.toplam_usd)),
             h('button', { type: 'button', disabled: data.closed, title: 'Gemi bilgileri, limanlar, tarihler ve sefer bacakları Transits’teki haliyle yeniden yazılır', on: { click: refill } }, '↻ fill from transit'),
-            h('button', { type: 'button', title: 'Bu DA’nin değişiklik geçmişi', on: { click: () => window.dispatchEvent(new CustomEvent('ops:gecmis', { detail: { entity: 'da_doc', search: `${year}/${no}`, label: `DA ${no}` } })) } }, icon('history'), ' geçmiş'),
+            h('button', { type: 'button', title: 'Bu DA’nin değişiklik geçmişi', on: { click: () => window.dispatchEvent(new CustomEvent('ops:gecmis', { detail: { entity: 'da_doc', entity_id: `${year}/${no}`, label: `DA ${no}` } })) } }, icon('history'), ' geçmiş'),
             h('button.close', { type: 'button', title: 'Listeye dön — DA açık kalır (Esc)', on: { click: () => onClose() } }, '✕'));
     }
 

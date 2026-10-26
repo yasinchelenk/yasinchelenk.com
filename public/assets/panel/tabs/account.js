@@ -177,7 +177,7 @@ export async function mount(el) {
                     draw();
                     loadList();
                 } } }, '↻ reload from Final DA'),
-                h('button', { type: 'button', on: { click: () => window.dispatchEvent(new CustomEvent('ops:gecmis', { detail: { entity: 'da_account', search: `${data.year}/${data.no}`, label: `DA ${data.no} · Account` } })) } }, icon('history'), ' History'),
+                h('button', { type: 'button', on: { click: () => window.dispatchEvent(new CustomEvent('ops:gecmis', { detail: { entity: 'da_account', entity_id: `${data.year}/${data.no}`, label: `DA ${data.no} · Account` } })) } }, icon('history'), ' History'),
                 h('button', { type: 'button', on: { click: savePdf } }, icon('doc'), ' Save PDF'),
                 h('button', { type: 'button', on: { click: printPdf } }, icon('print'), ' Print'),
                 tamamBtn),

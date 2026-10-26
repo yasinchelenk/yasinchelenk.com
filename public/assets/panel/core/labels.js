@@ -8,7 +8,7 @@ export const SECTION_LABELS = {
     da_account: 'Account', port: 'Ports', setting: 'Shared Settings', cell_note: 'Hücre notu', passage_mail: 'Geçiş Maili', work_mail: 'İş Maili',
     sp1_mail: 'POLICE SP1', user: 'Kullanıcılar', price_row: 'Tariffs · Price List', price_section: 'Tariffs · Price List · Section',
     petition_template: 'Petitions · Template', petition_supplier: 'Petitions · Supplier', petition_ek1: 'Petitions · Ek1', barge: 'Petitions · Barge',
-    tariff: 'Tariffs · Formulas', petition: 'Petitions',
+    tariff: 'Tariffs · Formulas', petition: 'Petitions', talepname: 'Petitions · Talepname',
 };
 
 const F = {
