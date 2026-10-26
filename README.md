@@ -91,9 +91,16 @@ Proje `public_html` köküne kurulur; kök `.htaccess` blokları tüm istekleri 
    (Natro'nun varsayılan sayfası silinir; `storage/`, `.well-known`, `app/config.local.php` ve cPanel'in PHP satırları korunur).
 4. `https://yasinchelenk.com/panel` adresini bir kez açın; ilk yönetici şifresi `public_html/storage/initial-admin-password.txt`
    dosyasına yazılır (cPanel → Dosya Yöneticisi). Girişten sonra şifreyi değiştirin, dosyayı silin, iki adımlı doğrulamayı açın.
-5. cPanel → **SSL/TLS Status → Run AutoSSL**. Sertifika çıkınca `deploy/htaccess-root.conf` içindeki HTTPS satırlarının başındaki `#`
-   işaretini kaldırıp commit'leyin ve yeniden yayınlayın.
+5. HTTPS Cloudflare üzerinden sağlanır (aşağıya bakın); `deploy/htaccess-root.conf` içindeki HTTPS satırları kapalı kalabilir.
 6. İsteğe bağlı: `public_html/app/config.local.php` oluşturup (örnek: `app/config.local.example.php`) sunucuya özel ayarları girin.
+
+**DNS ve HTTPS (Cloudflare, ücretsiz plan):**
+
+- Nameserver'lar Cloudflare'de (`josephine` / `logan.ns.cloudflare.com`); hosting Natro'da kalır.
+- `yasinchelenk.com` ve `www` → Proxied; `ftp`, `autodiscover`, MX, SRV, SPF → DNS only (e-posta Natro kurumsal e-posta).
+- SSL/TLS modu **Full (strict)**; sunucuda Cloudflare Origin sertifikası kurulu (cPanel → SSL/TLS → SSL sitelerini yönetin,
+  CA paketi: Cloudflare Origin RSA kök sertifikası). **Always Use HTTPS** açık.
+- Uygulama ziyaretçi IP'sini `CF-Connecting-IP` başlığından yalnızca istek Cloudflare IP aralığından geldiğinde okur (`client_ip()`).
 
 **Güncelleme:** GitHub'a push → cPanel Git™ Version Control → *Update from Remote* → *Deploy HEAD Commit*.
 Veritabanı değişiklikleri ilk istekte `app/panel/migrations.php` ile otomatik uygulanır.
