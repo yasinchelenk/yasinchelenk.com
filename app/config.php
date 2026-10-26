@@ -38,6 +38,7 @@ return [
         'secure'  => $env('SMTP_SECURE', 'tls'),        // tls | ssl | none
         'from'    => $env('MAIL_FROM'),                 // operasyon mailleri (ör. ops@…)
         'account' => $env('MAIL_ACCOUNT'),              // armatöre DA (ör. account@…)
+        'outbox'  => $env('MAIL_OUTBOX') === '1',       // geliştirme: göndermek yerine storage/outbox'a yaz
     ],
     // Operasyon panelinin (/panel) çıktılarda ve e-postalarda kullandığı acente bilgileri.
     'agency' => [

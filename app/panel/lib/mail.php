@@ -16,6 +16,9 @@ function smtp_config(): array
 function smtp_missing(bool $account = false): array
 {
     $c = smtp_config();
+    if (!empty($c['outbox'])) {
+        return [];                                  // geliştirme modu: mailler storage/outbox'a yazılır
+    }
     $miss = [];
     foreach (['host' => 'SMTP_HOST', 'user' => 'SMTP_USER', 'pass' => 'SMTP_PASS'] as $k => $env) {
         if (($c[$k] ?? '') === '') {
@@ -34,10 +37,40 @@ function mail_encode_header(string $s): string
     return preg_match('/[^\x20-\x7E]/', $s) ? '=?UTF-8?B?' . base64_encode($s) . '?=' : $s;
 }
 
-/** @return list<string> */
+/** "Ad <adres>; adres2, …" → adresler @return list<string> */
 function mail_split_addresses(?string $s): array
 {
-    return array_values(array_filter(array_map('trim', preg_split('/[;,\s]+/', (string) $s)), fn($a) => filter_var($a, FILTER_VALIDATE_EMAIL)));
+    $out = [];
+    foreach (preg_split('/[;,]+/', (string) $s) as $part) {
+        $part = trim($part);
+        if (preg_match('/<([^<>\s]+@[^<>\s]+)>/', $part, $m)) {
+            $part = $m[1];
+        }
+        foreach (preg_split('/\s+/', $part) as $a) {
+            if (filter_var($a, FILTER_VALIDATE_EMAIL)) {
+                $out[] = $a;
+            }
+        }
+    }
+
+    return array_values(array_unique($out));
+}
+
+/** Gönderen: MAIL_FROM (ya da Firma Ayarları → Gönderen e-posta), firma adıyla */
+function mail_from(): string
+{
+    $addr = smtp_config()['from'] ?: (string) setting('firma_email', '');
+    $name = (string) (setting('firma_ad') ?: '');
+
+    return $name !== '' ? mail_encode_header($name) . " <{$addr}>" : $addr;
+}
+
+function smtp_status(): array
+{
+    $miss = smtp_missing();
+    $from = smtp_config()['from'] ?: (string) setting('firma_email', '');
+
+    return ['hazir' => !$miss && $from !== '', 'eksik' => $from === '' ? [...$miss, 'MAIL_FROM'] : $miss, 'gonderen' => $from, 'outbox' => !empty(smtp_config()['outbox'])];
 }
 
 /**
@@ -87,7 +120,7 @@ function mail_send(string $from, array $to, array $cc, string $subject, string $
 {
     $to || throw new RuntimeException('Alıcı adresi yok.');
     $raw = mail_build($from, $to, $cc, $subject, $html, $attachments, $inline);
-    if (smtp_missing()) {
+    if (smtp_missing() || !empty(smtp_config()['outbox'])) {
         $dir = panel_storage('outbox');
         is_dir($dir) || mkdir($dir, 0775, true);
         $file = $dir . '/' . date('Ymd-His') . '-' . substr(preg_replace('/[^a-z0-9]+/i', '-', $subject), 0, 60) . '.eml';

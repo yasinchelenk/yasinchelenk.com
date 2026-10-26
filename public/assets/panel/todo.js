@@ -40,6 +40,13 @@ export function parseTodo(text) {
     return out;
 }
 
+/** İş satırının kimliği (iş maili "gönderildi" takibi): (when|) + Türkçe katlamalı küçük harf, tek boşluk */
+export function todoKey(line) {
+    const norm = String(line.text ?? '').toLocaleLowerCase('tr').replace(/[ıi̇]/g, 'i').replace(/ş/g, 's').replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ö/g, 'o').replace(/ç/g, 'c')
+        .replace(/\s+/g, ' ').trim();
+    return (line.when ? line.when + '|' : '') + norm;
+}
+
 /** Görünüm: dönüşümlü satır işaretleri, kutular, tarih rozetleri */
 export function renderTodo(lines) {
     return h('div.todo', lines.map((l, i) => h('div.todo-line', {

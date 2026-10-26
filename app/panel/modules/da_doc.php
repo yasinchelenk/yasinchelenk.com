@@ -995,7 +995,7 @@ function da_doc_owner_mail(array $p, array $in): never
     $html = '<p>Dear Sirs,</p><p>Please find attached our Final Disbursement Account <b>No ' . $no . '</b> for <b>M/V ' . htmlspecialchars((string) $data['doc']['gemi']['ad']) . '</b> ('
         . htmlspecialchars((string) $data['doc']['belge']['baslik']) . '), total <b>USD ' . number_format((float) $data['hesap']['toplam_usd'], 2, ',', '.') . '</b>.</p>'
         . '<p>Best regards,<br>' . htmlspecialchars((string) $firm) . '</p>';
-    $res = mail_send($c['account'], $to, $cc, $m['subject'], $html, [['name' => $data['pdf_indir'], 'data' => (string) file_get_contents(da_files_dir() . '/' . $pdf), 'type' => 'application/pdf']]);
+    $res = mail_send($c['account'] ?: mail_from(), $to, $cc, $m['subject'], $html, [['name' => $data['pdf_indir'], 'data' => (string) file_get_contents(da_files_dir() . '/' . $pdf), 'type' => 'application/pdf']]);
     if (!$res['ok']) {
         api_error('Mail gönderilemedi: ' . ($res['error'] ?? ''), 502);
     }

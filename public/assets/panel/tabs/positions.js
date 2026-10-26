@@ -7,7 +7,7 @@ import { live } from '../core/live.js';
 import { flag } from '../core/flags.js';
 import { ports, portField, directionMark, vesselSearch, vesselSummary, portalShortcuts } from '../core/ports.js';
 import { quickVesselCard } from '../vessel-card.js';
-import { parseTodo, renderTodo, openTodoEditor, TODO_PLACEHOLDER } from '../todo.js';
+import { parseTodo, renderTodo, openTodoEditor, todoKey, TODO_PLACEHOLDER } from '../todo.js';
 import { undoGecmis, showChanges } from '../core/undo.js';
 
 export const CATS = [
@@ -189,10 +189,13 @@ export async function mount(el, ctx) {
     function actions(r) {
         const todo = parseTodo(r.notes);
         const st = anchorState(r);
+        const sentKeys = workSent[r.vessel_name] ?? [];
+        const unsent = todo.some((l) => !l.done && !sentKeys.includes(todoKey(l)));
         const soon = (label) => () => toast(`${label} sonraki aşamada eklenecek.`, 'error');
         return h('div.row-actions',
             h('button.icon-btn', { type: 'button', title: `${r.vessel_name} — armatöre geçiş maili gönder`, on: { click: () => openMail('passage', r, soon('Geçiş maili')) } }, icon('ship')),
-            h('button.icon-btn', { type: 'button', disabled: !todo.length, title: todo.length ? `${r.vessel_name} — yapılacak işleri acenteye gönder` : 'To Do hücresi boş', on: { click: () => openMail('work', r, soon('İş maili')) } }, icon('clipboard')),
+            h('button.icon-btn', { type: 'button', disabled: !todo.length, class: unsent ? 'is-bekliyor' : '',
+                title: !todo.length ? 'To Do hücresi boş' : unsent ? `${r.vessel_name} — acenteye gönderilmemiş iş var` : `${r.vessel_name} — yapılacak işleri acenteye gönder`, on:{ click: () => openMail('work', r, soon('İş maili')) } }, icon('clipboard')),
             h('button.icon-btn', { type: 'button', title: `${r.vessel_name} — POLICE SP1 formunu hazırla ve emniyete gönder`, on: { click: () => openMail('sp1', r, soon('SP1')) } }, icon('shield')),
             h('button.icon-btn', { type: 'button', title: `${r.vessel_name} — yakıt / yağ / su talepnamesi ve Ek1 hazırla (PDF)`, on: { click: () => openMail('petition', r, soon('Talepname')) } }, icon('pump')),
             h('button.icon-btn', { type: 'button', class: st.started ? 'is-on' : '', title: `${r.vessel_name} — demirleme hakkı sayacı (168 saat)`, on: { click: (e) => anchorPanel(e.currentTarget, r) } }, icon('anchor')));
@@ -281,6 +284,14 @@ export async function mount(el, ctx) {
         }
         grid.setSections(sections);
         counter.textContent = `${rows.length} gemi`;
+    }
+
+    let workSent = {};
+    async function loadWorkSent() {
+        try {
+            workSent = (await get('is-maili/gonderilenler')).gemiler ?? {};
+            if (!deletedMode) draw();
+        } catch { /* yetki yoksa vurgu yok */ }
     }
 
     async function load() {
@@ -417,7 +428,9 @@ export async function mount(el, ctx) {
             }
         }),
         live.on('cash', debounce(loadCash, 500)),
+        live.on('work_mail', debounce(loadWorkSent, 300)),
     ];
+    loadWorkSent();
     const onAgain = () => { load(); loadCash(); };
     window.addEventListener('ops:yeniden', onAgain);
 
