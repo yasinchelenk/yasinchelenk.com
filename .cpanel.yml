@@ -1,9 +1,8 @@
 ---
-# cPanel → Git Version Control → "Deploy HEAD Commit" bu adımları çalıştırır.
-# Sunucuda rsync olmadığı için kopyalamayı bin/deploy.php yapar (PHP 7.4+ ile çalışır).
-# Korunanlar: storage/ (veritabanı, mailler), app/config.local.php, .well-known, cgi-bin ve .htaccess'teki cPanel satırları.
+# cPanel Git Version Control "Deploy HEAD Commit" bu adımları çalıştırır.
+# Asıl iş bin/deploy.sh + bin/deploy.php içinde (rsync gerekmez).
+# Not: buradaki komutlarda "iki nokta + boşluk" kullanmayın; YAML onu anahtar sanar.
 deployment:
   tasks:
     - export DEPLOYPATH=$HOME/public_html
-    - export PHPBIN=/usr/local/bin/php; for p in /opt/cpanel/ea-php84/root/usr/bin/php /opt/alt/php84/usr/bin/php /usr/local/lsws/lsphp84/bin/php; do if [ -x "$p" ]; then PHPBIN=$p; break; fi; done; echo "PHP: $PHPBIN"
-    - $PHPBIN bin/deploy.php $DEPLOYPATH
+    - /bin/bash bin/deploy.sh $DEPLOYPATH
