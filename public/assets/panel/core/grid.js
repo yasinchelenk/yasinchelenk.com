@@ -10,7 +10,7 @@ import { undoCell, showChanges } from './undo.js';
  * new Grid({
  *   key,                 // yerleşim anahtarı: ops_cols_<key>, ops_rowh_<key>, ops_sort_<key>
  *   tab, entity,         // canlı imleç sekmesi; not/geçmiş varlığı (string ya da fn(row))
- *   columns: [{ key, label, width, align: 'r'|'c', title, sortable, sortValue(row), render(row), className(row),
+ *   columns: [{ key, label, width, align: 'r'|'c', title, sortable, sortValue(row), render(row), className(row), grow (pencere genişse boşluğu doldurur),
  *               field, popover, cellTitle(row), contextItems(row),
  *               edit: { type: text|number|date|datetime|select|textarea, field, options, optionLabel, suzulen(row, q),
  *                       suggest(row) → menü, placeholder, enterKaydeder, hucrede, locked(row) → false|'neden',
@@ -43,10 +43,9 @@ export class Grid {
         ];
         this.onNotes = () => this.paintNotes();
         window.addEventListener('ops:notlar', this.onNotes);
-        if (this.opts.fit) {
-            this.ro = new ResizeObserver(() => this.applyWidths());
-            this.ro.observe(this.el);
-        }
+        // Pencere boyu değişince sütunlar yeniden yerleşir (dar: sığdır · geniş: esneyen sütun boşluğu doldurur)
+        this.ro = new ResizeObserver(() => this.applyWidths());
+        this.ro.observe(this.el);
     }
 
     destroy() {
@@ -101,10 +100,15 @@ export class Grid {
     applyWidths() {
         const cols = this.columns();
         let widths = cols.map((c) => this.width(c));
-        if (this.opts.fit) {
-            const avail = this.el.clientWidth - this.gutter() - 2;
-            const total = widths.reduce((s, w) => s + w, 0);
-            if (avail > 200 && total > avail) widths = widths.map((w) => Math.max(36, Math.floor((w * avail) / total)));
+        const avail = this.el.clientWidth - this.gutter() - 2;
+        const total = widths.reduce((s, w) => s + w, 0);
+        if (this.opts.fit && avail > 200 && total > avail) {
+            widths = widths.map((w) => Math.max(36, Math.floor((w * avail) / total)));
+        } else if (avail > 200 && total < avail && widths.length) {
+            // Tablo pencereden darsa artan genişlik tek bir sütuna verilir: grow:true işaretli olan, yoksa en geniş metin sütunu
+            let i = cols.findIndex((c) => c.grow);
+            if (i < 0) i = widths.indexOf(Math.max(...widths.map((w, k) => (cols[k].cls === 'tight' ? 0 : w))));
+            widths[i] += avail - total;
         }
         const colEls = [...this.colgroup.children];
         const offset = this.gutter() ? 1 : 0;
@@ -209,6 +213,7 @@ export class Grid {
                 const head = s.head instanceof HTMLTableRowElement ? s.head : h('tr.grp-head', { class: s.className, style: s.style }, h('td', { colSpan: span }, s.head));
                 body.push(head);
             }
+            if (s.rows.length) any = true;            // kapalı grupta satır varsa "kayıt yok" yazılmaz
             if (s.collapsed) return;
             const rows = s.noSort ? s.rows : this.sortedRows(s.rows);
             let prev = null;

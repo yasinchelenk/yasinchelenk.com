@@ -55,7 +55,7 @@ export async function mount(el, ctx) {
             { key: 'warehouse_in', label: 'Warehouse In', width: 118, align: 'r', edit: { type: 'date', locked } },
             { key: 'kalan', label: 'Days Left', width: 96, align: 'c', render: leftView, field: 'kalan', history: false,
                 edit: { type: 'text', locked, value: (r) => (r.due_date ? String(customsDue(r).left) : '') } },
-            txt('remarks', 'Remarks', 170, 'açıklama'),
+            { ...txt('remarks', 'Remarks', 170, 'açıklama'), grow: true },
             { key: 'actions', label: '', width: 74, cls: 'tight', render: actions },
         ],
     });
