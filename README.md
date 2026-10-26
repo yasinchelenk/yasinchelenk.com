@@ -1,22 +1,23 @@
 # yasinchelenk.com
 
-İki parça:
+Üç parça:
 
 1. **Kişisel site** (`/` Türkçe, `/en` İngilizce): Yasin Çelenk'in tek sayfalık özgeçmiş sitesi; hakkımda, deneyim,
    eğitim/sertifikalar, uzmanlık ve iletişim formu.
 2. **Site Yönetimi** (`/admin`): kişisel sitenin tüm içeriğini düzenler (metinler TR/EN, fotoğraf, CV, iletişim bilgileri,
    bölüm sırası/görünürlüğü/menü, özel bölümler, renkler ve yazı tipi), gelen mesajları ve yedekleri gösterir.
    Operasyon panelinden tamamen ayrıdır: kendi hesabı ve kendi veri dosyası vardır.
-3. **Operasyon paneli** (`/panel`): `artanis-ozellik-haritasi.md` şartnamesine göre gemi acentesi operasyon yazılımı.
-   Sitede bağlantısı yoktur; acente bilgileri `app/config.php` → `agency` bölümünden gelir.
+3. **Operasyon paneli** (`/panel`): boğaz/liman acenteliği için operasyon ve muhasebe yazılımı (yerel şartnameye göre).
+   Sitede bağlantısı yoktur. Firmaya özel her şey (ad, antet, kaşe, altbilgi, mail renkleri, alıcılar, DA ayarları)
+   panelde **Firma Ayarları**'ndan değiştirilir.
 
-PHP 8.4+, framework yok. Veritabanı SQLite (`storage/panel.sqlite`, ilk istekte otomatik kurulur).
+PHP 8.4+, framework ve Composer bağımlılığı yok. Veritabanı SQLite (`storage/panel.sqlite`, ilk istekte kurulur,
+sonraki şema/veri değişiklikleri `app/panel/core/db.php` → `panel_migrations()` ile sürümlenir).
+Gerekli PHP eklentileri: `pdo_sqlite`, `mbstring`, `iconv`, `curl`, `openssl`, `fileinfo` (`zip` varsa kullanılır, yoksa yerleşik zip yazıcısı devreye girer).
 
 ## Çalıştırma
 
 ```bash
-composer serve
-# veya
 php -S localhost:8000 -t public public/index.php
 ```
 
@@ -26,79 +27,75 @@ Hata ayrıntılarını görmek için sunucuyu `APP_DEBUG=1` ortam değişkeniyle
 - Site Yönetimi: http://localhost:8000/admin — kullanıcı `yasin`; şifre ilk açılışta rastgele üretilip
   `storage/site/admin-password.txt` dosyasına yazılır. Hesap sekmesinden şifre değiştirilince dosya silinir.
   Şifreyi unutursanız: `php bin/site-admin.php yasin 'YeniSifre123'`
-- Panel: http://localhost:8000/panel — ilk kullanıcı `admin`; şifresi ilk çalıştırmada rastgele üretilip
-  `storage/initial-admin-password.txt` dosyasına yazılır. Girişten sonra şifreyi değiştirip dosyayı silin.
+- Panel: http://localhost:8000/panel — ilk hesap, `storage/panel-kurulum-kodu.txt` dosyasındaki kurulum koduyla
+  "Kayıt ol" ekranından açılır (yönetici olur). Komut satırından da açılabilir:
 
 ```bash
-php bin/seed-demo.php                                         # arayüzü denemek için uydurma demo veri
 php bin/create-user.php ayse 'GucluSifre123' "Ayşe Yılmaz" --admin   # kullanıcı ekle / şifre sıfırla
 ```
 
-Demo veriyi silip sıfırdan başlamak için `storage/panel.sqlite*` dosyalarını silin.
+### Gizli ayarlar (.env)
+
+Kök dizindeki `.env` dosyası repoya girmez. Mail gönderimi için:
+
+```
+SMTP_HOST=mail.ornek.com
+SMTP_PORT=587
+SMTP_SECURE=tls          # tls | ssl | none
+SMTP_USER=ops@ornek.com
+SMTP_PASS=...
+MAIL_FROM=ops@ornek.com           # geçiş/iş maili, SP1
+MAIL_ACCOUNT=account@ornek.com    # armatöre Final DA
+# MAIL_OUTBOX=1                   # geliştirme: göndermek yerine storage/outbox'a .eml yaz
+```
+
+SMTP tanımlı değilse mail pencereleri gönderimi kapatır ve eksik ayarları gösterir.
 
 ## Panel sekmeleri
 
 | Sekme | İçerik |
 |---|---|
-| Positions | Canlı gemi panosu; gruplar (Chartering, Shipyard, Port, At Anchor, Contact, Listed), SP1/SNT/HG, yön üçgeni, To Do, geçiş maili, iş maili, SP1 PDF, dilekçe/Ek1, 168 saat demirleme sayacı, silinenler |
-| Tasks | Gemi bazında iş kalemleri; bayrak, iptal, "DA'da değil" filtresi, seçili kalemleri DA'ya aktarma (aktarılan kilitlenir) |
-| Transits | Boğaz geçiş kaydı; yıl/ay filtresi, sayfalama, LD/Sanitary/Pilot ödeme durumu ikonları ve köşe işaretleri |
-| Vessels | Gemi sicili (35 sütun), satır içi düzenleme, poliçe/CLC bitiş uyarıları |
-| Customs | Antrepodaki yedek parçalar, 49 günlük süre sayacı, teslim |
-| Cash | Kasa defteri, döviz bazında yürüyen bakiye |
-| Supply | Yağ/yakıt/su alım-satım, kâr, vade, ödendi/ödenmedi grupları |
-| Petitions | Şablon editörü (`{{gemi}}` vb. alanlar), Ek1, tedarikçiler, barçlar, geçmiş |
-| Final DA | DA numarası verme, satırlar, bekleyen kalemleri aktarma, tarife hesabı, ekstra kalemler, PDF |
-| Tariffs | Fiyat listesi bölümleri; formüller (tarife dönemleri, kademe tabloları, römorkör tarifesi + test aracı, fener matrisi); ekstra kalem listesi |
-| History | Tüm değişiklikler, filtreler, undo, eski kayıtları temizleme |
+| Positions | Canlı gemi panosu (kategori grupları, SP1/SNT/HG ışıkları, To Do, 168 saat demir sayacı, silinenler); geçiş maili, iş maili, POLICE SP1, talepname |
+| Tasks | Gemi bazında yapılan işler; DA'ya aktarma/onay, debit, geçmiş tarihli iş uyarısı |
+| Transits | Boğaz geçişleri ve resmî ödeme durumu; dönüş hakkı / sağlık hakkı / mahsup kural motoru |
+| Vessels, Customs, Cash, Supply | Gemi sicili; antrepo (49 gün); kasa defteri; yağ/yakıt/su ikmalleri |
+| Petitions | Dilekçe şablonları (blok editörü), tedarikçiler, barçlar, Ek1, hazırlanmış talepnameler (PDF/ZIP) |
+| Tariffs | Fiyat listesi; dönemli tarifeler (kademeler, değer grupları, fener matrisi, römorkör, ekstra kalemler) |
+| Dues & Payments | KEGM/HSSGM tahakkukları (yapıştırarak), ödeme işareti → Transits, tersane indirimi, fener muafiyeti, Mahsup, Refunds |
+| Final DA | DA numaraları, kuyruk, açık DA'ler, hazırlama editörü (tahakkuk + tarife + ekstra kalemler), TCMB kuru, PDF + XLSX, armatöre mail, Invoices |
+| Account | Gönderilmiş DA'ların muhasebe kopyası (USD/EUR/TL), kontrol ve PDF |
+| History | Tüm değişiklikler, filtreler, geri alma, eski kayıtları temizleme |
 
-Tüm tablolarda arama, sütun sürükleme, genişlik ayarı (tarayıcıda hatırlanır) ve "yerleşimi sıfırla" düğmesi vardır.
+Canlı işbirliği 3 sn'lik sorgu ile çalışır (çevrimiçi kullanıcılar, düzenlenen hücre, değişen satırın yanıp sönmesi).
+Yedekler günde üç kez `storage/backups/` altına alınır.
 
 ## Yapı
 
 ```
-app/config.php            teknik ayarlar: site adresi, diller, mail, acente bilgileri, panel kısayolları
-app/content.php           sitenin başlangıç içeriği (CV'den); Site Yönetimi'nde kaydedilince storage/site/content.json esas alınır
-app/site/schema.php       düzenlenebilir içeriğin yapısı: yönetim formları buradan çizilir, kaydedilen veri buna göre temizlenir
-app/site/store.php        içerik okuma/kaydetme, yedekler (storage/site/history/, son 30), mesajlar
-app/site/admin.php        Site Yönetimi girişi ve API'si
-templates/sections/       sitenin bölümleri; ana sayfa Site yapısı'ndaki sırayla bunları çizer
-public/assets/admin/      Site Yönetimi arayüzü (vanilla JS)
-public/uploads/           yönetimden yüklenen fotoğraf/CV (repoya girmez)
-app/contact.php           iletişim formu; mesajlar storage/messages/ altına kaydedilir
-app/panel/schema.sql      veritabanı şeması
-app/panel/resources.php   tablolar ve düzenlenebilir alanlar (genel CRUD buradan beslenir)
-app/panel/api.php         JSON API, History/undo, DA ve tarife hesapları, mailler
-templates/panel/          giriş, uygulama kabuğu, mail ve yazdırma şablonları
-public/assets/panel/      tek sayfa uygulama (vanilla JS modülleri), tabs/ altında her sekme
-bin/                      komut satırı araçları
+app/config.php              teknik ayarlar (site, diller, smtp, acente varsayılanları, panel kısayolları); .env'i okur
+app/content.php, app/site/  kişisel site içeriği ve Site Yönetimi
+app/panel/core/             veritabanı, yönlendirici, oturum/2FA, kayıt katmanı (geçmiş + canlı akış), History, ayarlar
+app/panel/lib/              bağımlılıksız PDF (Helvetica, Türkçe karakter, JPEG/PNG), XLSX, TCMB kuru, SMTP
+app/panel/modules/          her sekmenin API'si ve iş kuralları
+app/panel/schema.sql        şema · seed*.php başlangıç verileri (limanlar, tarifeler, dilekçe şablonları)
+public/assets/panel/        tek sayfa uygulama (vanilla JS modülleri); tabs/ altında her sekme
+bin/                        komut satırı araçları
 ```
-
-## Kaynak notlar
-
-Panelin şartname, tasarım, tarife ve proforma notları yerel çalışma kopyasında tutulur; repoya eklenmez (`.gitignore`).
-
-- **Resmî tarifeler** Tariffs → Formüller'e yüklü: fener/tahlisiye (1 frank = 6,70 USD, 01.07.2026–30.06.2027), 7×7 fener matrisi,
-  sağlık 0,5025/NRT ve muafiyet kelimeleri, kılavuzluk (600 + 107/1000 GRT, zamlar, tersane indirimi), DTO 2026 (TRY),
-  acente ücretleri (boğaz 37, liman 38 kademe, EUR, 40.000 NRT'ye kadar). Frank her 1 Temmuz, DTO her Ocak değişir: yeni tarife dönemi açın.
-- **Final DA → Boğaz proforma hesabı**: PROFORMA V7.8 mantığı. 10.000 NRT uğraksız gidiş-dönüş için bakanlığın 6,70 frank karşılığı
-  26.920,60 USD ile birebir doğrulandı.
 
 ## Bilinen eksikler / netleşmesi gerekenler
 
-- Liman uğrağı proformasının yalnızca acente ücreti var; PROFORMA V7.8'deki liman tarifeleri (kılavuzluk, römorkör, palamar, VTS, liman resmi vb.) henüz eklenmedi.
-- Notlarda işaretlenen farklar korunarak Artanis değerleri kullanıldı: tatil zammı (resmî metin yalnız resmî tatilleri sayar),
-  kılavuzlukta INT(GRT/1000) yuvarlaması, 300 m üstü römorkör (KONTROL). Tehlikeli yük için resmî %20 / %30 / %50 kademeleri ayrıca modellendi.
-- Dues & Payments, Mahsup, Refunds ekranları ve resmî SP1 form düzeni görülmediği için yok / tahmini.
+- **Tahakkuk ayrıştırıcısı** (Dues & Payments) gerçek KEGM/HSSGM mail örnekleri görülmeden yazıldı; etiket ve kalem satırı
+  sezgisiyle çalışır, okuyamadığını uyarır. Örnek mailler gelince ayarlanmalı. Mail olmadan "elle" giriş de var.
+- **POLICE SP1** resmî form düzeni görülmedi; alanlar tablo olarak basılıyor.
+- Belgelerde Archivo / Source Sans fontları yerine PDF'te Helvetica, önizlemede sistem fontu kullanılıyor.
+- TCMB kuru sunucudan `www.tcmb.gov.tr`'ye erişim ister; ulaşılamazsa son kayıtlı bülten ya da elle kur kullanılır.
 - `app/config.php` → `shortcuts`: LYBS, e-Denizcilik, Tek Pencere, atık ücreti adresleri boş.
-- Mail gönderimi kapalı (`mail.enabled`); gönderilen mailler `storage/outbox/` altına kaydedilir.
-- Veritabanı değişiklikleri `app/panel/migrations.php` ile sürümlenir (mevcut veri silinmeden güncellenir).
 
 ## Canlıya alırken
 
-- Document root `public/` olmalı; `storage/` web'den erişilemez olmalı.
+- Document root `public/` olmalı; `storage/` web'den erişilemez olmalı (`storage/.htaccess`).
 - `debug` canlıda kendiliğinden kapalıdır (`APP_DEBUG` tanımlı değilse).
-- İletişim formu mesajlarının e-postaya gelmesi için `mail.enabled` → `true` (sunucuda `mail()` çalışmalı).
-- `storage/` ve `public/uploads/` web sunucusu tarafından yazılabilir olmalı; `storage/panel.sqlite` ve
-  `storage/site/` düzenli yedeklenmeli. Kod güncellenirken bu klasörlerin üzerine yazılmamalı (site içeriği ve hesaplar orada).
+- `.env` sunucuda oluşturulmalı (SMTP). İletişim formu mesajlarının e-postaya gelmesi için `mail.enabled` → `true`.
+- `storage/` ve `public/uploads/` web sunucusu tarafından yazılabilir olmalı; `storage/panel.sqlite`, `storage/site/` ve
+  `storage/backups/` düzenli yedeklenmeli. Kod güncellenirken bu klasörlerin üzerine yazılmamalı.
 - HTTPS zorunlu (oturum çerezi HTTPS'te `secure` olur).
