@@ -87,7 +87,7 @@ Proje `public_html` köküne kurulur; kök `.htaccess` blokları tüm istekleri 
 2. cPanel → **Git™ Version Control** → *Create* → *Clone a Repository*:
    - Clone URL: `https://github.com/yasinchelenk/yasinchelenk.com.git`
    - Repository Path: `repositories/yasinchelenk.com` (public_html değil)
-3. Depo sayfasında **Manage → Pull or Deploy → Deploy HEAD Commit**. `.cpanel.yml` kodu `public_html`'e kopyalar
+3. Depo sayfasında **Manage → Pull or Deploy → Deploy HEAD Commit**. `.cpanel.yml`, `bin/deploy.php` ile kodu `public_html`e kopyalar
    (Natro'nun varsayılan sayfası silinir; `storage/`, `.well-known`, `app/config.local.php` ve cPanel'in PHP satırları korunur).
 4. `https://yasinchelenk.com/panel` adresini bir kez açın; ilk yönetici şifresi `public_html/storage/initial-admin-password.txt`
    dosyasına yazılır (cPanel → Dosya Yöneticisi). Girişten sonra şifreyi değiştirin, dosyayı silin, iki adımlı doğrulamayı açın.
