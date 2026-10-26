@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16213c"/>
+      <stop offset="0.5" stop-color="#0c1424"/>
+      <stop offset="1" stop-color="#080d18"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.42" r="0.62">
+      <stop offset="0" stop-color="#2f7cf6" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#2f7cf6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mark" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="0.55" stop-color="#93d3fb"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="115" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="115" fill="url(#halo)"/>
+  <g transform="translate(102.40 129.97) scale(3.9385)">
+    <path d="M0 0h14v64H0z M14 32L28.5 19v14L14 46z M30 0h16a32 32 0 0 1 0 64H30z M44 14a18 18 0 0 1 0 36z  " fill="url(#mark)" fill-rule="evenodd"/>
+  </g>
+</svg>

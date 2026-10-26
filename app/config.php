@@ -23,6 +23,12 @@ return [
         // Desteklenen diller; ilki varsayılan ve "/" adresinde açılır, diğerleri "/en" gibi önekle.
         'langs' => ['tr', 'en'],
     ],
+    // Footer'daki geliştirici künyesi (mdkurumsal ve bySecaattin ile aynı)
+    'developer' => [
+        'name'   => 'HD Yazılım',
+        'url'    => 'https://www.hamitdincel.com/',
+        'domain' => 'hamitdincel.com',
+    ],
     'mail' => [
         // İletişim formu mesajları e-posta ile de gönderilsin mi? (sunucuda mail() ayarlı olmalı)
         // Kapalıyken mesajlar yalnızca storage/messages/ altına kaydedilir.
