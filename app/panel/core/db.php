@@ -71,6 +71,7 @@ function panel_migrations(): array
 {
     require_once dirname(__DIR__) . '/seed.php';
     require_once dirname(__DIR__) . '/seed_tariffs.php';
+    require_once dirname(__DIR__) . '/seed_petitions.php';
 
     return [
         101 => 'seed_tariffs',
@@ -83,6 +84,7 @@ function panel_migrations(): array
                 $set->execute([$k, $v]);
             }
         },
+        104 => 'seed_petitions',
     ];
 }
 

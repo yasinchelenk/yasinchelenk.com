@@ -288,7 +288,7 @@ export async function settingsDialog() {
         h('div.form-grid', { style: { gridTemplateColumns: '1fr 1fr' } }, Object.entries(fields).map(([key, [label, hint, type]]) => {
             if (type === 'image') {
                 const preview = values[key] ? h('img', { src: values[key], style: { maxHeight: '48px', maxWidth: '200px', background: key === 'firma_logo' ? 'var(--navy)' : '#fff', padding: '4px', borderRadius: '4px' } }) : h('span.dim', 'yok');
-                const file = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', hidden: true });
+                const file = h('input', { type: 'file', accept: 'image/png,image/jpeg', hidden: true });
                 file.onchange = async () => {
                     const form = new FormData();
                     form.append('key', key);

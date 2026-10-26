@@ -820,3 +820,83 @@ input.group-name { width: 100%; font-weight: 700; }
 .inv-table td.cost input.amt-in { width: 90px; }
 .inv-table td.cost { min-width: 175px; }
 .inv-table td.cost select { margin-left: 4px; }
+
+/* ---------------------------------------------------------------- Petitions (§6.8) */
+.doc-preview { position: relative; overflow: hidden; background: #e9edf2; border-radius: 6px; min-height: 300px; }
+.doc-preview iframe { position: absolute; left: 4px; top: 4px; border: 0; transform-origin: 0 0; background: transparent; }
+.tp-tab { padding: 0 !important; }
+.tp-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 250px 1fr; }
+.tp-nav { background: var(--surface); border-right: 1px solid var(--line); padding: 12px 10px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.tp-nav-item { justify-content: space-between !important; border: 0 !important; background: none !important; padding: 7px 10px !important; border-radius: 6px !important; font-weight: 600; text-align: left; }
+.tp-nav-item:hover { background: var(--row-hover) !important; }
+.tp-nav-item.is-on { background: var(--navy) !important; color: #fff; }
+.tp-tpl-list { display: grid; gap: 1px; padding: 4px 0 8px 10px; }
+.tp-tpl-list > button.tiny { justify-self: start; margin-bottom: 4px; }
+.tp-group { font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: var(--dim); letter-spacing: .4px; margin-top: 6px; }
+.tp-tpl { display: flex !important; justify-content: space-between !important; border: 0 !important; background: none !important; padding: 4px 8px !important; font-size: 12.5px !important; border-radius: 5px !important; text-align: left; white-space: normal !important; }
+.tp-tpl:hover { background: var(--row-hover) !important; } .tp-tpl.is-on { background: var(--row-selected) !important; font-weight: 600; }
+.tp-content { overflow: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tp-editor { display: flex; flex-direction: column; gap: 8px; }
+input.tp-name { width: 280px; font-weight: 600; }
+.tp-users { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; }
+.tp-add, .tp-toolbar { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.tp-toolbar { position: sticky; top: -14px; z-index: 5; background: var(--bg); padding: 6px 0; min-height: 36px; }
+button.tiny.is-on { background: var(--navy); color: #fff; border-color: var(--navy); }
+.tp-edit-grid { display: grid; grid-template-columns: auto 260px; gap: 14px; align-items: start; }
+.tp-paper-wrap { overflow: auto; }
+.tp-paper { width: 794px; min-height: 1123px; background: #fff; box-shadow: 0 2px 14px rgba(13,37,64,.14); padding: 50px 67px 120px; position: relative; color: #0d2540; font-size: 14.6px; line-height: 1.5; }
+.tp-antet { display: flex; justify-content: space-between; align-items: flex-start; height: 64px; }
+.tp-antet img.kelime { height: 42px; } .tp-antet img.amblem { height: 50px; } .kelime-yazi { font-size: 20px; }
+.tp-antet-hat { height: 1px; background: #d6dde5; margin: 6px 0 26px; }
+.tp-altbilgi { position: absolute; left: 67px; right: 67px; bottom: 40px; border-top: 1px solid #d6dde5; padding-top: 8px; font-size: 11px; color: #4a5a6d; display: grid; gap: 1px; }
+.tp-altbilgi .unvan { font-weight: 700; color: #0d2540; } .tp-altbilgi .mono { font-family: Consolas, monospace; }
+.tp-block { border: 1px dashed transparent; border-radius: 4px; margin: 0 -6px; padding: 0 5px; }
+.tp-block:hover { border-color: #c4dcf0; } .tp-block.is-selected { border-color: var(--accent); background: #f6faff; }
+.tp-text { width: 100%; border: 0 !important; background: transparent !important; resize: none; padding: 0 !important; font: inherit; color: inherit; line-height: inherit; overflow: hidden; outline: none !important; }
+.tp-text:focus { background: #fffbe6 !important; }
+.tp-text::placeholder { color: #a7b3c2; font-style: italic; }
+.hz-sol { text-align: left; } .hz-orta { text-align: center; } .hz-sag { text-align: right; } .hz-iki { text-align: justify; }
+.tp-paper .b-baslik { font-weight: 700; font-size: 17.3px; letter-spacing: .02em; margin: 10px 0 16px; }
+.tp-paper .b-baslik.aralikli { letter-spacing: .38em; }
+.tp-paper .b-metin { margin: 0 0 10px; display: block; } .tp-paper .b-metin.kalin { font-weight: 700; } .tp-paper .b-metin.girinti { padding-left: 2.5em !important; }
+.tp-paper .b-iki { display: flex; justify-content: space-between; gap: 24px; margin: 0 0 12px; }
+.tp-paper .b-iki .tp-text { width: 45%; }
+.tp-paper .b-kase { margin: 6px 0 10px; } .tp-paper .b-kase img { height: 108px; mix-blend-mode: multiply; }
+.kase-ph { display: inline-grid; place-items: center; width: 108px; height: 108px; border: 2px dashed #c4dcf0; border-radius: 50%; color: #8493a8; font-weight: 700; }
+.tp-paper .b-bosluk { background: repeating-linear-gradient(45deg, #f2f5f8, #f2f5f8 4px, #fff 4px, #fff 8px); }
+.tp-paper .b-bosluk.kucuk { height: 10px; } .tp-paper .b-bosluk.orta { height: 24px; } .tp-paper .b-bosluk.buyuk { height: 48px; }
+.tp-paper .b-tablo { border-collapse: collapse; margin: 4px 0 6px; width: 100%; }
+.tp-paper .b-tablo td { padding: 1.5px 0; vertical-align: top; }
+.tp-paper .b-tablo td.et { width: 38%; padding-right: 20px; } .tp-paper .b-tablo td.et .tp-text { font-weight: 700; }
+.tp-paper .b-tablo td.ay { width: 16px; font-weight: 700; } .tp-paper .b-tablo tr.ara td { padding-top: 12px; }
+.tp-paper .b-tablo td.row-tools { width: 70px; white-space: nowrap; opacity: 0; } .tp-paper .b-tablo tr:hover td.row-tools { opacity: 1; }
+.tp-empty { text-align: center; padding: 40px 0; }
+.tp-fields { position: sticky; top: 40px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: grid; gap: 4px; max-height: calc(100vh - 220px); overflow: auto; }
+.tp-field { justify-content: space-between !important; border: 0 !important; background: none !important; padding: 3px 4px !important; text-align: left; white-space: normal !important; }
+.tp-field:hover { background: var(--row-hover) !important; }
+.tp-scroll { overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.tp-table td { vertical-align: top; } .tp-table input, .tp-table textarea, .tp-table select { width: 100%; }
+.tp-table tr.grp-start td { border-top: 2px solid var(--line); }
+.tp-table input.is-saved, .tp-table textarea.is-saved, .tp-ek1 .is-saved { border-color: var(--green); background: var(--notice-ok-bg); }
+input.strong { font-weight: 700; }
+.tp-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; } .tp-chips select { width: auto !important; }
+.tp-docs-cell { display: flex; flex-wrap: wrap; gap: 4px; }
+.tp-ek1 { display: grid; grid-template-columns: 380px 1fr; gap: 16px; align-items: start; }
+.tp-ek1-form { display: grid; gap: 8px; } .tp-ek1-form textarea, .tp-ek1-form input { width: 100%; }
+
+/* Talepname penceresi */
+.petition-modal .modal__body { padding-bottom: 6px; }
+.pt-grid { display: grid; grid-template-columns: 430px 1fr; gap: 16px; min-height: 0; }
+.pt-left { overflow: auto; max-height: calc(100vh - 190px); padding-right: 6px; }
+.pt-form { display: grid; gap: 7px; }
+.pt-form h5 { margin: 8px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--thead-text); }
+.form-grid.two { grid-template-columns: 1fr 1fr; }
+.pt-docs { display: grid; gap: 3px; } .pt-docs select { justify-self: start; }
+.pt-prod-row { display: grid; grid-template-columns: 70px 76px 1fr auto; gap: 5px; margin-bottom: 4px; }
+input.is-missing { border-color: var(--red); background: #fdecea; }
+.pt-right { min-width: 0; display: flex; flex-direction: column; gap: 6px; max-height: calc(100vh - 190px); overflow: auto; }
+.pt-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.pt-tab { padding: 4px 10px !important; font-size: 12.5px !important; }
+.pt-tab.is-on { background: var(--navy); color: #fff; border-color: var(--navy); }
+.miss-strip { background: var(--lt-mid-bg); color: var(--lt-mid-tx); padding: 5px 10px; border-radius: 6px; font-size: 12.5px; }
+.tp-paper .b-tablo td.et { width: 46%; }

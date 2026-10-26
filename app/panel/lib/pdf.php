@@ -76,19 +76,25 @@ final class Pdf
     }
 
     /** Metin; $align: L | R | C (R/C'de $x hizalama noktası) */
-    public function text(float $x, float $y, string $s, float $size = 10, bool $bold = false, string $align = 'L', ?array $rgb = null): void
+    public function text(float $x, float $y, string $s, float $size = 10, bool $bold = false, string $align = 'L', ?array $rgb = null, float $cs = 0): void
     {
         if ($s === '') {
             return;
         }
         if ($align !== 'L') {
-            $w = $this->width($s, $size, $bold);
+            $w = $this->width($s, $size, $bold) + $cs * max(0, mb_strlen($s) - 1);
             $x -= $align === 'R' ? $w : $w / 2;
+        }
+        if ($cs) {
+            $this->cur .= sprintf("%.3F Tc\n", $cs);
         }
         $enc = @iconv('UTF-8', 'CP1254//TRANSLIT', strtr($s, ['₺' => 'TL', '€' => 'EUR'])) ?: preg_replace('/[^\x20-\x7E]/', '?', $s);
         $enc = strtr($enc, ['\\' => '\\\\', '(' => '\\(', ')' => '\\)', "\r" => '', "\n" => ' ']);
         $color = $rgb ? sprintf('%.3F %.3F %.3F rg ', ...array_map(fn($c) => $c / 255, $rgb)) : '0 0 0 rg ';
         $this->cur .= sprintf("BT %s/%s %.2F Tf %.2F %.2F Td (%s) Tj ET\n", $color, $bold ? 'F2' : 'F1', $size, $x, self::H - $y, $enc);
+        if ($cs) {
+            $this->cur .= "0 Tc\n";
+        }
     }
 
     public function line(float $x1, float $y1, float $x2, float $y2, float $width = 0.5, array $rgb = [0, 0, 0]): void
@@ -109,6 +115,134 @@ final class Pdf
         $this->cur .= sprintf("%s%.2F %.2F %.2F %.2F re %s\n", $ops, $x, self::H - $y - $h, $w, $h, $op);
     }
 
+    /** @var array<string, array{name: string, w: int, h: int, cs: string, filter: string, parms: ?string, data: string, smask: ?string}> */
+    private array $images = [];
+
+    /**
+     * Görsel (JPEG ya da 8 bit PNG; PNG şeffaflığı SMask olur). $w/$h'den biri verilirse oran korunur.
+     * Okunamayan görsel sessizce atlanır (belge görselsiz basılır). Dönen değer çizilen yükseklik.
+     */
+    public function image(string $bytes, float $x, float $y, ?float $w = null, ?float $h = null): float
+    {
+        $key = md5($bytes);
+        $img = $this->images[$key] ??= self::loadImage($bytes, 'Im' . (count($this->images) + 1));
+        if (!$img) {
+            unset($this->images[$key]);
+            return 0;
+        }
+        if ($w === null && $h === null) {
+            $w = $img['w'] * 0.75;
+        }
+        $w ??= $h * $img['w'] / $img['h'];
+        $h ??= $w * $img['h'] / $img['w'];
+        $this->cur .= sprintf("q %.2F 0 0 %.2F %.2F %.2F cm /%s Do Q\n", $w, $h, $x, self::H - $y - $h, $img['name']);
+
+        return $h;
+    }
+
+    private static function loadImage(string $b, string $name): ?array
+    {
+        if (str_starts_with($b, "\xFF\xD8")) {
+            $info = @getimagesizefromstring($b);
+            if (!$info) {
+                return null;
+            }
+            $cs = match ($info['channels'] ?? 3) { 1 => '/DeviceGray', 4 => '/DeviceCMYK', default => '/DeviceRGB' };
+            return ['name' => $name, 'w' => $info[0], 'h' => $info[1], 'cs' => $cs, 'filter' => 'DCTDecode', 'parms' => null, 'data' => $b, 'smask' => null];
+        }
+        if (!str_starts_with($b, "\x89PNG\r\n\x1a\n")) {
+            return null;
+        }
+        $pos = 8;
+        $idat = '';
+        $plte = '';
+        $trns = '';
+        $hdr = null;
+        while ($pos + 8 <= strlen($b)) {
+            $len = unpack('N', substr($b, $pos, 4))[1];
+            $type = substr($b, $pos + 4, 4);
+            $data = substr($b, $pos + 8, $len);
+            $pos += 12 + $len;
+            match ($type) {
+                'IHDR' => $hdr = unpack('Nw/Nh/Cdepth/Ctype/Ccomp/Cfilter/Cinterlace', $data),
+                'PLTE' => $plte = $data,
+                'tRNS' => $trns = $data,
+                'IDAT' => $idat .= $data,
+                default => null,
+            };
+            if ($type === 'IEND') {
+                break;
+            }
+        }
+        if (!$hdr || $hdr['depth'] !== 8 || $hdr['interlace'] !== 0) {
+            return null;                                    // 16 bit / interlaced PNG desteklenmez
+        }
+        [$w, $h, $type] = [$hdr['w'], $hdr['h'], $hdr['type']];
+        $colors = [0 => 1, 2 => 3, 3 => 1, 4 => 2, 6 => 4][$type] ?? null;
+        if ($colors === null) {
+            return null;
+        }
+        $cs = match ($type) {
+            0, 4 => '/DeviceGray',
+            3 => '[/Indexed /DeviceRGB ' . (intdiv(strlen($plte), 3) - 1) . ' <' . bin2hex($plte) . '>]',
+            default => '/DeviceRGB',
+        };
+        // Saydamlık yoksa IDAT olduğu gibi gömülür (PNG öngörücüsü PDF'te de var)
+        if (in_array($type, [0, 2], true) || ($type === 3 && $trns === '')) {
+            return ['name' => $name, 'w' => $w, 'h' => $h, 'cs' => $cs, 'filter' => 'FlateDecode',
+                'parms' => "<< /Predictor 15 /Colors {$colors} /BitsPerComponent 8 /Columns {$w} >>", 'data' => $idat, 'smask' => null];
+        }
+        // Saydamlık: satır filtreleri çözülür, renk ve alfa ayrılır
+        $raw = @gzuncompress($idat);
+        if ($raw === false) {
+            return null;
+        }
+        $stride = $w * $colors;
+        $prev = array_fill(0, $stride, 0);
+        $color = '';
+        $alpha = '';
+        $alphaOf = $type === 3 ? array_values(unpack('C*', $trns . str_repeat("\xFF", 256))) : null;
+        for ($y = 0, $p = 0; $y < $h; $y++) {
+            $f = ord($raw[$p]);
+            $line = array_values(unpack('C*', substr($raw, $p + 1, $stride)));
+            $p += $stride + 1;
+            if ($f !== 0) {
+                for ($i = 0; $i < $stride; $i++) {
+                    $a = $i >= $colors ? $line[$i - $colors] : 0;
+                    $up = $prev[$i];
+                    if ($f === 1) {
+                        $add = $a;
+                    } elseif ($f === 2) {
+                        $add = $up;
+                    } elseif ($f === 3) {
+                        $add = ($a + $up) >> 1;
+                    } else {
+                        $c = $i >= $colors ? $prev[$i - $colors] : 0;
+                        $pp = $a + $up - $c;
+                        $pa = abs($pp - $a);
+                        $pb = abs($pp - $up);
+                        $pc = abs($pp - $c);
+                        $add = $pa <= $pb && $pa <= $pc ? $a : ($pb <= $pc ? $up : $c);
+                    }
+                    $line[$i] = ($line[$i] + $add) & 0xFF;
+                }
+            }
+            $prev = $line;
+            if ($type === 3) {
+                $color .= pack('C*', ...$line);
+                $alpha .= pack('C*', ...array_map(fn($ix) => $alphaOf[$ix], $line));
+            } else {
+                $cc = $colors - 1;
+                for ($i = 0; $i < $stride; $i += $colors) {
+                    $color .= $cc === 1 ? chr($line[$i]) : chr($line[$i]) . chr($line[$i + 1]) . chr($line[$i + 2]);
+                    $alpha .= chr($line[$i + $cc]);
+                }
+            }
+        }
+
+        return ['name' => $name, 'w' => $w, 'h' => $h, 'cs' => $cs, 'filter' => 'FlateDecode', 'parms' => null, 'data' => gzcompress($color), 'smask' => gzcompress($alpha)];
+    }
+
     public function output(): string
     {
         $pages = $this->pages;
@@ -122,9 +256,26 @@ final class Pdf
         $objs[4] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding 5 0 R >>";
         $objs[5] = $enc;
         $kids = [];
+        // Görseller (XObject) sayfalardan önce numaralanır
         $n = 6;
+        $xobj = [];
+        foreach ($this->images as $img) {
+            if ($img['smask'] !== null) {
+                $objs[$n] = sprintf("<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length %d >>\nstream\n%s\nendstream",
+                    $img['w'], $img['h'], strlen($img['smask']), $img['smask']);
+                $smask = " /SMask {$n} 0 R";
+                $n++;
+            } else {
+                $smask = '';
+            }
+            $objs[$n] = sprintf("<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter /%s%s%s /Length %d >>\nstream\n%s\nendstream",
+                $img['w'], $img['h'], $img['cs'], $img['filter'], $img['parms'] ? ' /DecodeParms ' . $img['parms'] : '', $smask, strlen($img['data']), $img['data']);
+            $xobj[] = "/{$img['name']} {$n} 0 R";
+            $n++;
+        }
+        $res = '/Font << /F1 3 0 R /F2 4 0 R >>' . ($xobj ? ' /XObject << ' . implode(' ', $xobj) . ' >>' : '');
         foreach ($pages as $content) {
-            $objs[$n] = sprintf('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2F %.2F] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents %d 0 R >>', self::W, self::H, $n + 1);
+            $objs[$n] = sprintf('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2F %.2F] /Resources << %s >> /Contents %d 0 R >>', self::W, self::H, $res, $n + 1);
             $objs[$n + 1] = "<< /Length " . strlen($content) . " >>\nstream\n{$content}\nendstream";
             $kids[] = "{$n} 0 R";
             $n += 2;

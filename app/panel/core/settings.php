@@ -127,7 +127,8 @@ function settings_upload(array $p, array $in): never
     if (!is_array($file) || $file['error'] !== UPLOAD_ERR_OK || $file['size'] > 3 * 1024 * 1024) {
         api_error('Görsel yüklenemedi (en fazla 3 MB).');
     }
-    $ext = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp'][(new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name'])] ?? api_error('Yalnızca PNG, JPG veya WEBP.');
+    // Belge görselleri PDF'e gömülür: PNG (8 bit) ya da JPG
+    $ext = ['image/png' => 'png', 'image/jpeg' => 'jpg'][(new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name'])] ?? api_error('Yalnızca PNG veya JPG yüklenebilir (belgelere gömülür).');
     $dir = dirname(__DIR__, 3) . '/public/uploads';
     if (!is_dir($dir)) {
         mkdir($dir, 0775, true);
