@@ -45,6 +45,17 @@
 <main id="view" class="view"></main>
 <div id="toasts" class="toasts"></div>
 
-<script type="module" src="<?= asset('panel/app.js') ?>"></script>
+<?php
+// Tüm panel modülleri import map ile tek bir sürümlü adrese bağlanır:
+// - "../app.js" ile "app.js?v=…" aynı modül olur (iki kez çalışmaz),
+// - dosya değişince ?v= değişir, tarayıcı ve Cloudflare eski kopyayı kullanmaz.
+$modules = [];
+foreach (array_merge(glob(dirname(__DIR__, 2) . '/public/assets/panel/*.js'), glob(dirname(__DIR__, 2) . '/public/assets/panel/tabs/*.js')) as $file) {
+    $rel = substr($file, strlen(dirname(__DIR__, 2) . '/public/assets/'));
+    $modules['/assets/' . $rel] = asset($rel);
+}
+?>
+<script type="importmap"><?= json_encode(['imports' => $modules], JSON_UNESCAPED_SLASHES) ?></script>
+<script type="module">import '/assets/panel/app.js';</script>
 </body>
 </html>
