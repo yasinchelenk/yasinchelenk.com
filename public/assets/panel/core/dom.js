@@ -92,8 +92,8 @@ export const icon = (name, title, cls = '') => h('span.i' + (cls ? '.' + cls : '
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-/** Türkçe büyük harf (i → İ) */
-export const trUpper = (s) => String(s ?? '').toLocaleUpperCase('tr-TR');
+/** Kayıt büyük harfi (sunucudaki tr_upper ile aynı): i/ı → I, Ç Ş Ğ Ö Ü korunur */
+export const trUpper = (s) => String(s ?? '').replace(/[iı]/g, 'I').toUpperCase();
 
 /** Karşılaştırma için katlama: İıi→I, Ş→S, Ğ→G, Ü→U, Ö→O, Ç→C, büyük harf */
 export function fold(s) {

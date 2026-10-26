@@ -59,6 +59,10 @@ function panel_connect(string $file): PDO
     ]);
     $pdo->exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
 
+    // SQL içinde Türkçe duyarsız arama: WHERE fold(name) LIKE ?
+    $fold = fn($s) => $s === null ? null : tr_fold((string) $s);
+    method_exists($pdo, 'createFunction') ? $pdo->createFunction('fold', $fold, 1) : $pdo->sqliteCreateFunction('fold', $fold, 1);
+
     return $pdo;
 }
 
@@ -168,10 +172,13 @@ function today(): string
 
 // ---------------------------------------------------------------- Metin ve sayı
 
-/** Türkçe kurallarıyla büyük harf (i → İ, ı → I). */
+/**
+ * Kayıt büyük harfi: gemi, liman ve belge metinleri uluslararası yazılır (i/ı → I; MERIOS, KARADENIZ),
+ * Ç Ş Ğ Ö Ü ve kullanıcının yazdığı İ korunur.
+ */
 function tr_upper(string $s): string
 {
-    return mb_strtoupper(strtr($s, ['i' => 'İ', 'ı' => 'I']), 'UTF-8');
+    return mb_strtoupper(strtr($s, ['i' => 'I', 'ı' => 'I']), 'UTF-8');
 }
 
 /** Karşılaştırma için katlama: büyük harf + Türkçe harfler ASCII'ye (İıi→I, Ş→S, Ğ→G, Ü→U, Ö→O, Ç→C). */

@@ -22,7 +22,7 @@ export const anyModalOpen = () => openModals > 0 || !!document.querySelector('.f
  * modal({ title, body, actions:[{label, primary, danger, onClick → false ise kapanmaz}], wide, width, onClose, foot })
  * → { close, el, body }
  */
-export function modal({ title, body, actions = [], wide = false, width, onClose, foot, className = '' }) {
+export function modal({ title, body, actions = [], wide = false, width, onClose, foot, className = '', onEscape }) {
     const backdrop = h('div.modal-back');
     const card = h('div.modal' + (wide ? '.wide' : '') + (className ? '.' + className : ''), { role: 'dialog', 'aria-modal': 'true', style: { width: width ? width + 'px' : null } });
     let closed = false;
@@ -37,7 +37,7 @@ export function modal({ title, body, actions = [], wide = false, width, onClose,
     const onKey = (e) => {
         if (e.key === 'Escape' && backdrop === document.querySelector('.modal-back:last-of-type')) {
             e.stopPropagation();
-            close();
+            onEscape ? onEscape() : close();
         }
     };
     const bodyEl = h('div.modal__body', body);

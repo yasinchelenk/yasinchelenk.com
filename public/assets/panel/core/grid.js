@@ -358,49 +358,86 @@ export class Grid {
         return c.edit?.field ?? c.field ?? c.key;
     }
 
+    /**
+     * Hücre. c.lines verilirse hücre alt alta düzenlenebilir satırlardan oluşur (ör. From / To):
+     * lines: [{ field, edit, render, hidden(row), className(row) }], after(row) → satırların yanına eklenen öğe.
+     */
     renderCell(row, c) {
+        const td = h('td', { class: [c.align === 'r' ? 'r' : '', c.align === 'c' ? 'c' : '', c.className?.(row) ?? c.cls ?? ''].join(' ') });
+        if (c.lines) {
+            td.classList.add('stack');
+            const box = h('div.stack__lines');
+            for (const line of c.lines) {
+                if (line.hidden?.(row)) continue;
+                const div = h('div.cell-line', { class: line.className?.(row) ?? '' });
+                this.setupEditable(div, row, { ...line, key: line.key ?? line.field });
+                box.append(div);
+            }
+            td.append(box);
+            const after = c.after?.(row);
+            if (after) td.append(after);
+            return td;
+        }
+        this.setupEditable(td, row, c);
+        return td;
+    }
+
+    /** Görünüm + tıklayınca düzenleme + sağ tık menüsü + not işareti + taşan metin ipucu (td ya da satır içi div) */
+    setupEditable(el, row, c) {
         const field = this.fieldOf(c);
         const ed = c.edit;
         const locked = ed?.locked?.(row) || false;
         const editable = ed && !locked;
-        const td = h('td', {
-            class: [c.align === 'r' ? 'r' : '', c.align === 'c' ? 'c' : '', editable ? 'is-editable' : '', locked ? 'is-locked' : '', c.className?.(row) ?? c.cls ?? ''].join(' '),
-            dataset: { field, ...(editable && ed.nav !== false ? { nav: '1' } : {}) },
-            title: (typeof locked === 'string' ? locked : null) ?? c.cellTitle?.(row) ?? null,
-        });
-        td.append(...[this.display(row, c)].flat().filter((x) => x !== null && x !== undefined && x !== ''));
+        el.dataset.field = field;
+        if (editable && ed.nav !== false) el.dataset.nav = '1';
+        if (editable) el.classList.add('is-editable');
+        if (locked) el.classList.add('is-locked');
+        const title = (typeof locked === 'string' ? locked : null) ?? c.cellTitle?.(row) ?? null;
+        if (title) el.title = title;
+        el.append(...[this.display(row, c)].flat().filter((x) => x !== null && x !== undefined && x !== ''));
 
         if (editable) {
-            td.addEventListener(ed.ciftTik ? 'dblclick' : 'click', (e) => {
+            el.addEventListener(ed.ciftTik ? 'dblclick' : 'click', (e) => {
                 if (e.target.closest('button, a, input, select, textarea, .no-edit')) return;
-                this.startEdit(td, row, c);
+                e.stopPropagation();
+                this.startEdit(el, row, c);
             });
         }
         const entity = this.entityOf(row);
         if (entity && c.history !== false && (ed || c.contextItems)) {
-            td.addEventListener('contextmenu', (e) => {
+            el.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 this.cellMenu(e, row, c);
             });
         }
         if (c.popover) {
             let t;
-            td.addEventListener('mouseenter', () => {
+            el.addEventListener('mouseenter', () => {
                 t = setTimeout(() => {
-                    if (td.classList.contains('cell-editing')) return;
+                    if (el.classList.contains('cell-editing')) return;
                     const full = typeof c.popover === 'function' ? c.popover(row) : row[field];
-                    if (full && (td.scrollWidth > td.clientWidth + 1 || td.scrollHeight > td.clientHeight + 1 || String(full).includes('\n'))) {
-                        showTip(td, h('div.pop-full', String(full)));
+                    if (full && (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1 || String(full).includes('\n'))) {
+                        showTip(el, h('div.pop-full', String(full)));
                     }
                 }, 300);
             });
-            td.addEventListener('mouseleave', () => {
+            el.addEventListener('mouseleave', () => {
                 clearTimeout(t);
                 hideTip();
             });
         }
-        this.paintNote(td, row, field);
-        return td;
+        this.paintNote(el, row, field);
+    }
+
+    /** Sütun ya da satır içi alan tanımı (lines) — alan adına göre */
+    columnFor(field) {
+        for (const c of this.columns()) {
+            if (this.fieldOf(c) === field && !c.lines) return c;
+            const line = c.lines?.find((l) => (l.edit?.field ?? l.field) === field);
+            if (line) return { ...line, key: line.key ?? line.field };
+        }
+        return null;
     }
 
     display(row, c) {
@@ -443,7 +480,7 @@ export class Grid {
         for (const tr of this.tbody.querySelectorAll('tr[data-row-id]')) {
             const found = this.findRow(tr.dataset.rowId);
             if (!found) continue;
-            tr.querySelectorAll('td[data-field]').forEach((td) => this.paintNote(td, found.row, td.dataset.field));
+            tr.querySelectorAll('[data-field]').forEach((el) => this.paintNote(el, found.row, el.dataset.field));
         }
     }
 
@@ -475,6 +512,30 @@ export class Grid {
         const raw = ed.value ? ed.value(row) : row[field];
         const original = raw === null || raw === undefined ? '' : String(raw);
         const rowId = this.opts.rowId(row);
+
+        // Özel düzenleyici (ör. To Do ayna editörü): ed.custom(el, row, done) — done(değer) kaydeder, done(undefined) vazgeçer
+        if (ed.custom) {
+            td.classList.add('cell-editing');
+            live.setCursor({ tab: this.opts.tab, rowId: String(rowId), field });
+            let closed = false;
+            const done = async (value) => {
+                if (closed) return;
+                closed = true;
+                this.endEdit = null;
+                live.setCursor(null);
+                td.classList.remove('cell-editing');
+                if (value !== undefined && String(value ?? '') !== original) {
+                    try {
+                        const updated = await this.opts.onSave(row, field, value, c);
+                        if (updated) return this.updateRow(updated);
+                    } catch { /* hata gösterildi */ }
+                }
+                this.rerenderRow(rowId);
+            };
+            this.endEdit = () => {};
+            ed.custom(td, row, done);
+            return;
+        }
 
         let editor;
         let floating = false;
@@ -605,15 +666,23 @@ export class Grid {
 
     /** Tab / Shift+Tab: sonraki/önceki düzenlenebilir hücre */
     navigate(rowId, field, dir) {
-        const cells = [...this.tbody.querySelectorAll('td[data-nav]')];
-        const current = this.trFor(rowId)?.querySelector(`td[data-field="${CSS.escape(field)}"]`);
+        const cells = [...this.tbody.querySelectorAll('[data-nav]')];
+        const current = this.trFor(rowId)?.querySelector(`[data-field="${CSS.escape(field)}"]`);
         const i = cells.indexOf(current);
         const next = cells[i + dir];
         if (next) {
             const found = this.findRow(next.closest('tr').dataset.rowId);
-            const col = this.columns().find((c) => this.fieldOf(c) === next.dataset.field);
+            const col = this.columnFor(next.dataset.field);
             if (found && col) this.startEdit(next, found.row, col);
         }
+    }
+
+    /** Dışarıdan bir hücreyi düzenlemeye aç (ör. yeni boş satırın ilk hücresi) */
+    editCell(rowId, field) {
+        const el = this.trFor(rowId)?.querySelector(`[data-field="${CSS.escape(field)}"]`);
+        const found = this.findRow(rowId);
+        const col = this.columnFor(field);
+        if (el && found && col) this.startEdit(el, found.row, col);
     }
 
     // ---------------------------------------------------------------- Canlılık
@@ -622,7 +691,7 @@ export class Grid {
     flash(rowId, fields, by) {
         const tr = this.trFor(rowId);
         if (!tr) return;
-        const tds = fields?.length ? fields.map((f) => tr.querySelector(`td[data-field="${CSS.escape(f)}"]`)).filter(Boolean) : [...tr.querySelectorAll('td')];
+        const tds = fields?.length ? fields.map((f) => tr.querySelector(`[data-field="${CSS.escape(f)}"]`)).filter(Boolean) : [...tr.querySelectorAll('td')];
         for (const td of tds) {
             td.classList.remove('flash');
             void td.offsetWidth;
@@ -641,7 +710,7 @@ export class Grid {
         });
         if (!this.opts.tab) return;
         for (const cell of live.cellsIn(this.opts.tab)) {
-            const td = this.trFor(cell.rowId)?.querySelector(`td[data-field="${CSS.escape(cell.field ?? '')}"]`);
+            const td = this.trFor(cell.rowId)?.querySelector(`[data-field="${CSS.escape(cell.field ?? '')}"]`);
             if (!td) continue;
             td.classList.add('has-presence');
             td.style.setProperty('--pc', cell.color);
