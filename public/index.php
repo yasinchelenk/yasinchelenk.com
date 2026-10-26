@@ -20,7 +20,7 @@ error_reporting(E_ALL);
 session_start([
     'cookie_httponly' => true,
     'cookie_samesite' => 'Lax',
-    'cookie_secure'   => !empty($_SERVER['HTTPS']),
+    'cookie_secure'   => is_https(),
 ]);
 
 header('X-Content-Type-Options: nosniff');

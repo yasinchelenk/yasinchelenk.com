@@ -69,7 +69,7 @@ function store_message(array $input): void
     $record = [
         ...$input,
         'subject_label' => CONTACT_SUBJECTS[$input['subject']],
-        'ip'            => $_SERVER['REMOTE_ADDR'] ?? null,
+        'ip'            => client_ip(),
         'created_at'    => date(DATE_ATOM),
     ];
 
