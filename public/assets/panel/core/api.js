@@ -52,7 +52,8 @@ export async function api(method, path, body, opts = {}) {
         throw new ApiError(data.error, 403, data);
     }
     if (!res.ok) {
-        if (!opts.quiet && res.status !== 409) toast(data.error ?? 'İşlem başarısız', 'error', 6000);
+        // 409 + onay: geri alma çakışması, çağıran kendi penceresini gösterir
+        if (!opts.quiet && !(res.status === 409 && 'onay' in data)) toast(data.error ?? 'İşlem başarısız', 'error', 6000);
         throw new ApiError(data.error ?? res.statusText, res.status, data);
     }
     return data;

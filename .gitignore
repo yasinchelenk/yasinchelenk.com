@@ -1,8 +1,10 @@
 # Çalışma zamanı verileri
-storage/panel.sqlite*
-storage/initial-admin-password.txt
+storage/*.sqlite*
+storage/*.txt
+storage/backups/*
 storage/messages/*.jsonl
 storage/outbox/*
+storage/da-files/*
 storage/uploads/*
 storage/site/*
 !storage/**/.gitkeep
@@ -10,6 +12,9 @@ storage/site/*
 # Site Yönetimi'nden yüklenen dosyalar (sunucuda kalır)
 public/uploads/*
 !public/uploads/.htaccess
+
+# Gizli ayarlar (SMTP vb.)
+.env
 
 # Kaynak notlar (herkese açık repoya girmez)
 artanis-*.md

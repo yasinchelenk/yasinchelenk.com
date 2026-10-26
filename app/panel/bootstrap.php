@@ -10,7 +10,7 @@ require __DIR__ . '/core/history.php';
 require __DIR__ . '/core/live.php';
 require __DIR__ . '/core/settings.php';
 
-foreach (glob(__DIR__ . '/modules/*.php') ?: [] as $module) {
+foreach ([...(glob(__DIR__ . '/lib/*.php') ?: []), ...(glob(__DIR__ . '/modules/*.php') ?: [])] as $module) {
     require $module;
 }
 

@@ -40,6 +40,15 @@ const SETTING_FIELDS = [
     'Kasa' => [
         'kasa_birakma' => ['Para bırakma açıklaması', 'Cash → Cash In açıklamasının varsayılanı'],
     ],
+    'Final DA' => [
+        'da_ref_format'    => ['OUR REF.NO biçimi', '{kisa} kısa acente adı, {yil} / {yy} yıl, {no} DA numarası — örn. {kisa}/{yil}/{no}'],
+        'da_ctm_ad'        => ['Cash to Master kalemi', 'CTM teslimi DA’ye eklenirken satırın adı'],
+        'da_ctm_ucret'     => ['CTM teslim ücreti', 'Tutar (boşsa 0)'],
+        'da_ctm_para'      => ['CTM ücreti para birimi', 'USD / EUR / TRY'],
+        'da_customs_ad'    => ['Parça teslim kalemi', 'Customs → DA satırının adı (sonuna AWB eklenir)'],
+        'da_customs_ucret' => ['Gümrük müşavirliği ücreti', 'Tutar (boşsa 0)'],
+        'da_customs_para'  => ['Gümrük ücreti para birimi', 'USD / EUR / TRY'],
+    ],
     'Hesaplar' => [
         'onay'       => ['Yeni hesaplar yönetici onayı ister', '', 'bool'],
         'kayit_kodu' => ['Kayıt kodu', 'Doluysa kayıt olurken istenir; boşsa herkes kayıt olabilir'],

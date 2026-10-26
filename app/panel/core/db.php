@@ -76,6 +76,13 @@ function panel_migrations(): array
         101 => 'seed_tariffs',
         // İadenin kaynağına işlediği değişiklikler (status ok ↔ geri alma)
         102 => fn(PDO $pdo) => $pdo->exec('ALTER TABLE refunds ADD COLUMN yan_etki TEXT'),
+        // Final DA ayarları (mevcut kurulumlara varsayılanlar)
+        103 => function (PDO $pdo): void {
+            $set = $pdo->prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+            foreach (array_filter(settings_defaults(), fn($k) => str_starts_with($k, 'da_') && $k !== 'da_cutoff', ARRAY_FILTER_USE_KEY) as $k => $v) {
+                $set->execute([$k, $v]);
+            }
+        },
     ];
 }
 
