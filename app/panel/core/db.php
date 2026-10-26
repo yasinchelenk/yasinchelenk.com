@@ -218,7 +218,8 @@ function parse_number(mixed $value, int $decimals = 2): ?float
         $sep = $lastDot !== false ? '.' : ',';
         $parts = explode($sep, $s);
         $tail = end($parts);
-        if (count($parts) === 2 && strlen($tail) <= $decimals) {
+        // Miktar/fiyatta (decimals > 2) virgül her zaman ondalıktır: "2,1500" → 2.15; "1.200" → 1200
+        if (count($parts) === 2 && ($decimals > 2 ? ($sep === ',' || strlen($tail) <= 2) : strlen($tail) <= $decimals)) {
             $s = $parts[0] . '.' . $tail;
         } else {
             $s = implode('', $parts);

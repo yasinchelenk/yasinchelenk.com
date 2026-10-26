@@ -521,3 +521,48 @@ b.calls { color: var(--thead-text); }
 .call-row input { flex: 1; }
 .mini-form { display: flex; gap: 6px; align-items: center; }
 .mini-form input { width: 200px; }
+
+/* ---------------------------------------------------------------- Faz 4: Tasks, Customs, Cash, Supply */
+.da-tag { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: var(--cat-blue-pill); color: var(--cat-blue-ink); white-space: nowrap; }
+.da-tag.gonderildi { background: var(--badge-dhv-bg); color: var(--badge-dhv-tx); }
+.da-tag.debit { background: var(--cat-brown-pill); color: var(--cat-brown-ink); }
+.da-tag.arsiv { opacity: .5; }
+.flag-btn { border: 0; background: none; cursor: pointer; color: #c4ced9; font-size: 14px; padding: 0 4px; }
+.flag-btn.is-on { color: var(--red); }
+.task-head { cursor: pointer; flex-wrap: nowrap; overflow: hidden; }
+.task-head .grp__name { margin-right: 2px; }
+.task-head .add-task { width: 22px; height: 22px; }
+.task-preview { color: var(--dim); font-weight: 400; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+tr.grp-head.gemi-beyaz td { background: #fff; }
+tr.is-iptal td { color: var(--dim); text-decoration: line-through; opacity: .7; }
+tr.is-iptal td .row-actions { text-decoration: none; }
+tr.is-gecmis td { background: var(--gecmis-row) !important; }
+tr.is-alert td { background: var(--alert-row) !important; }
+tr.is-alert:hover td { background: var(--alert-row-hover) !important; }
+tr.blink td { animation: blink-row .65s 4; }
+@keyframes blink-row { 50% { background: var(--flash-bg); } }
+.lock { color: var(--dim); display: inline-grid; place-items: center; width: 100%; }
+.alert-filter.is-on { color: var(--red) !important; border-color: var(--red) !important; }
+.bosta-filter.is-on { color: var(--accent) !important; border-color: var(--accent) !important; }
+.pos-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.chip-btn { display: inline-flex !important; align-items: center; gap: 5px; padding: 2px 9px !important; border-radius: 999px !important; font-size: 12px !important; }
+.work-lines { display: grid; gap: 4px; }
+.wl { display: grid; grid-template-columns: 1fr 70px 110px 70px 110px 26px; gap: 6px; align-items: center; }
+.wl-head span { font-size: 11.5px; font-weight: 600; color: var(--dim); }
+.work-totals { display: flex; gap: 6px; flex-wrap: wrap; }
+tr.is-delivered td { color: var(--dim); }
+.mini-col { display: grid; gap: 6px; width: 240px; }
+tr.kasa-giris-satir td { background: #eaf7ef !important; }
+tr.kasa-giris-satir:hover td { background: #d9f0e2 !important; }
+.paid-on { background: var(--badge-dhv-bg) !important; color: var(--badge-dhv-tx) !important; border-color: var(--badge-dhv-tx) !important; font-weight: 700; }
+td.ikmal-elle { background: #fff7e0 !important; font-style: italic; }
+tr.vadesi-gecti td { background: var(--alert-row) !important; }
+tr.tikli td:first-child { box-shadow: inset 3px 0 0 var(--green); }
+tr.is-paid td { color: #4e5d70; }
+.grid-slot { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.grid-slot > .grid-wrap { flex: 1; }
+tr.grp-foot td { text-align: center; padding: 6px !important; background: var(--bg); }
+.supply-lines { display: grid; gap: 4px; }
+.sl { display: grid; grid-template-columns: repeat(var(--n), minmax(70px, 1fr)) 90px 90px 26px; gap: 6px; align-items: center; }
+.sl-head span { font-size: 11.5px; font-weight: 600; color: var(--dim); }
+.sl .r { text-align: right; font-variant-numeric: tabular-nums; }

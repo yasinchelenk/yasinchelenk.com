@@ -64,6 +64,7 @@ function firma_public(): array
         'footer' => setting('firma_footer'),
         'logo'   => setting('firma_logo') ?: null,
         'web'    => setting('firma_mail_web'),
+        'kasa_birakma' => setting('kasa_birakma'),
     ];
 }
 

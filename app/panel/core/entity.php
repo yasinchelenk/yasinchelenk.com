@@ -61,6 +61,7 @@ function cast_field(string $type, mixed $v): mixed
         'int'      => is_numeric($v) ? (int) $v : (($n = parse_number($v)) === null ? api_error('Geçerli bir sayı girin') : (int) round($n)),
         'num'      => parse_number($v) ?? api_error('Geçerli bir tutar girin'),
         'num3'     => parse_number($v, 3) ?? api_error('Geçerli bir sayı girin'),
+        'num4'     => parse_number($v, 4) ?? api_error('Geçerli bir fiyat girin'),
         'date'     => parse_date((string) $v) ?? api_error('Geçerli bir tarih girin (gg.aa.yyyy)'),
         'datetime' => parse_datetime((string) $v) ?? api_error('Geçerli bir tarih-saat girin (gg.aa.yyyy ss:dd)'),
         'json'     => is_string($v) ? $v : json_encode($v, JSON_UNESCAPED_UNICODE),

@@ -132,9 +132,12 @@ export function parseNumber(value, decimals = 2) {
         const dec = Math.max(lastDot, lastComma);
         s = s.slice(0, dec).replace(/[.,]/g, '') + '.' + s.slice(dec + 1);
     } else if (lastDot >= 0 || lastComma >= 0) {
-        const parts = s.split(lastDot >= 0 ? '.' : ',');
+        const sep = lastDot >= 0 ? '.' : ',';
+        const parts = s.split(sep);
         const tail = parts.at(-1);
-        s = parts.length === 2 && tail.length <= decimals ? parts[0] + '.' + tail : parts.join('');
+        // Miktar/fiyatta (decimals > 2) virgül her zaman ondalıktır: "2,1500" → 2.15; "1.200" → 1200
+        const decimal = decimals > 2 ? sep === ',' || tail.length <= 2 : tail.length <= decimals;
+        s = parts.length === 2 && decimal ? parts[0] + '.' + tail : parts.join('');
     }
     const n = Number(s);
     return Number.isFinite(n) ? (neg ? -n : n) : null;
@@ -150,10 +153,11 @@ export const CUR_SIGN = { USD: '$', EUR: '€', TRY: '₺' };
 /** "$1.234,56" — sembol sönük renkte önde */
 export function money(n, cur = 'USD', { empty = '' } = {}) {
     if (n === null || n === undefined || n === '') return empty;
-    return h('span.money', { class: Number(n) < 0 ? 'neg' : '' }, h('span.cur-sign', CUR_SIGN[cur] ?? cur + ' '), fmtNum(n));
+    const neg = Number(n) < 0;
+    return h('span.money', { class: neg ? 'neg' : '' }, neg ? '−' : '', h('span.cur-sign', CUR_SIGN[cur] ?? cur + ' '), fmtNum(Math.abs(n)));
 }
 
-export const moneyText = (n, cur = 'USD') => (n === null || n === undefined || n === '' ? '' : (CUR_SIGN[cur] ?? cur + ' ') + fmtNum(n));
+export const moneyText = (n, cur = 'USD') => (n === null || n === undefined || n === '' ? '' : (Number(n) < 0 ? '−' : '') + (CUR_SIGN[cur] ?? cur + ' ') + fmtNum(Math.abs(n)));
 
 // ---- tarih
 
