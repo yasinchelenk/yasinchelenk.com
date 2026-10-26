@@ -74,6 +74,8 @@ function panel_migrations(): array
 
     return [
         101 => 'seed_tariffs',
+        // İadenin kaynağına işlediği değişiklikler (status ok ↔ geri alma)
+        102 => fn(PDO $pdo) => $pdo->exec('ALTER TABLE refunds ADD COLUMN yan_etki TEXT'),
     ];
 }
 

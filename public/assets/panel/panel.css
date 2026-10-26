@@ -611,3 +611,67 @@ table.matrix td { padding: 2px; }
 table.matrix select { padding: 3px 4px; font-size: 12px; }
 .word-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .word-chips input { width: 140px; }
+
+/* ---------------------------------------------------------------- Dues & Payments (§6.10) */
+.dues-tab .dues-tabs > button { font-weight: 600; }
+.dues-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.chip.orange { background: var(--ik-orange); color: #fff; }
+.dues-body { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+.kind-dot { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font-size: 11px; font-weight: 700; color: #fff; background: var(--ik-gray); flex-shrink: 0; }
+.kind-dot.k-light { background: var(--cat-blue); }
+.kind-dot.k-pilotage { background: var(--cat-purple); }
+.kind-dot.k-sanitary { background: var(--cat-green); }
+.badge.scope-full { background: var(--badge-dhv-bg); color: var(--badge-dhv-tx); }
+.badge.scope-half { background: var(--badge-yarim-bg); color: var(--badge-yarim-tx); }
+.badge.scope-liman, .badge.scope-diger { background: var(--badge-mahsup-bg); color: var(--badge-mahsup-tx); }
+.transit-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 5px; background: var(--chip-bg); font-size: 12px; white-space: nowrap; }
+.code-badge { display: inline-block; font-family: Consolas, monospace; font-size: 11.5px; font-weight: 700; padding: 0 5px; border-radius: 3px; background: var(--thead-bg); color: var(--thead-text); }
+
+.paste-box { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; flex-shrink: 0; }
+.paste-input { width: 100%; min-height: 58px; font-size: 13px; border-style: dashed; background: #fbfcfe; }
+.paste-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; font-size: 12px; }
+.paste-preview { grid-column: 1 / -1; display: grid; gap: 8px; }
+.paste-preview:empty { display: none; }
+.pv-card { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; }
+.pv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.pv-total { margin-left: auto; font-size: 14px; }
+.pv-actions { display: flex; align-items: center; gap: 8px; }
+.pv-hak { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pv-vessel { display: inline-flex; align-items: center; gap: 6px; }
+.pv-vessel .search, .pv-vessel input { min-width: 220px; }
+.pv-table { width: auto; min-width: 420px; }
+.pv-table th:first-child { text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+.pv-table tr.is-dup td { opacity: .5; }
+.lines-table { width: auto; min-width: 560px; }
+.lines-table tr.is-off td { color: var(--dim); text-decoration: line-through; }
+.lines-table tr.is-off td:first-child { text-decoration: none; }
+.lines-table tfoot td { border-bottom: 0; padding-top: 6px; }
+.transit-pick { width: 340px; }
+.pick-row { justify-content: flex-start !important; gap: 6px; padding: 5px 8px !important; font-size: 12.5px; }
+
+.sel-strip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 6px; background: var(--notice-info-bg); color: var(--notice-info-tx); font-size: 12.5px; }
+table.grid tr.is-missing { background: var(--alert-row) !important; }
+table.grid tr.is-paid td { color: #4f5f73; }
+table.grid tr.is-open { background: var(--row-selected) !important; }
+tr.dues-detail > td, tr.dues-warn > td { background: #f8fafc !important; white-space: normal !important; padding: 10px 14px 12px 18px !important; border-bottom: 2px solid var(--line) !important; }
+tr.dues-warn > td { background: var(--notice-warn-bg) !important; padding: 6px 14px !important; }
+.warn-line { color: var(--notice-warn-tx); font-size: 12.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dues-detail__body { display: grid; gap: 8px; max-width: 1100px; }
+.dd-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: 12.5px; }
+.dd-note input { width: 420px; max-width: 100%; }
+.flow-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: #fff; font-size: 12.5px; }
+.grp-hint { font-weight: 400; white-space: normal; }
+.paid-mark { border: 0; background: none; padding: 0; cursor: pointer; color: var(--green); font-weight: 600; font-size: 12.5px; }
+span.paid-mark { cursor: default; color: var(--amber); }
+td.need-fill .ph, td.need-fill:empty::before { color: var(--red) !important; }
+small.block { display: block; }
+
+.mahsup-list { display: grid; gap: 8px; align-content: start; }
+.mahsup-card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.mahsup-card > .notice { margin: 0 12px 10px; }
+.mh-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 10px 12px; cursor: pointer; font-size: 13px; }
+.mh-head:hover { background: var(--row-hover); }
+.mh-bal { margin-left: auto; font-weight: 700; font-size: 14px; }
+.mahsup-card table.ledger { margin: 0 12px; width: calc(100% - 24px); }
+.mh-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px 12px; }
+.mh-actions input { width: 260px; }
