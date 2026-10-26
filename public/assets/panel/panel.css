@@ -496,3 +496,28 @@ button.is-on { border-color: var(--accent); color: var(--accent); }
 .gc-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 8px 10px; }
 .voyages { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
 .vc-errors { display: grid; gap: 4px; }
+
+/* ---------------------------------------------------------------- Faz 3: Transits */
+.grid-host { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.grid-host > .grid-wrap { flex: 1; }
+.float-pager { position: absolute; left: 50%; bottom: 14px; transform: translate(-50%, 8px); display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; box-shadow: 0 8px 24px rgba(10,25,45,.2); font-size: 13px; color: var(--dim); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 6; }
+.float-pager.is-near { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.pay-cell { position: relative; display: inline-grid; place-items: center; width: 34px; height: 22px; }
+.pay-ic { display: inline-grid; place-items: center; line-height: 0; }
+.pay-dot { position: absolute; right: -2px; top: -1px; width: 8px; height: 8px; border-radius: 50%; }
+.pay-sq { position: absolute; right: -2px; bottom: 0; width: 7px; height: 7px; }
+.pay-dot.static, .pay-sq.static { position: static; display: inline-block; }
+.pay-dot.orange { background: var(--ik-orange); } .pay-dot.blue, .pay-sq.blue { background: var(--accent); } .pay-dot.green, .pay-sq.green { background: var(--ik-green); } .pay-sq.red { background: var(--red); }
+.legend { width: 480px; display: grid; gap: 4px; font-size: 12.5px; }
+.legend h4 { font-size: 12px; text-transform: uppercase; color: var(--dim); margin-top: 8px; }
+.legend__row { display: grid; grid-template-columns: 34px 150px 1fr; align-items: center; gap: 6px; }
+.da-mark { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.da-dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--line); }
+.da-dot.is-open { background: var(--ik-green); border-color: var(--ik-green); }
+b.calls { color: var(--thead-text); }
+.rule-notes { display: grid; gap: 6px; }
+.calls-box { display: grid; gap: 4px; }
+.call-row { display: flex; gap: 4px; align-items: center; }
+.call-row input { flex: 1; }
+.mini-form { display: flex; gap: 6px; align-items: center; }
+.mini-form input { width: 200px; }
