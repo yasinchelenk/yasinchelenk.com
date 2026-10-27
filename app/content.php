@@ -14,7 +14,7 @@ return [
         'photo'    => '',
         'cv'       => '',
         'email'    => 'yasincelenk@outlook.com',
-        'phone'    => '+90 534 370 76 70',
+        'phone'    => '',      // boşken sitede telefon gösterilmez (Site Yönetimi → Telefon)
         'linkedin' => 'https://www.linkedin.com/in/ychelenk/',
         'location' => ['tr' => 'İstanbul, Türkiye', 'en' => 'Istanbul, Türkiye'],
     ],

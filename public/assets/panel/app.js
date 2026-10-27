@@ -100,6 +100,7 @@ function start() {
 
 let host;
 let tabsNav;
+let menuBtn;
 let meWrap;
 let onlineWrap;
 let connChip;
@@ -109,6 +110,8 @@ function buildShell() {
     const logo = h('a.topbar__logo', { href: '#', title: info.firma.baslik ?? '', on: { click: (e) => e.preventDefault() } },
         info.firma.logo ? h('img', { src: info.firma.logo, alt: info.firma.kisa ?? '' }) : info.firma.kisa);
     tabsNav = h('nav.tabs');
+    // Dar ekranda yatay sekme şeridi yerine: "☰ <sekme>" düğmesi → gruplu dikey menü
+    menuBtn = h('button.tab-menu-btn', { type: 'button', on: { click: () => mobileMenu() } });
     onlineWrap = h('div.topbar__online', { style: { display: 'flex', gap: '4px' } });
     connChip = h('span.conn-lost', { hidden: true, title: 'Sunucuyla bağlantı koptu — yeniden bağlanılıyor. Ekrandaki veriler güncel olmayabilir.' }, '● Bağlantı yok');
     meWrap = h('div');
@@ -116,7 +119,7 @@ function buildShell() {
     drawTabs();
     drawMe();
     live.onUsers(drawOnline);
-    return h('div.app', h('header.topbar', logo, tabsNav, h('div.topbar__right', connChip, onlineWrap, meWrap)), host);
+    return h('div.app', h('header.topbar', logo, menuBtn, tabsNav, h('div.topbar__right', connChip, onlineWrap, meWrap)), host);
 }
 
 function drawTabs() {
@@ -136,12 +139,29 @@ function drawTabs() {
                 if (!openGroups.has(g) && items.some((t) => t.code === current)) openGroups.add(g);
                 store.set('gruplar', [...openGroups], true);
                 wrap.classList.toggle('is-open', openGroups.has(g) || items.some((t) => t.code === current));
+                // Şerit taşıyorsa açılan grup görünür alana kaydırılır (açılma animasyonu bitince)
+                if (wrap.classList.contains('is-open')) setTimeout(() => wrap.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' }), 360);
             } } }, label, icon('chevron')),
             h('div.tab-group__inner', h('div.tab-group__track', items.map(tabBtn))));
         parts.push(wrap);
     }
     TABS.filter((t) => !t.group && allowed(t.code)).forEach((t, i) => parts.push(tabBtn(t, i)));
     tabsNav.replaceChildren(...parts);
+    const cur = TABS.find((t) => t.code === current);
+    menuBtn.replaceChildren(h('span.tab-menu-btn__icon', '☰'), h('span', cur ? `${cur.group ? GROUPS[cur.group] + ' · ' : ''}${cur.label}` : 'Menü'));
+}
+
+/** Dar ekran menüsü: bütün sekmeler gruplarıyla alt alta */
+function mobileMenu() {
+    let pop;
+    const go = (code) => { pop.close(); show(code); };
+    const item = (t) => h('button.mobile-nav__item' + (t.code === current ? '.is-active' : ''), { type: 'button', on: { click: () => go(t.code) } }, t.label);
+    const sections = Object.entries(GROUPS).map(([g, label]) => {
+        const items = TABS.filter((t) => t.group === g && allowed(t.code));
+        return items.length ? h('div.mobile-nav__group', h('div.mobile-nav__head', { lang: 'en' }, label), items.map(item)) : null;
+    });
+    const rest = TABS.filter((t) => !t.group && allowed(t.code));
+    pop = popover(menuBtn, h('nav.mobile-nav', sections, rest.length ? h('div.mobile-nav__group', rest.map(item)) : null), { className: 'mobile-nav-pop', align: 'right' });
 }
 
 function drawMe() {

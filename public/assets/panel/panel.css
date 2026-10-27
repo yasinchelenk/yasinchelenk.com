@@ -965,3 +965,26 @@ table.acc-lines tfoot td { font-weight: 700; color: var(--navy); padding: 6px; b
 table.acc-lines tfoot tr.strong td { background: var(--thead-bg); }
 tr.acc-checked td { color: var(--green) !important; font-weight: 600 !important; }
 .acc-foot { max-width: 1000px; }
+
+/* ---------------------------------------------------------------- Dar ekran menüsü (sekme şeridi yerine) */
+.tab-menu-btn { display: none; align-items: center; gap: 8px; border: 0; background: rgba(255,255,255,.1); color: #fff; font-weight: 600; font-size: 14px;
+    border-radius: 6px; padding: 0 12px; margin: 8px 0; cursor: pointer; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-menu-btn:hover { background: rgba(255,255,255,.18); }
+.tab-menu-btn__icon { font-size: 17px; line-height: 1; }
+.mobile-nav-pop { padding: 6px; width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 70px); overflow: auto; }
+.mobile-nav { display: grid; gap: 6px; }
+.mobile-nav__group { display: grid; gap: 2px; }
+.mobile-nav__group + .mobile-nav__group { border-top: 1px solid var(--row-line); padding-top: 6px; }
+.mobile-nav__head { font-size: 11px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; padding: 4px 10px; }
+.mobile-nav__item { justify-content: flex-start !important; border: 0 !important; background: none !important; padding: 10px 12px !important; font-size: 15px !important;
+    border-radius: 6px !important; text-align: left; }
+.mobile-nav__item:hover { background: var(--row-hover) !important; }
+.mobile-nav__item.is-active { background: var(--navy) !important; color: #fff; font-weight: 600; }
+@media (max-width: 900px) {
+    .tabs { display: none; }
+    .tab-menu-btn { display: inline-flex; flex: 1 1 0; }
+    .tab-menu-btn span:last-child { overflow: hidden; text-overflow: ellipsis; }
+    .topbar__logo { font-size: 14px; }
+    .topbar__online, .conn-lost { display: none; }
+    .topbar { gap: 8px; padding: 0 10px; }
+}
