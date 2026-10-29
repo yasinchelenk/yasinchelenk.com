@@ -65,6 +65,7 @@ SMTP tanımlı değilse mail pencereleri gönderimi kapatır ve eksik ayarları 
 | Final DA | DA numaraları, kuyruk, açık DA'ler, hazırlama editörü (tahakkuk + tarife + ekstra kalemler), TCMB kuru, PDF + XLSX, armatöre mail, Invoices |
 | Account | Gönderilmiş DA'ların muhasebe kopyası (USD/EUR/TL), kontrol ve PDF |
 | History | Tüm değişiklikler, filtreler, geri alma, eski kayıtları temizleme |
+| Chartering · Market | Özet şeridi (BDI, en çok değişen segment, İstanbul VLSFO/MGO, EUA, TCMB USD/TRY), Baltic endeksleri ve TC kazançları (günlük form veya rapor paragrafını yapıştırarak), trip charter rate'leri (satır yapıştırma, segment sekmeleri, Türkiye/Akdeniz/Karadeniz filtresi, bölge kısaltma ipuçları), 1 yıllık period ve route TC, bunker fiyatları ve spread'ler, grafikler (çizgi + tablo görünümü), haftalık yorumlar, haber linkleri, yaklaşan time bar'lar |
 | Chartering · Voyage Estimator | Çok bacaklı itinerary (deniz / yükleme / tahliye / bunker / kanal / boğaz / hava), intake (DWT / hacim / draft / CP; bağlayan kısıt), bunker + ECA + EU ETS, net navlun, TCE, breakeven ve hedef TCE için navlun, sensitivity, kayıtlı estimate'ler, karşılaştırma, PDF/Excel/e-posta metni; teknik bilgiler gemi kartına kaydedilir |
 | Chartering · Laytime & Demurrage | Liman başına SOF (yapıştırarak da), NOR + turn time / GENCON 94 başlangıcı, NOR ofis saatleri, SHINC/SHEX/SHEXUU/SSHEX/SATPM/FHEX/WWD, ülke tatil takvimi (Türkiye 2025–2027 hazır, arifeler 13:00'ten), once on demurrage, ayrı / reversible / averaged, ATS/WTS despatch, time sheet (PDF/Excel), claim mektubu taslağı, claim durumu ve time bar uyarısı |
 | Chartering · Calculators | TPC/draft, FWA/DWA, SF & intake, tolerans & deadfreight, bunker stem/redelivery, bunker sapması, mesafe/ETA (saat dilimli), EU ETS, komisyon, birim çevirici, lay-up vs trading |
@@ -73,7 +74,8 @@ SMTP tanımlı değilse mail pencereleri gönderimi kapatır ve eksik ayarları 
 
 Hesap motoru tarayıcıda çalışan saf fonksiyonlardır (`public/assets/panel/chartering/engine/`), arayüzden bağımsızdır.
 Yöntem handybulk derslerini izler (bağlantılar `chartering/links.js`; metin kopyalanmaz, link verilir). Sunucu yalnızca
-girdileri/sonuçları saklar (`ch_vessel_specs`, `ch_estimates`, `ch_laytime_calcs`, `ch_holidays`) ve ekrandaki sonuçların
+girdileri/sonuçları saklar (`ch_vessel_specs`, `ch_estimates`, `ch_laytime_calcs`, `ch_holidays`, `ch_market_indices`,
+`ch_charter_rates`, `ch_tc_rates`, `ch_bunker_prices`, `ch_market_notes`) ve ekrandaki sonuçların
 PDF/Excel kopyasını üretir. Laytime'da SOF saatleri limanın yerel saatidir; hafta günleri ve tatiller o yerel tarihe göre işlenir.
 
 Kabul testleri (handybulk "M/V Apollon" voyage estimate'i, TPC/FWA/DWA, SF, ETA, EU ETS vb.):

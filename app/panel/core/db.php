@@ -89,6 +89,8 @@ function panel_migrations(): array
         105 => 'chartering_migrate_105',
         // Chartering, Faz 2: laytime hesapları ve tatil takvimi (Türkiye hazır)
         106 => 'chartering_migrate_106',
+        // Chartering, Faz 3: piyasa verileri (Baltic, charter rate, period/route TC, bunker, notlar)
+        107 => 'chartering_migrate_107',
     ];
 }
 

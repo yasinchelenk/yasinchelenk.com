@@ -18,7 +18,7 @@ const PAGES = [
     'positions' => 'Positions', 'tasks' => 'Tasks', 'transits' => 'Transits', 'vessels' => 'Vessels',
     'customs' => 'Customs', 'cash' => 'Cash', 'supply' => 'Supply', 'talepname' => 'Petitions',
     'tariffs' => 'Tariffs', 'dues' => 'Dues & Payments', 'da' => 'Final DA', 'account' => 'Account', 'gecmis' => 'History',
-    'ch-voyage' => 'Chartering · Voyage Estimator', 'ch-laytime' => 'Chartering · Laytime & Demurrage', 'ch-calc' => 'Chartering · Calculators',
+    'ch-market' => 'Chartering · Market Dashboard', 'ch-voyage' => 'Chartering · Voyage Estimator', 'ch-laytime' => 'Chartering · Laytime & Demurrage', 'ch-calc' => 'Chartering · Calculators',
 ];
 
 const USER_COLORS = [

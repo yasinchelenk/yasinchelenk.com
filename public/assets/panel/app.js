@@ -21,6 +21,7 @@ export const TABS = [
     { code: 'dues', label: 'Dues & Payments', group: 'acc', tip: 'Fener ve kılavuzluk tahakkukları, ödeme takibi' },
     { code: 'da', label: 'Final DA', group: 'acc' },
     { code: 'account', label: 'Account', group: 'acc', tip: 'Armatöre gönderilmiş DA’lerin son kontrolü ve muhasebe çıktısı' },
+    { code: 'ch-market', label: 'Market', group: 'ch', tip: 'Baltic endeksleri ve TC kazançları, charter rate’ler, period TC, bunker fiyatları, haftalık yorumlar, yaklaşan işler' },
     { code: 'ch-voyage', label: 'Voyage Estimator', group: 'ch', tip: 'Voyage estimate: intake, bunker, freight, TCE, breakeven ve sensitivity' },
     { code: 'ch-laytime', label: 'Laytime & Demurrage', group: 'ch', tip: 'SOF’tan time sheet: NOR, turn time, SHEX/SHEXUU, tatiller, once on demurrage, reversible/averaged, ATS/WTS, claim mektubu ve time bar' },
     { code: 'ch-calc', label: 'Calculators', group: 'ch', tip: 'TPC/draft, intake & SF, deadfreight, bunker, ETA, EU ETS, komisyon, birim çevirici' },
