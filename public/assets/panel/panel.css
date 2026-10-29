@@ -1198,6 +1198,26 @@ table.ch-statement tfoot th { font-weight: 700; color: var(--navy); border-top: 
 table.ch-table tr.is-done td { color: var(--dim); }
 select.tiny { padding: 1px 4px; font-size: 12px; height: auto; }
 .ch-inputs h5 { font-size: 12px; margin: 6px 0 4px; color: var(--dim); font-weight: 600; }
+dl.ch-gloss { display: grid; grid-template-columns: minmax(200px, 320px) minmax(0, 1fr); margin: 0; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+dl.ch-gloss dt, dl.ch-gloss dd { margin: 0; padding: 6px 10px; border-bottom: 1px solid var(--row-line); font-size: 13px; }
+dl.ch-gloss dd a { white-space: nowrap; font-size: 12px; }
+table.ch-wrap td { white-space: normal; }
+details.ch-lessons { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+details.ch-lessons summary { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+details.ch-lessons ul { columns: 2 360px; margin: 8px 0 2px; padding-left: 18px; font-size: 12.5px; }
+details.ch-lessons li { break-inside: avoid; margin-bottom: 3px; }
+.ch-pick { display: grid; gap: 6px; padding: 6px; width: 300px; }
+.ch-pick__list { display: grid; max-height: 320px; overflow: auto; }
+.ch-pick__item { display: flex !important; justify-content: space-between; gap: 8px; border: 0 !important; border-radius: 4px; background: none !important; text-align: left; padding: 4px 6px !important; }
+.ch-pick__item:hover { background: var(--row-hover, #d7e7f6) !important; }
+.ch-calc--wide { grid-column: 1 / -1; }
+.ch-calc--wide .ch-calc__body { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+table.ch-ds input.ch-num { width: 110px; }
+table.ch-ds tr.ch-ds__sub td { background: var(--thead-bg) !important; color: var(--navy); font-weight: 600; font-size: 12px; }
+@media (max-width: 900px) {
+    dl.ch-gloss { grid-template-columns: minmax(0, 1fr); } dl.ch-gloss dt { border-bottom: 0; padding-bottom: 0; }
+    .ch-calc--wide .ch-calc__body { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 900px) { .ch-mon__split { grid-template-columns: minmax(0, 1fr); height: auto; } .ch-mon__map { height: 60vh; } }
 @media (max-width: 1250px) { .ch-dash__grid { grid-template-columns: minmax(0, 1fr); } .ch-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 900px) { .ch-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

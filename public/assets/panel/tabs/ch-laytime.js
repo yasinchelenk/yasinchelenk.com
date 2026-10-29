@@ -57,6 +57,8 @@ export async function mount(el, ctx, param) {
     const nameIn = h('input.ch-name', { type: 'text', placeholder: 'Hesap adı (boşsa gemi / limanlar)…', on: { input: (e) => { calc.name = e.target.value; changed(); } } });
     const status = h('span.ch-status');
     const vesselList = h('datalist#ch-lay-vessels');
+    const portList = h('datalist#ch-lay-ports');
+    let portDb = [];
 
     const persist = debounce(() => {
         store.set('ch_lay_draft', calc);
@@ -176,10 +178,19 @@ export async function mount(el, ctx, param) {
                 : p.laytimeMode === 'rate' ? [fld('Rate (t/day)', numInput(p, 'rate', changed)), h('span')] : [h('span'), h('span')];
             body.replaceChildren(
                 h('div.ch-grid', { style: { '--cols': 4 } },
-                    fld('Port', textInput(p, 'name', changed)),
+                    fld('Port', textInput(p, 'name', changed, { list: 'ch-lay-ports', onCommit: (name) => {
+                        // A port from the Ports database brings its holiday calendar and time zone
+                        const db = portDb.find((x) => x.name.toLowerCase() === name.trim().toLowerCase());
+                        if (!db) return;
+                        if (db.holiday_country || db.country) p.country = db.holiday_country || db.country;
+                        if (db.tz) p.tz = db.tz;
+                        changed();
+                        draw();
+                        loadHolidays().then(compute);
+                    } })),
                     fld('Operation', selectInput(p, 'kind', { load: 'Loading', disch: 'Discharging' }, () => { changed(); left.replaceChildren(cpSection(), claimSection(), ...calc.ports.map(portSection), addPortBar()); })),
                     fld('Holiday calendar', textInput(p, 'country', () => { p.country = (p.country ?? '').toUpperCase().slice(0, 2); changed(); }, { placeholder: 'TR, RO… (empty = none)', onCommit: () => loadHolidays().then(compute) })),
-                    fld('Timezone (SOF times)', selectInput(p, 'tz', Object.fromEntries(COMMON_ZONES.map((z) => [z, z])), changed)),
+                    fld('Timezone (SOF times)', selectInput(p, 'tz', Object.fromEntries([...new Set([...COMMON_ZONES, p.tz].filter(Boolean))].map((z) => [z, z])), changed)),
                     fld('Quantity (t)', numInput(p, 'qty', changed)),
                     fld('Laytime', selectInput(p, 'laytimeMode', { rate: 'Quantity ÷ rate', fixed: 'Fixed days/hours', cqd: 'CQD (customary quick despatch)' }, () => { changed(); draw(); })),
                     ...laytimeFields,
@@ -451,7 +462,7 @@ export async function mount(el, ctx, param) {
     // ------------------------------------------------------------ Mount
 
     el.append(
-        vesselList,
+        vesselList, portList,
         h('div.toolbar.ch-toolbar',
             h('button', { type: 'button', on: { click: (e) => openSaved(e.currentTarget).catch(() => {}) } }, 'Saved ▾'),
             h('button', { type: 'button', on: { click: async () => { if (await discardOk()) replace(blankLaytime()); } } }, '+ New'),
@@ -470,6 +481,7 @@ export async function mount(el, ctx, param) {
     drawInputs();
 
     get('chartering/vessel-profiles').then((list) => vesselList.replaceChildren(...list.map((x) => h('option', { value: x.name })))).catch(() => {});
+    get('chartering/ports').then((list) => { portDb = list; portList.replaceChildren(...list.map((x) => h('option', { value: x.name }))); }).catch(() => {});
 
     const onKey = (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && el.isConnected && !el.closest('.is-hidden')) {

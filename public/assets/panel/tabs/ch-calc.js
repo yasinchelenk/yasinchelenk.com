@@ -1,6 +1,10 @@
 // CHARTERING · Calculators (spec §7): small tools, each a card with inputs on the left and live results
 // on the right. Inputs are remembered per browser; every card can be copied, or exported to PDF/Excel.
-import { h, store } from '../core/dom.js';
+import { h, fill, store, toast } from '../core/dom.js';
+import { get } from '../core/api.js';
+import { popover } from '../core/ui.js';
+import { kbTables } from '../chartering/kb.js';
+import { draftSurvey, surveyCargo } from '../chartering/engine/draftsurvey.js';
 import { parseNum, fmt, usd, kvList, exportButtons, DISCLAIMER } from '../chartering/ui.js';
 import { LESSONS } from '../chartering/links.js';
 import { tpc, draftChangeCm, fwa, dockWater, toTargetDraft } from '../chartering/engine/tpc.js';
@@ -39,7 +43,7 @@ const CARDS = [
         },
     },
     {
-        id: 'fwa', needs: ['disp', 'tpc'], title: 'FWA / DWA & dock water', cat: 'teal', links: [LESSONS.tpc, LESSONS.deadweight],
+        id: 'fwa', needs: ['disp', 'tpc'], actions: (v, apply) => [pickButton('Density from port ▾', densityPicker(apply))], title: 'FWA / DWA & dock water', cat: 'teal', links: [LESSONS.tpc, LESSONS.deadweight],
         desc: 'Tatlı veya acı suda gemi aynı deplasmanda daha fazla batar. FWA = Δ ÷ (4 × TPC); DWA = FWA × (1025 − ρ) ÷ 25. Yükleme limanında summer draft’ı DWA kadar aşabilir, ek yük = DWA (cm) × TPC.',
         fields: [['disp', 'Summer displacement Δ (t)'], ['tpc', 'TPC (t/cm)', { small: true }], ['draft', 'Summer draft (m)', { small: true }],
             ['rhoDock', 'Dock water density', { small: true, def: 1.015, hint: '1.000 – 1.025' }]],
@@ -55,7 +59,7 @@ const CARDS = [
         },
     },
     {
-        id: 'intake', needs: ['dwt'], title: 'Stowage factor & cargo intake', cat: 'green', links: [LESSONS.stowageFactor, LESSONS.cargoQuantity],
+        id: 'intake', needs: ['dwt'], actions: (v, apply) => [pickButton('SF from KB ▾', sfPicker(apply))], title: 'Stowage factor & cargo intake', cat: 'green', links: [LESSONS.stowageFactor, LESSONS.cargoQuantity],
         desc: 'Intake; DWCC (DWT − bunker − FW − stores − constant), hacim (grain/bale ÷ SF), draft kısıtı (eksik cm × TPC) ve CP maksimumunun en küçüğüdür. Hangisinin bağladığı gösterilir.',
         fields: [['sf', 'Stowage factor', { small: true }], ['sfUnit', 'SF unit', { type: 'select', options: { 'cbm/mt': 'cbm/mt', 'cuft/lt': 'cuft/lt' }, def: 'cbm/mt' }],
             ['dwt', 'DWT (t)', { sub: 'Vessel' }], ['rob', 'Bunkers ROB (t)'], ['fw', 'FW + stores (t)'], ['constants', 'Constant (t)'],
@@ -108,7 +112,7 @@ const CARDS = [
         },
     },
     {
-        id: 'deviation', needs: ['qty', 'here', 'there'], title: 'Bunker deviation & extra bunkers', cat: 'brown', links: [LESSONS.bunkerDeviation],
+        id: 'deviation', needs: ['qty', 'here', 'there'], actions: (v, apply) => [pickButton('Prices from Market ▾', pricePicker(apply))], title: 'Bunker deviation & extra bunkers', cat: 'brown', links: [LESSONS.bunkerDeviation],
         desc: 'Ucuz bunker için sapma; fiyat farkı × miktar, sapma mesafesinin yakıtı + kaybedilen gün × günlük değer + liman masraflarından büyükse değer. DWT-limited seferde fazladan taşınan her ton bunker bir ton yük kaybıdır.',
         fields: [['qty', 'Stem (t)'], ['here', 'Price on route (USD/mt)'], ['there', 'Price at deviation port'], ['nm', 'Extra distance (nm)'], ['kn', 'Speed (kn)', { small: true }],
             ['cons', 'Consumption (t/day)', { small: true }], ['hours', 'Extra port time (h)', { small: true }], ['daily', 'Daily value / TCE (USD)'], ['port', 'Port & agency (USD)'],
@@ -145,7 +149,7 @@ const CARDS = [
         },
     },
     {
-        id: 'ets', needs: ['eua'], title: 'EU ETS cost', cat: 'green', links: [LESSONS.emissions],
+        id: 'ets', needs: ['eua'], actions: (v, apply) => [h('button.tiny', { type: 'button', title: 'Son EUA fiyatı (Market) ve TCMB EUR/USD', on: { click: () => euaFromMarket(apply) } }, 'EUA from Market')], title: 'EU ETS cost', cat: 'green', links: [LESSONS.emissions],
         desc: 'CO₂ = yakıt × Cf. AB içi sefer %100, AB’ye giriş/çıkış %50, AB limanında rıhtımda %100; yıl kademesi 2024 %40, 2025 %70, 2026+ %100. Maliyet = kapsanan CO₂ × EUA fiyatı. Katsayılar varsayılandır — mevzuattan teyit edin.',
         fields: [['g1', 'Fuel 1', { type: 'select', options: { VLSFO: 'VLSFO (LFO)', HSFO: 'HSFO (HFO)', MGO: 'MGO/MDO', LNG: 'LNG' }, def: 'VLSFO' }], ['t1', 'Tons'],
             ['g2', 'Fuel 2', { type: 'select', options: { VLSFO: 'VLSFO (LFO)', HSFO: 'HSFO (HFO)', MGO: 'MGO/MDO', LNG: 'LNG' }, def: 'MGO' }], ['t2', 'Tons'],
@@ -215,6 +219,146 @@ function unitOptions(group) {
     return Object.fromEntries((UNIT_GROUPS[group] ?? []).map((u) => [u, UNIT_LABELS[u]]));
 }
 
+// ---------------------------------------------------------------- Values from the KB, the port database and Market
+
+/** Header button opening a popover built by `build(close)` (async). */
+function pickButton(label, build) {
+    const btn = h('button.tiny', { type: 'button', on: { click: async () => {
+        let pop;
+        const content = await build(() => pop.close()).catch(() => null);
+        if (content) pop = popover(btn, h('div.ch-pick', content), { align: 'right' });
+    } } }, label);
+    return btn;
+}
+
+const sfPicker = (apply) => async (close) => {
+    const { sf } = await kbTables();
+    return [h('strong', 'Stowage factor (Knowledge Base)'), h('div.ch-pick__list', sf.filter((r) => Number(r.sf) > 0).map((r) => h('button.ch-pick__item', { type: 'button',
+        on: { click: () => { apply({ sf: Number(r.sf), sfUnit: 'cbm/mt' }); close(); toast(`${r.cargo}: SF ${fmt(r.sf, 2)} cbm/mt (yaklaşık — teyit edin)`); } } },
+        h('span', r.cargo), h('b', fmt(r.sf, 2)))))];
+};
+
+const densityPicker = (apply) => async (close) => {
+    const ports = (await get('chartering/ports')).filter((p) => p.density);
+    if (!ports.length) return [h('p.dim', 'Ports sekmesinde yoğunluğu girilmiş liman yok.')];
+    return [h('strong', 'Water density (Ports)'), h('div.ch-pick__list', ports.map((p) => h('button.ch-pick__item', { type: 'button',
+        on: { click: () => { apply({ rhoDock: Number(p.density) }); close(); } } }, h('span', p.name), h('b', fmt(p.density, 3)))))];
+};
+
+const pricePicker = (apply) => async (close) => {
+    const { bunkers } = await get('chartering/market/latest-bunkers');
+    if (!bunkers.length) return [h('p.dim', 'Market’te bunker fiyatı yok.')];
+    const grade = h('select', ['vlsfo', 'hsfo', 'mgo'].map((g) => h('option', { value: g }, g.toUpperCase())));
+    const portSel = () => h('select', bunkers.map((b) => h('option', { value: b.port }, `${b.port} (${b.date})`)));
+    const here = portSel();
+    const there = portSel();
+    if (bunkers.length > 1) there.selectedIndex = 1;
+    const price = (port) => Number(bunkers.find((b) => b.port === port)?.[grade.value]) || null;
+    return [h('strong', 'Bunker prices (Market, latest)'),
+        h('label.ch-field', h('span.ch-field__label', 'Grade'), grade), h('label.ch-field', h('span.ch-field__label', 'On route'), here), h('label.ch-field', h('span.ch-field__label', 'Deviation port'), there),
+        h('button.primary.tiny', { type: 'button', on: { click: () => {
+            const a = price(here.value);
+            const b = price(there.value);
+            if (!a || !b) { toast('Seçilen limanda bu grade için fiyat yok.', 'error'); return; }
+            apply({ here: a, there: b });
+            close();
+        } } }, 'Use')];
+};
+
+async function euaFromMarket(apply) {
+    const m = await get('chartering/market/latest-bunkers');
+    const patch = {};
+    if (m.eua?.value) patch.eua = Number(m.eua.value);
+    if (m.fx?.eur_usd) patch.eurUsd = Number(m.fx.eur_usd);
+    if (!Object.keys(patch).length) { toast('Market’te EUA fiyatı yok.', 'error'); return; }
+    apply(patch);
+    toast(`EUA ${m.eua ? `${fmt(m.eua.value, 2)} (${m.eua.date})` : '—'}${m.fx ? ` · EUR/USD ${fmt(m.fx.eur_usd, 4)}` : ''}`);
+}
+
+// ---------------------------------------------------------------- Draft survey (initial and final side by side)
+
+const DS_COMMON = [['lbp', 'LBP (m)'], ['fwdDist', 'Fwd marks aft of FP (m)'], ['midDist', 'Mid marks aft of midships (m)'], ['aftDist', 'Aft marks fwd of AP (m)'],
+    ['keel', 'Keel thickness (m)', 'hydrostatics moulded'], ['tableDensity', 'Table density', 'usually 1.025'], ['lightship', 'Light ship (t)', 'for the constant']];
+const DS_ROWS = [
+    ['Draft readings (m)', [['fp', 'Fwd port'], ['fs', 'Fwd stbd'], ['mp', 'Mid port'], ['ms', 'Mid stbd'], ['ap', 'Aft port'], ['as', 'Aft stbd'], ['rho', 'Dock water density']]],
+    ['Hydrostatics — row below the quarter mean', [['l_draft', 'Draft (m)'], ['l_displ', 'Displacement (t)'], ['l_tpc', 'TPC'], ['l_lcf', 'LCF (m)']]],
+    ['Hydrostatics — row above', [['u_draft', 'Draft (m)'], ['u_displ', 'Displacement (t)'], ['u_tpc', 'TPC'], ['u_lcf', 'LCF (m)'], ['mtcP', 'MTC at QM + 0.5 m'], ['mtcM', 'MTC at QM − 0.5 m']]],
+    ['Deductibles (t)', [['ballast', 'Ballast'], ['fw', 'Fresh water'], ['hfo', 'Fuel oil'], ['mgo', 'Gas oil'], ['lube', 'Lube oil'], ['other', 'Other']]],
+];
+
+function draftCard() {
+    const key = 'ch_calc_draft';
+    const v = { tableDensity: 1.025, lcfRef: 'mid', mode: 'load', initial: {}, final: {}, ...store.get(key, {}) };
+    const save = () => store.set(key, v);
+    const results = h('div');
+    const num = (obj, k) => h('input.ch-num', { type: 'text', inputmode: 'decimal', value: obj[k] === null || obj[k] === undefined ? '' : fmt(obj[k], null), autocomplete: 'off',
+        on: { input: (e) => { obj[k] = parseNum(e.target.value, true); save(); update(); }, focus: (e) => e.target.select() } });
+    const survey = (s) => draftSurvey({
+        lbp: v.lbp, keel: v.keel, lcfRef: v.lcfRef, tableDensity: v.tableDensity, dockDensity: s.rho,
+        fwd: { p: s.fp, s: s.fs, dist: v.fwdDist }, mid: { p: s.mp, s: s.ms, dist: v.midDist }, aft: { p: s.ap, s: s.as, dist: v.aftDist },
+        lower: { draft: s.l_draft, displ: s.l_displ, tpc: s.l_tpc, lcf: s.l_lcf }, upper: { draft: s.u_draft, displ: s.u_displ, tpc: s.u_tpc, lcf: s.u_lcf },
+        mtcPlus: s.mtcP, mtcMinus: s.mtcM, deductibles: { ballast: s.ballast, fw: s.fw, hfo: s.hfo, mgo: s.mgo, lube: s.lube, other: s.other },
+    });
+    const ready = (s) => [s.fp ?? s.fs, s.mp ?? s.ms, s.ap ?? s.as].every((x) => x !== null && x !== undefined) && v.lbp;
+    let lines = [];
+
+    function update() {
+        const a = ready(v.initial) ? survey(v.initial) : null;
+        const b = ready(v.final) ? survey(v.final) : null;
+        const cell = (r, k, d = 3) => (r && Number.isFinite(r[k]) ? fmt(r[k], d) : '—');
+        lines = [
+            ['Draft fwd / aft at perpendiculars (m)', (r) => (r && Number.isFinite(r.fp) ? `${fmt(r.fp, 3)} / ${fmt(r.ap, 3)}` : '—')],
+            ['Draft midships corrected (m)', (r) => cell(r, 'mp')],
+            ['True trim (m, + by stern)', (r) => cell(r, 'trueTrim')],
+            ['Hog (−) / sag (+) (m)', (r) => cell(r, 'deflection')],
+            ['Quarter mean draft (m)', (r) => cell(r, 'qm')],
+            ['Displacement from table (t)', (r) => cell(r, 'displ', 1)],
+            ['1st trim correction (t)', (r) => cell(r, 'ftc', 1)],
+            ['2nd trim correction (t)', (r) => cell(r, 'stc', 1)],
+            ['Density correction (t)', (r) => cell(r, 'densityCorr', 1)],
+            ['Corrected displacement (t)', (r) => cell(r, 'displacement', 1)],
+            ['Deductibles (t)', (r) => cell(r, 'deductibles', 1)],
+            ['Net displacement (t)', (r) => cell(r, 'net', 1)],
+        ].map(([label, f]) => [label, f(a), f(b)]);
+        const c = surveyCargo(a?.net !== undefined ? a : null, b?.net !== undefined ? b : null, { lightship: v.lightship, mode: v.mode });
+        const warn = [a, b].filter(Boolean).find((r) => r.invalid || r.noHydro);
+        fill(results,
+            warn ? h('div.notice.warn', warn.invalid ? 'LBP ve işaret mesafelerini kontrol edin.' : 'Hidrostatik tablodan en az bir satır (draft + deplasman) girin.') : null,
+            h('div.ch-scroll', h('table.ch-table', h('thead', h('tr', h('th', ''), h('th.r', 'Initial'), h('th.r', 'Final'))),
+                h('tbody', lines.map(([l, x, y]) => h('tr', h('td', l), h('td.r', x), h('td.r', y)))))),
+            kvList([
+                [v.mode === 'load' ? 'Cargo loaded' : 'Cargo discharged', c ? `${fmt(c.cargo, 1)} t` : '— (initial and final survey)', { strong: true }],
+                c?.constant !== null && c?.constant !== undefined ? ['Constant', `${fmt(c.constant, 1)} t`, { hint: 'Net displacement at the empty survey less light ship' }] : null,
+            ]));
+    }
+
+    const build = () => {
+        const c = lines.length ? lines : [];
+        const text = ['Draft survey', '', ...c.map(([l, x, y]) => `${l}: ${x} | ${y}`), '', results.querySelector('dl')?.innerText ?? '', '', DISCLAIMER].join('\n');
+        return { text, report: { title: 'Draft survey', file: 'Calculator - Draft survey', subtitle: 'Initial and final survey', note: DISCLAIMER,
+            blocks: [{ head: ['', 'Initial', 'Final'], align: ['L', 'R', 'R'], rows: c }, { kv: [...results.querySelectorAll('dl dt')].map((dt) => [dt.textContent, dt.nextElementSibling?.textContent ?? '']) }] } };
+    };
+
+    const select = (k, opts) => h('select', { on: { change: (e) => { v[k] = e.target.value; save(); update(); } } }, Object.entries(opts).map(([val, t]) => h('option', { value: val, selected: v[k] === val }, t)));
+    const inputs = h('div',
+        h('div.ch-grid', { style: { '--cols': 4 } },
+            h('label.ch-field', h('span.ch-field__label', 'Operation'), select('mode', { load: 'Loading (final − initial)', disch: 'Discharging (initial − final)' })),
+            h('label.ch-field', h('span.ch-field__label', 'LCF given'), select('lcfRef', { mid: 'from midships (+ aft)', ap: 'from AP (forward)' })),
+            ...DS_COMMON.map(([k, label, hint]) => h('label.ch-field', h('span.ch-field__label', label), num(v, k), hint ? h('span.ch-field__hint', hint) : null))),
+        h('div.ch-scroll', h('table.ch-table.ch-edit.ch-ds', h('thead', h('tr', h('th', ''), h('th', 'Initial'), h('th', 'Final'))),
+            h('tbody', DS_ROWS.flatMap(([title, rows]) => [h('tr.ch-ds__sub', h('td', { colspan: 3 }, title)),
+                ...rows.map(([k, label]) => h('tr', h('td', label), h('td', num(v.initial, k)), h('td', num(v.final, k))))])))));
+    update();
+    const art = h('article.ch-calc.ch-calc--wide.cat-blue', { id: 'calc-draft' },
+        h('header.ch-calc__head', h('h4', 'Draft survey'), h('span.spacer'),
+            h('button.tiny.ghost', { type: 'button', title: 'Girdileri temizle', on: { click: () => { store.del(key); art.replaceWith(draftCard()); } } }, 'Clear'),
+            exportButtons(build, { small: true })),
+        h('p.ch-calc__desc', 'Baş/orta/kıç (iskele-sancak) okumaları → perpendicular düzeltmeleri → quarter mean ((F + A + 6M) ÷ 8) → hidrostatik tablodan deplasman (iki satır arası doğrusal) → 1. trim düzeltmesi (trim × LCF × TPC × 100 ÷ LBP) ve 2. trim düzeltmesi (trim² × 50 × ΔMTC ÷ LBP) → yoğunluk → düşülecekler. İlk ve son survey farkı yüktür. ',
+            h('a', { href: LESSONS.draftSurvey[0], target: '_blank', rel: 'noopener' }, LESSONS.draftSurvey[1])),
+        h('div.ch-calc__body', inputs, results));
+    return art;
+}
+
 function card(def) {
     const key = 'ch_calc_' + def.id;
     const v = Object.fromEntries(def.fields.map(([k, , o = {}]) => [k, o.def ?? null]));
@@ -269,10 +413,12 @@ function card(def) {
             blocks: [{ title: 'Inputs', kv: inputRows }, { title: 'Results', kv: rows.map(([a, b]) => [a, b]) }] } };
     };
 
+    const apply = (patch) => { Object.assign(v, patch); save(); drawInputs(); update(); };
+
     drawInputs();
     update();
     return h('article.ch-calc.cat-' + def.cat, { id: 'calc-' + def.id },
-        h('header.ch-calc__head', h('h4', def.title), h('span.spacer'),
+        h('header.ch-calc__head', h('h4', def.title), h('span.spacer'), def.actions?.(v, apply) ?? null,
             h('button.tiny.ghost', { type: 'button', title: 'Girdileri temizle', on: { click: () => {
                 for (const [k, , o = {}] of def.fields) v[k] = o.def ?? null;
                 save();
@@ -287,9 +433,9 @@ function card(def) {
 export async function mount(el) {
     el.lang = 'en'; // English UI: uppercase headings must not turn i into İ
     const jump = h('select', { on: { change: (e) => { el.querySelector('#calc-' + e.target.value)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); e.target.value = ''; } } },
-        h('option', { value: '' }, 'Jump to calculator…'), CARDS.map((c) => h('option', { value: c.id }, c.title)));
+        h('option', { value: '' }, 'Jump to calculator…'), CARDS.map((c) => h('option', { value: c.id }, c.title)), h('option', { value: 'draft' }, 'Draft survey'));
     el.append(
         h('div.toolbar', h('strong', 'Calculators'), jump, h('span.count', DISCLAIMER)),
-        h('div.ch-calcs', CARDS.map(card)),
+        h('div.ch-calcs', CARDS.map(card), draftCard()),
     );
 }

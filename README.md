@@ -86,7 +86,12 @@ Chartering değişiklikleri, panel kullanıcıları listelenmez). Kullanıcı y�
 | Fixtures | Recap e-postasından fixture kaydı (voyage / TCT / period / COA; tahmin edilen alanlar sarı), FX-YYYY-NNN referansı, durum akışı (negotiating → on subs → fixed → … → closed), laycan / fixture tarihine göre post-fixture kontrol listesi (sorumlu, vade, not, belge linki), ETA notice tarihleri, navlun faturası özeti, belge şablonları (freight invoice, voyage instructions, ETA notice, NOR, demurrage claim, LOI checklist; düzenlenebilir, PDF/kopya), Deadlines (laycan, cancelling, notice, navlun vadesi, görevler, time bar'lar, hire ödemeleri — Market'teki "Upcoming" da buradan); Voyage Estimator'daki "→ Fixture" ile estimate'ten açılır, fixture'dan Laytime'a ön dolu geçilir |
 | Laytime & Demurrage | Liman başına SOF (yapıştırarak da), NOR + turn time / GENCON 94 başlangıcı, NOR ofis saatleri, SHINC/SHEX/SHEXUU/SSHEX/SATPM/FHEX/WWD, ülke tatil takvimi (Türkiye 2025–2027 hazır, arifeler 13:00'ten), once on demurrage, ayrı / reversible / averaged, ATS/WTS despatch, time sheet (PDF/Excel), claim mektubu taslağı, claim durumu ve time bar uyarısı |
 | TC Desk | Hire statement (dakika bazında pro rata, off-hire'lar, BOD/BOR, C/V/E, ILOHC, ballast bonus, address commission, ödemeler; brokerage ayrıca bilgi olarak), 15/30 günlük hire takvimi ve sıradaki ödeme (Deadlines'a düşer), off-hire hesabı, speed & consumption claim (noon report yapıştırma, iyi hava filtresi BF/DSS, hız ve tüketim toleransları, mesafeyle ekstrapolasyon, isteğe bağlı az tüketim mahsubu) |
-| Calculators | TPC/draft, FWA/DWA, SF & intake, tolerans & deadfreight, bunker stem/redelivery, bunker sapması, mesafe/ETA (saat dilimli), EU ETS, komisyon, birim çevirici, lay-up vs trading |
+| Calculators | TPC/draft, FWA/DWA (liman yoğunluğu Ports'tan), SF & intake (SF Knowledge Base'den), draft survey (ilk/son survey yan yana: perpendicular düzeltmeleri, quarter mean, hidrostatik ara değer, 1. ve 2. trim düzeltmesi, yoğunluk, düşülecekler, yük ve constant), tolerans & deadfreight, bunker stem/redelivery, bunker sapması (fiyatlar Market'ten), mesafe/ETA (saat dilimli), EU ETS (EUA ve EUR/USD Market'ten), komisyon, birim çevirici, lay-up vs trading |
+| Ports | Liman veritabanı (UN/LOCODE, ülke, saat dilimi ve yerel saat, koordinat, max draft/LOA/beam/air draft, su yoğunluğu, rıhtımlar, NOR kuralları, tatil takvimi, masraf notları, acente; başlangıçta 48 liman, limitler boş — elle girilir) ve mesafe matrisi (düz çizgi kontrolüyle). Laytime'da liman seçilince tatil takvimi ve saat dilimi, Position Monitor haritası ve laycan aracı buradan |
+| Knowledge | Aranabilir kısaltma sözlüğü (kendi açıklamalarımız + handybulk linki), bölge kısaltmaları, CP formları, gemi boyutları ve stowage factor tabloları (düzenlenebilir, "Reset to default"), handybulk ders indeksi (site haritasından, konulara göre ~870 bağlantı; yalnızca link) |
+| Contacts | Owners, operators, charterers, brokers, agents, surveyors, bunker suppliers; firma adına göre ilgili fixture'lar |
+
+Klavye: `/` sekmedeki aramaya gider, `N` sekmenin "+ …" (yeni kayıt) düğmesine basar.
 
 ### Position Monitor — canlı AIS kurulumu
 
@@ -108,7 +113,7 @@ konumlar, ekranları göstermek için) / kapalı olarak değiştirebilir. Ücret
 Hesap motoru tarayıcıda çalışan saf fonksiyonlardır (`public/assets/panel/chartering/engine/`), arayüzden bağımsızdır.
 Yöntem handybulk derslerini izler (bağlantılar `chartering/links.js`; metin kopyalanmaz, link verilir). Sunucu yalnızca
 girdileri/sonuçları saklar (`ch_vessel_profiles`, `ch_estimates`, `ch_laytime_calcs`, `ch_holidays`, `ch_market_indices`,
-`ch_charter_rates`, `ch_tc_rates`, `ch_bunker_prices`, `ch_market_notes`, `ch_tonnage`, `ch_cargo_orders`, `ch_distances`, `ch_watchlist`, `ch_ais_positions`, `ch_ais_runs`, `ch_fixtures`, `ch_fixture_tasks`, `ch_tc_calcs`, `ch_templates`) ve ekrandaki sonuçların
+`ch_charter_rates`, `ch_tc_rates`, `ch_bunker_prices`, `ch_market_notes`, `ch_tonnage`, `ch_cargo_orders`, `ch_distances`, `ch_watchlist`, `ch_ais_positions`, `ch_ais_runs`, `ch_fixtures`, `ch_fixture_tasks`, `ch_tc_calcs`, `ch_templates`, `ch_ports`, `ch_contacts`, `ch_kb`) ve ekrandaki sonuçların
 PDF/Excel kopyasını üretir. Laytime'da SOF saatleri limanın yerel saatidir; hafta günleri ve tatiller o yerel tarihe göre işlenir.
 
 Kabul testleri (handybulk "M/V Apollon" voyage estimate'i, TPC/FWA/DWA, SF, ETA, EU ETS vb.):

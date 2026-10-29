@@ -15,7 +15,10 @@ export const TABS = [
     { code: 'ch-fixtures', label: 'Fixtures', tip: 'Fixture register from recaps, post-fixture checklist, deadlines, document templates' },
     { code: 'ch-laytime', label: 'Laytime & Demurrage', tip: 'Time sheets from the SOF, demurrage / despatch, claim letter' },
     { code: 'ch-tc', label: 'TC Desk', tip: 'Hire statement and schedule, off-hire, speed & consumption claim' },
-    { code: 'ch-calc', label: 'Calculators', tip: 'TPC/draft, intake & SF, deadfreight, bunkers, ETA, EU ETS, commissions' },
+    { code: 'ch-calc', label: 'Calculators', tip: 'TPC/draft, intake & SF, draft survey, deadfreight, bunkers, ETA, EU ETS, commissions' },
+    { code: 'ch-ports', label: 'Ports', tip: 'Port database (limits, density, time zone, NOR rules, agent) and the distance matrix' },
+    { code: 'ch-kb', label: 'Knowledge', tip: 'Glossary, regions, CP forms, vessel sizes, stowage factors, handybulk lessons' },
+    { code: 'ch-contacts', label: 'Contacts', tip: 'Owners, operators, charterers, brokers, agents, surveyors, bunker suppliers' },
 ];
 const BRAND = { ad: 'Chartering Desk', kisa: 'Chartering Desk', footer: 'yasinchelenk.com', logo: null };
 
@@ -143,6 +146,21 @@ async function show(code, param) {
         body.replaceChildren(h('div.empty-state', 'Page could not be loaded: ' + e.message));
     }
 }
+
+// Keyboard (spec §14): "/" focuses the tab's search box, "N" presses its "+ …" (new record) button
+document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || !current || document.querySelector('.modal-back')) return;
+    if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+    const body = mounted.get(current)?.body;
+    if (!body) return;
+    if (e.key === '/') {
+        const s = body.querySelector('input[type=search]');
+        if (s) { e.preventDefault(); s.focus(); s.select(); }
+    } else if (e.key === 'n' || e.key === 'N') {
+        const b = [...body.querySelectorAll('button')].find((x) => /^\+\s?\S/.test(x.textContent.trim()) && x.offsetParent);
+        if (b) { e.preventDefault(); b.click(); }
+    }
+});
 
 window.addEventListener('ops:oturum-dustu', () => {
     live.stop();

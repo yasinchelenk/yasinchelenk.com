@@ -7,6 +7,7 @@ import { estimate, sensitivity, blankEstimate, TERMS_FACTORS, SEA_MODES, STOP_TY
 import { apollon } from '../chartering/engine/examples.js';
 import { numInput, textInput, selectInput, checkInput, fld, section, kvList, fmt, usd, cell, exportButtons, textTable, DISCLAIMER } from '../chartering/ui.js';
 import { LESSONS } from '../chartering/links.js';
+import { kbTables, sfFor } from '../chartering/kb.js';
 
 const TYPE_CAT = { sea: 'blue', load: 'green', disch: 'orange', bunker: 'teal', canal: 'purple', strait: 'indigo', weather: 'gray', other: 'brown' };
 const TYPE_NAME = { sea: 'Sea', load: 'Load', disch: 'Disch', ...STOP_TYPES };
@@ -139,7 +140,15 @@ export async function mount(el, ctx, param) {
                 fld('Cargo', textInput(c, 'name', changed, { placeholder: 'e.g. Wheat in bulk' })),
                 f('Quantity (t)', 'qty'), f('Tolerance %', 'tolPct', { small: true }),
                 fld('Option', selectInput(c, 'option', { MOLOO: 'MOLOO (owners)', MOLCHOPT: 'MOLCHOPT (charterers)' }, changed)),
-                fld('Stowage factor', h('span.ch-inline', numInput(c, 'sf', changed, { small: true }), selectInput(c, 'sfUnit', ['cbm/mt', 'cuft/lt'], changed))),
+                fld('Stowage factor', h('span.ch-inline', numInput(c, 'sf', changed, { small: true }), selectInput(c, 'sfUnit', ['cbm/mt', 'cuft/lt'], changed),
+                    h('button.tiny', { type: 'button', title: 'Kargo adına göre Knowledge Base SF tablosundan', on: { click: async () => {
+                        const hit = sfFor((await kbTables()).sf, c.name);
+                        if (!hit) { toast(c.name ? `“${c.name}” KB SF tablosunda yok — Knowledge Base’e ekleyin.` : 'Önce kargo adını yazın.', 'error'); return; }
+                        Object.assign(c, { sf: Number(hit.sf), sfUnit: 'cbm/mt' });
+                        draw();
+                        changed();
+                        toast(`${hit.cargo}: SF ${fmt(hit.sf, 2)} cbm/mt (yaklaşık — teyit edin)`);
+                    } } }, 'KB'))),
                 h('div.ch-field', h('span.ch-field__label', { title: 'İşaretli değilse grain kapasitesi kullanılır' }, 'Capacity'), checkInput(c, 'useBale', 'use bale', changed)),
                 f('Broken stowage %', 'brokenStowagePct', { small: true }),
                 fld('Freight', selectInput(c, 'freightType', { pt: 'USD per ton', lumpsum: 'Lumpsum' }, () => { changed(); draw(); })),

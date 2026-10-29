@@ -394,7 +394,7 @@ export async function mount(el, ctx) {
         const rows = data.distances.filter((d) => matchesSearch(d, ['from_port', 'to_port', 'via']));
         return h('div.ch-board__view',
             h('div.toolbar', searchInput(), h('span.count', `${rows.length} port pairs`)),
-            h('p.dim', 'Mesafeler iki yönde de kullanılır. Otomatik büyük daire tahmini yok (kanal ve kıyıları hesaba katmaz); kendi tablolarınızdan / BIMCO / Netpas’tan girin. Phase 7’de liman veritabanıyla genişleyecek.'),
+            h('p.dim', 'Mesafeler iki yönde de kullanılır. Otomatik deniz rotası hesabı yok; kendi tablolarınızdan / BIMCO / Netpas’tan girin. Liman bilgileri ve düz çizgi kontrolü Ports sekmesinde.'),
             canEdit ? h('div.toolbar', from, to, nm, via, h('button', { type: 'button', on: { click: async () => {
                 await post('chartering/distances/set', { from_port: from.value, to_port: to.value, nm: parseNum(nm.value), via: via.value || null });
                 load();

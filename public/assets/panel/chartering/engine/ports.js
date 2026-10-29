@@ -1,5 +1,5 @@
 // Starter list of ports and waiting areas for the map layer and the laycan tool.
-// Coordinates are approximate (port area, not a berth); Phase 7 replaces this with an editable port database.
+// Coordinates are approximate (port area, not a berth). Fallback only: the Monitor reads the editable port database (Ports tab).
 export const PORTS = [
     ['Istanbul (Ambarlı)', 'TR', 40.966, 28.690], ['Haydarpaşa', 'TR', 40.996, 29.016], ['Izmit / Kocaeli', 'TR', 40.760, 29.920], ['Derince', 'TR', 40.752, 29.830],
     ['Gemlik', 'TR', 40.430, 29.100], ['Bandırma', 'TR', 40.355, 27.970], ['Tekirdağ', 'TR', 40.968, 27.510], ['Karabiga', 'TR', 40.402, 27.305], ['Çanakkale', 'TR', 40.150, 26.405],

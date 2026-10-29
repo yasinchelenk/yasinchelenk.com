@@ -51,6 +51,9 @@ function loadLeaflet() {
 export async function mount(el, ctx) {
     el.lang = 'en';
     const canEdit = ctx.allowed('ch-monitor');
+    // Ports from the Ports database (those with coordinates); the starter list if it cannot be read
+    const dbPorts = await get('chartering/ports').then((l) => l.filter((p) => p.lat !== null && p.lon !== null)).catch(() => []);
+    const PORT_LIST = dbPorts.length ? dbPorts : PORTS;
     const admin = ctx.user.role === 'yonetici';
     let rows = [];
     let status = null;
@@ -263,7 +266,7 @@ export async function mount(el, ctx) {
         const sea = L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', { maxZoom: 18, attribution: 'Seamarks © OpenSeaMap' });
         shipLayer = L.layerGroup().addTo(map);
         trackLayer = L.layerGroup().addTo(map);
-        const portLayer = L.layerGroup(PORTS.map((p) => L.circleMarker([p.lat, p.lon], { radius: 3, color: '#12365c', weight: 1, fillOpacity: 0.7 }).bindTooltip(`${p.name} (${p.country}) — approx.`)));
+        const portLayer = L.layerGroup(PORT_LIST.map((p) => L.circleMarker([p.lat, p.lon], { radius: 3, color: '#12365c', weight: 1, fillOpacity: 0.7 }).bindTooltip(`${p.name} (${p.country}) — approx.`)));
         const anchLayer = L.layerGroup(ANCHORAGES.map((a) => L.circle([a.lat, a.lon], { radius: a.radiusNm * 1852, color: '#a86e12', weight: 1, dashArray: '4 4', fillOpacity: 0.06 }).bindTooltip(`${a.name} — approx.`)));
         portLayer.addTo(map);
         anchLayer.addTo(map);
@@ -353,10 +356,10 @@ export async function mount(el, ctx) {
         };
         const num = (k, small = true) => h('input.ch-num', { type: 'text', value: tool[k] ?? '', placeholder: k === 'nm' ? 'auto (GC × factor)' : '', on: { input: (e) => { tool[k] = parseNum(e.target.value, small); calc(); } } });
         const portSel = h('select', { on: { change: (e) => {
-            const p = PORTS.find((x) => x.name === e.target.value);
+            const p = PORT_LIST.find((x) => x.name === e.target.value);
             if (p) Object.assign(tool, { port: p.name, lat: p.lat, lon: p.lon, nm: null });
             drawTool(panel, L, mapEl);
-        } } }, h('option', { value: '' }, '— port (approx.) —'), PORTS.map((p) => h('option', { value: p.name, selected: tool.port === p.name }, `${p.name} (${p.country})`)));
+        } } }, h('option', { value: '' }, '— port (approx.) —'), PORT_LIST.map((p) => h('option', { value: p.name, selected: tool.port === p.name }, `${p.name} (${p.country})`)));
         panel.replaceChildren(
             h('h4', 'Can she make the laycan?'),
             h('label.ch-field', h('span.ch-field__label', 'Vessel'), h('select', { on: { change: (e) => { tool.watchId = +e.target.value; tool.forId = null; drawTool(panel, L, mapEl); } } },

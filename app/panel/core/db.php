@@ -99,6 +99,8 @@ function panel_migrations(): array
         110 => 'chartering_migrate_110',
         // Chartering, Faz 6: fixture'lar, post-fixture görevleri, TC hesapları, belge şablonları
         111 => 'chartering_migrate_111',
+        // Chartering, Faz 7: liman veritabanı, kişiler, Knowledge Base tabloları
+        112 => 'chartering_migrate_112',
     ];
 }
 
