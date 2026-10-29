@@ -68,6 +68,43 @@ export function checkInput(obj, key, label, onChange) {
     return h('label.check', h('input', { type: 'checkbox', checked: !!obj[key], on: { change: (e) => { obj[key] = e.target.checked; onChange?.(); } } }), label);
 }
 
+/**
+ * Form over a field spec: [key, label, type, options|{span}] with type text | num | small (decimal) | int | date | bool | select.
+ * Writes straight into obj. `guessed` keys are highlighted for checking (parsed / assumed values).
+ */
+export function specForm(obj, spec, { guessed = [], cols = 4, onChange } = {}) {
+    const changed = () => onChange?.();
+    return h('div.ch-grid', { style: { '--cols': cols } }, spec.map(([k, label, type, extra]) => {
+        const span = extra && !Array.isArray(extra) && extra.span;
+        let control;
+        if (type === 'select') {
+            const entries = Array.isArray(extra) ? extra.map((x) => [x, x || '—']) : Object.entries(extra ?? {});
+            control = h('select', { on: { change: (e) => { obj[k] = e.target.value || null; changed(); } } }, entries.map(([v, l]) => h('option', { value: v, selected: String(obj[k] ?? '') === String(v) }, l)));
+        } else if (type === 'bool') {
+            control = h('label.check', h('input', { type: 'checkbox', checked: !!+obj[k], on: { change: (e) => { obj[k] = e.target.checked ? 1 : 0; changed(); } } }), 'yes');
+        } else if (type === 'date') {
+            control = h('input', { type: 'date', value: obj[k] ?? '', on: { input: (e) => { obj[k] = e.target.value || null; changed(); } } });
+        } else if (type === 'text' || type === 'datetime') {
+            control = h('input', { type: 'text', value: obj[k] ?? '', placeholder: type === 'datetime' ? 'YYYY-MM-DD HH:mm' : '', on: { input: (e) => { obj[k] = e.target.value || null; changed(); } } });
+        } else if (type === 'textarea') {
+            control = h('textarea', { rows: 3, on: { input: (e) => { obj[k] = e.target.value || null; changed(); } } }, obj[k] ?? '');
+        } else {
+            control = h('input.ch-num', { type: 'text', inputmode: 'decimal', value: obj[k] ?? '', on: { input: (e) => { obj[k] = parseNum(e.target.value, type === 'small'); changed(); } } });
+        }
+        if (guessed.includes(k)) control.classList.add('is-guess');
+        return h(type === 'bool' ? 'div.ch-field' : 'label.ch-field', { style: span ? { gridColumn: `span ${span}` } : null }, h('span.ch-field__label', label), control);
+    }));
+}
+
+/** "in 5 d" / "today" / "3 d overdue" badge for a due date (green > 7 days, amber ≤ 7, red overdue). */
+export function dueBadge(date, { done = false } = {}) {
+    if (!date) return null;
+    if (done) return h('span.ch-badge.green', 'done');
+    const d = Math.round((Date.parse(date + 'T00:00:00Z') - Date.parse(new Date().toISOString().slice(0, 10) + 'T00:00:00Z')) / 86400000);
+    const [level, text] = d < 0 ? ['red', `${-d} d overdue`] : d === 0 ? ['amber', 'today'] : d <= 7 ? ['amber', `in ${d} d`] : ['green', `in ${d} d`];
+    return h('span.ch-badge.' + level, { title: date }, text);
+}
+
 /** Labelled field for the input grids. */
 export const fld = (label, control, hint) => h('label.ch-field', h('span.ch-field__label', label), control, hint ? h('span.ch-field__hint', hint) : null);
 

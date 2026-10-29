@@ -233,7 +233,7 @@ function parseOrder(block, today) {
     const o = { _missing: [], _guessed: [], source_text: block.trim(), status: 'open' };
     const set = (k, v) => { if (v !== null && v !== undefined && v !== '') o[k] = v; };
 
-    const acc = block.match(/\b(?:account|acct|a\/c|chrtrs?|charterers?)\s*[:\-]\s*([^\n]+)/i);
+    const acc = block.match(/\b(?:account|acct|a\/c|chrtrs?|chrts|chtrs|charterers?)\s*[:\-]\s*([^\n]+)/i);
     if (acc) set('charterer', acc[1].trim());
 
     const q = s.match(/([\d][\d,.]*)\s*(?:mt|mts|t|tons)\b\s*(?:(\d+(?:\.\d+)?)\s*%\s*(moloo|molchopt|mol\b|more or less(?: in (?:owners?|charterers?)'? option)?)?)?\s*(?:of\s+)?([^\n,;]*)/i);
@@ -245,8 +245,9 @@ function parseOrder(block, today) {
         const cargo = q[4].replace(/\b(?:sf|s\.f\.)\b.*$/i, '').replace(/\b(?:in bulk|bulk)\b/i, (m) => m).trim();
         if (cargo && !/^(?:\d|laycan|load|disch|frt|freight)/i.test(cargo)) set('cargo', cargo);
     }
+    // "Cargo: wheat in bulk" names the cargo; "Cargo: 45,000 mt 10% … wheat" was already read by the quantity pattern
     const cargoLine = block.match(/\b(?:cargo|commodity)\s*[:\-]\s*([^\n]+)/i);
-    if (cargoLine) set('cargo', cargoLine[1].trim());
+    if (cargoLine && !/\b[\d][\d,.]*\s*(?:mt|mts|t|tons)\b/i.test(cargoLine[1])) set('cargo', cargoLine[1].trim());
 
     const sf = s.match(/\b(?:sf|s\.f\.|stowage factor)\s*:?\s*(?:abt|about|ard|around|~)?\s*([\d.,]+)\s*(cbm|cuft|wog|cbm\/mt|cuft\/lt)?/i);
     if (sf) {
@@ -259,8 +260,10 @@ function parseOrder(block, today) {
     const sbsp = s.match(new RegExp(`${portRe}([A-Z][A-Za-zÇĞİÖŞÜçğıöşü' .()-]+?)\\s*(?:\\/|\\bto\\b|→|->)\\s*${portRe}([A-Z][A-Za-zÇĞİÖŞÜçğıöşü' .()-]+?)(?=\\s*(?:\\d|laycan|lay\\/can|l\\/c|$|,|;|load|disch|frt|freight))`, 'i'));
     const load = block.match(/\b(?:load(?:ing)?\s*port|pol|load(?:ing)?)\s*[:\-]\s*([^\n\/]+)/i);
     const disch = block.match(/\b(?:disch(?:arge|arging)?\s*port|pod|disch(?:arge|arging)?)\s*[:\-]\s*([^\n\/]+)/i);
-    if (load) set('load_port', load[1].trim());
-    if (disch) set('disch_port', disch[1].trim());
+    // "1 SB SP Novorossiysk" → "Novorossiysk" (berth/port qualifiers are not part of the name)
+    const cleanPort = (x) => x.replace(/^(?:\d+\s*)?(?:(?:sb|gsb|sa|sp|sbp|sbs|ssp|sb\/sp|aa|aaaa|bb|safe|berths?|ports?|anchorages?)\b[\s/,]*)+/i, '').trim();
+    if (load) set('load_port', cleanPort(load[1]));
+    if (disch) set('disch_port', cleanPort(disch[1]));
     if ((!o.load_port || !o.disch_port) && sbsp) {
         if (!o.load_port) set('load_port', sbsp[1].trim());
         if (!o.disch_port) set('disch_port', sbsp[2].trim());
@@ -282,13 +285,16 @@ function parseOrder(block, today) {
     }
 
     const terms = '(SHINC|SHEX(?:UU|EIU)?|SSHEX(?:UU)?|SATPM|FHEX(?:UU)?|WWD|PWWD)?';
-    const lr = s.match(new RegExp(`\\bload(?:ing)?\\s*(?:rate)?\\s*:?\\s*([\\d][\\d,.]*)\\s*(?:mt|t|mts)?\\s*(?:pwwd|pd|\\/day|per day)?\\s*${terms}`, 'i'));
-    const dr = s.match(new RegExp(`\\bdisch(?:arge|arging)?\\s*(?:rate)?\\s*:?\\s*([\\d][\\d,.]*)\\s*(?:mt|t|mts)?\\s*(?:pwwd|pd|\\/day|per day)?\\s*${terms}`, 'i'));
-    if (lr && num(lr[1]) < 200000) {
+    // First plausible rate (≥ 100 t/day), so "Load: 1 SB SP Novorossiysk" is not read as 1 t/day
+    const rate = (word) => [...s.matchAll(new RegExp(`\\b${word}\\s*(?:rate)?\\s*:?\\s*([\\d][\\d,.]*)\\s*(?:mt|t|mts)?\\s*(?:pwwd|pd|\\/day|per day)?\\s*${terms}`, 'gi'))]
+        .find((m) => num(m[1]) >= 100 && num(m[1]) < 200000);
+    const lr = rate('load(?:ing)?');
+    const dr = rate('disch(?:arge|arging)?');
+    if (lr) {
         set('load_rate', num(lr[1]));
         set('load_terms', lr[2]?.toUpperCase().replace('PWWD', 'WWD'));
     }
-    if (dr && num(dr[1]) < 200000) {
+    if (dr) {
         set('disch_rate', num(dr[1]));
         set('disch_terms', dr[2]?.toUpperCase().replace('PWWD', 'WWD'));
     }

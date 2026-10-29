@@ -6,7 +6,7 @@ import { Grid, resetLayoutButton } from '../core/grid.js';
 import { live } from '../core/live.js';
 import { parsePositions, parseOrders, VESSEL_TYPES, TONNAGE_STATUS, ORDER_STATUS, LAYTIME_TERMS, CP_FORMS } from '../chartering/engine/positions.js';
 import { matchPair, rank, distanceLookup, toEstimate, MATCH_DEFAULTS, normPort } from '../chartering/engine/matching.js';
-import { parseNum, fmt, usd } from '../chartering/ui.js';
+import { parseNum, fmt, usd, specForm } from '../chartering/ui.js';
 import { regionHint } from '../chartering/regions.js';
 import { LESSONS } from '../chartering/links.js';
 
@@ -41,29 +41,7 @@ const ORDER_FORM = [
     ['source', 'Source', 'text'], ['notes', 'Notes', 'text', { span: 3 }],
 ];
 
-/** Generic form over a spec: [key, label, type, options|{span}] — writes straight into obj. */
-function buildForm(obj, spec, { guessed = [], cols = 4 } = {}) {
-    return h('div.ch-grid', { style: { '--cols': cols } }, spec.map(([k, label, type, extra]) => {
-        const opts = extra && !Array.isArray(extra) && !extra.span && type === 'select' ? extra : null;
-        const span = extra?.span;
-        let control;
-        if (type === 'select') {
-            const entries = Array.isArray(extra) ? extra.map((x) => [x, x || '—']) : Object.entries(opts);
-            control = h('select', { on: { change: (e) => { obj[k] = e.target.value || null; } } }, entries.map(([v, l]) => h('option', { value: v, selected: String(obj[k] ?? '') === String(v) }, l)));
-        } else if (type === 'bool') {
-            control = h('label.check', h('input', { type: 'checkbox', checked: !!+obj[k], on: { change: (e) => { obj[k] = e.target.checked ? 1 : 0; } } }), 'yes');
-        } else if (type === 'date') {
-            control = h('input', { type: 'date', value: obj[k] ?? '', on: { input: (e) => { obj[k] = e.target.value || null; } } });
-        } else if (type === 'text') {
-            control = h('input', { type: 'text', value: obj[k] ?? '', on: { input: (e) => { obj[k] = e.target.value || null; } } });
-        } else {
-            control = h('input.ch-num', { type: 'text', inputmode: 'decimal', value: obj[k] ?? '', on: { input: (e) => { obj[k] = parseNum(e.target.value, type === 'small'); } } });
-        }
-        if (guessed.includes(k)) control.classList.add('is-guess');
-        return h(type === 'bool' ? 'div.ch-field' : 'label.ch-field', { class: span ? `span-${span}` : '', style: span ? { gridColumn: `span ${span}` } : null },
-            h('span.ch-field__label', label), control);
-    }));
-}
+const buildForm = specForm;
 
 const gearText = (t) => (t.cranes_n === 0 ? 'gearless' : t.cranes_n ? `${t.cranes_n}×${t.cranes_swl ?? '?'}t` : '') + (t.grabs_n ? ` · ${t.grabs_n}×${t.grabs_cbm ?? '?'}cbm grabs` : '');
 const speedText = (t) => ['laden', 'ballast'].map((m) => (t.speeds?.[m] ? `${m[0].toUpperCase()} ${t.speeds[m].kn}/${t.speeds[m].cons}` : '')).filter(Boolean).join(' · ');

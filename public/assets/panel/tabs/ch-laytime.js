@@ -40,13 +40,14 @@ export function timeBarBadge(date, status) {
 
 export async function mount(el, ctx, param) {
     el.lang = 'en';
-    // Opened from the Position Monitor for a vessel: a new calculation with that vessel, unless a draft is unsaved
-    const fromMonitor = param?.vesselName && !store.get('ch_lay_dirty', false);
-    let calc = merge(blankLaytime(), fromMonitor ? { vessel: { name: param.vesselName, vesselId: null } } : store.get('ch_lay_draft', null) ?? {});
+    // Opened from the Position Monitor (vessel) or a fixture (prefilled calc): a new calculation, unless a draft is unsaved
+    const preset = param?.calc ?? (param?.vesselName ? { vessel: { name: param.vesselName, vesselId: null } } : null);
+    const fromMonitor = preset && !store.get('ch_lay_dirty', false);
+    let calc = merge(blankLaytime(), fromMonitor ? preset : store.get('ch_lay_draft', null) ?? {});
     calc.ports = (calc.ports ?? []).map((p) => merge(blankPort(p.kind), p));
     let savedId = fromMonitor ? null : store.get('ch_lay_id', null);
     let dirty = fromMonitor ? true : store.get('ch_lay_dirty', false);
-    if (param?.vesselName && !fromMonitor) toast('Kaydedilmemiş bir laytime taslağı var; o açıldı (yeni hesap için önce kaydedin veya “+ New”).');
+    if (preset && !fromMonitor) toast('Kaydedilmemiş bir laytime taslağı var; o açıldı (yeni hesap için önce kaydedin veya “+ New”).');
     let res = null;
     let holidays = {};
     const canEdit = ctx.allowed('ch-laytime');

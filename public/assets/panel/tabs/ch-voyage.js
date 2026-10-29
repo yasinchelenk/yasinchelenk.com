@@ -546,6 +546,23 @@ export async function mount(el, ctx, param) {
 
     // ------------------------------------------------------------ Mount
 
+    /** Fixed on this estimate: open Fixtures with a new record (cargo, ports, freight, terms) + the default checklist. */
+    async function toFixture() {
+        const c = est.cargo;
+        const load = est.route.find((s) => s.type === 'load');
+        const disch = est.route.find((s) => s.type === 'disch');
+        if (dirty && canEdit && !(await confirmBox('Estimate kaydedilmemiş. Önce kaydedilsin mi? (Fixture estimate’e bağlanır.)', { title: 'Fixture oluştur', yes: 'Kaydet ve devam', danger: false }))) return;
+        if (dirty && canEdit) await save();
+        ctx.open('ch-fixtures', { fromEstimate: {
+            type: 'VC', status: 'negotiating', fixture_date: new Date().toISOString().slice(0, 10), vessel: est.vessel.name || null, cargo: c.name || null,
+            qty: c.qty, tol_pct: c.tolPct, option: c.option, sf: c.sf, sf_unit: c.sfUnit, load_port: load?.name || null, disch_port: disch?.name || null,
+            freight_type: c.freightType === 'lumpsum' ? 'lumpsum' : 'pt', freight: c.freightType === 'lumpsum' ? c.lumpsum : c.rate, ballast_bonus: c.ballastBonus,
+            address_pct: c.addressPct, brokerage_pct: c.brokeragePct, dem: c.demRate, des: c.desRate,
+            load_rate: load?.rate ?? null, load_terms: load?.terms ?? null, disch_rate: disch?.rate ?? null, disch_terms: disch?.terms ?? null,
+            estimate_id: savedId, notes: est.name ? `From estimate “${est.name}”` : null,
+        } });
+    }
+
     el.lang = 'en'; // English UI: uppercase labels must not turn i into İ
     const savedBtn = h('button', { type: 'button', on: { click: (e) => openSaved(e.currentTarget).catch(() => {}) } }, 'Saved ▾');
     el.append(
@@ -560,6 +577,7 @@ export async function mount(el, ctx, param) {
             status,
             h('span.spacer'),
             h('button', { type: 'button', on: { click: () => compare().catch(() => {}) } }, 'Compare'),
+            ctx.allowed('ch-fixtures') ? h('button', { type: 'button', title: 'Bu estimate’ten fixture kaydı + kontrol listesi oluştur', on: { click: toFixture } }, '→ Fixture') : null,
             exportButtons(buildReport)),
         h('div.ch-split', left, right),
     );

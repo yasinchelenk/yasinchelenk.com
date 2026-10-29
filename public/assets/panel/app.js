@@ -197,7 +197,7 @@ function accountMenu(anchor) {
         admin ? item('Backups', backupsDialog) : null,
         admin ? item('Security', securityDialog) : null,
         h('div.ctx-menu__sep'),
-        ['ch-market', 'ch-monitor', 'ch-board', 'ch-voyage', 'ch-laytime', 'ch-calc'].some(allowed) ? item('Chartering Desk ↗', () => window.open('/chartering', '_blank'), { hint: 'ayrı sayfa' }) : null,
+        ['ch-market', 'ch-monitor', 'ch-board', 'ch-voyage', 'ch-fixtures', 'ch-laytime', 'ch-tc', 'ch-calc'].some(allowed) ? item('Chartering Desk ↗', () => window.open('/chartering', '_blank'), { hint: 'ayrı sayfa' }) : null,
         item('Sign out', signOut, { danger: true }),
     ), { align: 'right', className: 'acc-menu' });
 }

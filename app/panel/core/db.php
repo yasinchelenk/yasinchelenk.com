@@ -97,6 +97,8 @@ function panel_migrations(): array
         109 => 'chartering_migrate_109',
         // Chartering, Faz 5: Position Monitor (izleme listesi, AIS konum geçmişi, toplama kayıtları)
         110 => 'chartering_migrate_110',
+        // Chartering, Faz 6: fixture'lar, post-fixture görevleri, TC hesapları, belge şablonları
+        111 => 'chartering_migrate_111',
     ];
 }
 

@@ -7,9 +7,8 @@ import { live } from '../core/live.js';
 import { INDICES, TC_CODES, SEGMENT_TABS, SEGMENTS, PERIOD_SIZES, ROUTES, BUNKER_PORTS, parseBaltic, parseRates, parseBunkers, latestWithChange, isLocalRoute } from '../chartering/engine/market.js';
 import { lineChart, SERIES_COLORS } from '../chartering/chart.js';
 import { regionHint } from '../chartering/regions.js';
-import { parseNum, fmt, usd } from '../chartering/ui.js';
+import { parseNum, fmt, usd, dueBadge } from '../chartering/ui.js';
 import { LESSONS } from '../chartering/links.js';
-import { timeBarBadge } from './ch-laytime.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const WEEKLY = ['Capesize', 'Panamax', 'Supramax / Ultramax', 'Handysize'];
@@ -418,10 +417,10 @@ export async function mount(el, ctx) {
     function upcomingCard() {
         const box = h('div', h('p.dim', 'Loading…'));
         get('chartering/upcoming').then((items) => {
-            box.replaceChildren(items.length ? h('ul.ch-upcoming', items.map((x) => h('li',
-                h('button.ch-link', { type: 'button', on: { click: () => ctx.open(x.tab) } }, x.title),
-                h('small.dim', ` ${x.detail}`), ' ', timeBarBadge(x.date, null) ?? h('span.dim', fmtDate(x.date)))))
-                : h('p.dim', 'Yaklaşan time bar yok. (Laycan, notice ve hire tarihleri Faz 6’da eklenecek.)'));
+            box.replaceChildren(items.length ? h('ul.ch-upcoming', items.slice(0, 12).map((x) => h('li',
+                h('button.ch-link', { type: 'button', on: { click: () => ctx.open(x.tab, x.tab === 'ch-fixtures' && x.id ? { openId: x.id } : undefined) } }, x.title),
+                h('small.dim', ` ${x.detail}`), ' ', h('span.dim', fmtDate(x.date)), ' ', dueBadge(x.date))))
+                : h('p.dim', 'Önümüzdeki 30 günde laycan, notice, time bar veya hire ödemesi yok.'));
         }).catch(() => box.replaceChildren(h('p.dim', 'Yüklenemedi.')));
         return card('Upcoming', 'red', [box]);
     }

@@ -233,16 +233,8 @@ function ch_market_latest_bunkers(): never
     json_response(['bunkers' => $rows, 'eua' => $eua, 'fx' => $fx]);
 }
 
-/** Deadlines for the dashboard: demurrage claim time bars (fixtures, notices and hire dates join in Phase 6). */
+/** Upcoming card on the dashboard: the next 30 days of the deadline centre (chartering_fixtures.php). */
 function ch_upcoming(): never
 {
-    $items = [];
-    if (izinli(current_user(), 'ch-laytime')) {
-        foreach (rows("SELECT id, name, vessel_name, net, claim_status, time_bar FROM ch_laytime_calcs
-            WHERE time_bar IS NOT NULL AND claim_status NOT IN ('paid', 'closed') ORDER BY time_bar LIMIT 30") as $r) {
-            $items[] = ['kind' => 'time_bar', 'date' => $r['time_bar'], 'title' => $r['name'], 'detail' => trim(($r['vessel_name'] ?? '') . ' · claim ' . $r['claim_status']),
-                'amount' => (float) $r['net'], 'tab' => 'ch-laytime', 'id' => (int) $r['id']];
-        }
-    }
-    json_response($items);
+    json_response(array_slice(ch_deadlines(30), 0, 40));
 }
