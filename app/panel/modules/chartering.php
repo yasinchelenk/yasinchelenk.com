@@ -33,6 +33,105 @@ function chartering_migrate_105(PDO $pdo): void
         SQL);
 }
 
+function chartering_migrate_106(PDO $pdo): void
+{
+    $pdo->exec(<<<'SQL'
+        CREATE TABLE ch_laytime_calcs (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            vessel_id INTEGER REFERENCES vessels(id) ON DELETE SET NULL,
+            vessel_name TEXT, ports TEXT,
+            demurrage REAL, despatch REAL, net REAL,
+            claim_status TEXT NOT NULL DEFAULT 'draft', time_bar TEXT,
+            data TEXT NOT NULL,
+            created_at TEXT, created_by TEXT, updated_at TEXT, updated_by TEXT
+        );
+        CREATE TABLE ch_holidays (
+            id INTEGER PRIMARY KEY,
+            country TEXT NOT NULL, date TEXT NOT NULL, name TEXT NOT NULL, from_time TEXT,
+            created_at TEXT, created_by TEXT, updated_at TEXT, updated_by TEXT,
+            UNIQUE (country, date)
+        );
+        SQL);
+    $ins = $pdo->prepare("INSERT OR IGNORE INTO ch_holidays (country, date, name, from_time, created_at, created_by) VALUES ('TR', ?, ?, ?, ?, 'sistem')");
+    foreach (ch_tr_holidays() as [$date, $name, $from]) {
+        $ins->execute([$date, $name, $from, now()]);
+    }
+}
+
+/**
+ * Türkiye resmî tatilleri 2025–2027. Arifeler 13:00'ten itibaren yarım gün.
+ * Dinî bayram tarihleri her yıl Diyanet takvimiyle teyit edilmeli (Laytime → Holidays'ten düzenlenir).
+ */
+function ch_tr_holidays(): array
+{
+    $out = [];
+    foreach ([2025, 2026, 2027] as $y) {
+        foreach ([['01-01', 'Yılbaşı'], ['04-23', 'Ulusal Egemenlik ve Çocuk Bayramı'], ['05-01', 'Emek ve Dayanışma Günü'],
+            ['05-19', 'Atatürk’ü Anma, Gençlik ve Spor Bayramı'], ['07-15', 'Demokrasi ve Millî Birlik Günü'], ['08-30', 'Zafer Bayramı'],
+            ['10-29', 'Cumhuriyet Bayramı']] as [$md, $name]) {
+            $out[] = ["{$y}-{$md}", $name, null];
+        }
+        $out[] = ["{$y}-10-28", 'Cumhuriyet Bayramı arifesi', '13:00'];
+    }
+    $religious = [
+        'Ramazan Bayramı' => ['2025-03-30' => 3, '2026-03-20' => 3, '2027-03-09' => 3],
+        'Kurban Bayramı'  => ['2025-06-06' => 4, '2026-05-27' => 4, '2027-05-16' => 4],
+    ];
+    foreach ($religious as $name => $starts) {
+        foreach ($starts as $first => $days) {
+            $t = strtotime($first);
+            $out[] = [date('Y-m-d', $t - 86400), "{$name} arifesi", '13:00'];
+            for ($i = 0; $i < $days; $i++) {
+                $out[] = [date('Y-m-d', $t + $i * 86400), "{$name} " . ($i + 1) . '. gün', null];
+            }
+        }
+    }
+
+    return $out;
+}
+
+entity_define('ch_laytime', [
+    'table'  => 'ch_laytime_calcs',
+    'page'   => 'ch-laytime',
+    'undo'   => true,
+    'label'  => fn($r) => $r['name'],
+    'fields' => [
+        'name' => 'text', 'vessel_id' => 'int', 'vessel_name' => 'upper', 'ports' => 'text', 'demurrage' => 'num', 'despatch' => 'num', 'net' => 'num',
+        'claim_status' => 'enum:draft|sent|disputed|agreed|paid|closed', 'time_bar' => 'date', 'data' => 'json',
+    ],
+    'prepare' => function (array $d, ?array $before): array {
+        if ((array_key_exists('name', $d) || !$before) && trim((string) ($d['name'] ?? '')) === '') {
+            api_error('Hesap adı gerekli.');
+        }
+        if (!$before && empty($d['data'])) {
+            api_error('Laytime verisi boş.');
+        }
+        return $d;
+    },
+]);
+
+entity_define('ch_holiday', [
+    'table'  => 'ch_holidays',
+    'page'   => 'ch-laytime',
+    'undo'   => true,
+    'label'  => fn($r) => "{$r['country']} {$r['date']} · {$r['name']}",
+    'fields' => ['country' => 'upper', 'date' => 'date', 'name' => 'text', 'from_time' => 'text'],
+    'prepare' => function (array $d, ?array $before): array {
+        $m = array_merge($before ?? [], $d);
+        if (!preg_match('/^[A-Z]{2}$/', (string) ($m['country'] ?? '')) || empty($m['date']) || trim((string) ($m['name'] ?? '')) === '') {
+            api_error('Ülke kodu (TR), tarih ve ad gerekli.');
+        }
+        if (!empty($d['from_time']) && !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', (string) $d['from_time'])) {
+            api_error('Başlangıç saati SS:dd olmalı (ör. 13:00) ya da boş (tam gün).');
+        }
+        if (array_key_exists('date', $d) && scalar('SELECT 1 FROM ch_holidays WHERE country = ? AND date = ? AND id <> ?', [$m['country'], $d['date'], $before['id'] ?? 0])) {
+            api_error('Bu tarihte zaten bir tatil kayıtlı.');
+        }
+        return $d;
+    },
+]);
+
 entity_define('ch_vessel_spec', [
     'table'  => 'ch_vessel_specs',
     'page'   => 'ch-voyage',
@@ -73,7 +172,28 @@ function module_routes_chartering(): void
     route('GET', '/api/chartering/vessels/{id}/specs', 'ch_specs_get', 'ch-voyage');
     route('PUT', '/api/chartering/vessels/{id}/specs', 'ch_specs_save', 'ch-voyage');
 
+    route('GET', '/api/chartering/laytime', 'ch_laytime_list', 'ch-laytime');
+    route('GET', '/api/chartering/laytime/{id}', 'ch_laytime_get', 'ch-laytime');
+    crud_routes('ch_laytime', '/api/chartering/laytime');
+
+    route('GET', '/api/chartering/holidays', fn($p, $in) => json_response(rows(
+        'SELECT id, country, date, name, from_time FROM ch_holidays WHERE country = ? ORDER BY date', [strtoupper((string) ($in['country'] ?? 'TR'))])), 'ch-laytime');
+    crud_routes('ch_holiday', '/api/chartering/holidays');
+
     route('POST', '/api/chartering/report/{format}', 'ch_report', '*');
+}
+
+function ch_laytime_list(): never
+{
+    json_response(rows('SELECT id, name, vessel_id, vessel_name, ports, demurrage, despatch, net, claim_status, time_bar, updated_at, updated_by
+        FROM ch_laytime_calcs ORDER BY updated_at DESC, id DESC'));
+}
+
+function ch_laytime_get(array $p): never
+{
+    $row = row('SELECT * FROM ch_laytime_calcs WHERE id = ?', [$p['id']]) ?? api_error('Hesap bulunamadı.', 404);
+    $row['data'] = json_decode((string) $row['data'], true);
+    json_response($row);
 }
 
 function ch_estimates_list(array $p, array $in): never
@@ -189,6 +309,18 @@ function ch_report_pdf(array $r): string
             $pdf->text($L + 6, $y + 1, (string) $b['title'], 9.5, true, 'L', $navy);
             $y += 16;
         }
+        if (isset($b['text'])) {
+            // Free text (letters): paragraphs wrapped to the page width
+            foreach (preg_split('/\R/u', (string) $b['text']) as $para) {
+                foreach ($para === '' ? [''] : $pdf->wrap($para, $R - $L, 10) as $line) {
+                    $ensure(14);
+                    $pdf->text($L, $y + 10, $line, 10);
+                    $y += 14;
+                }
+            }
+            $y += 8;
+            continue;
+        }
         if (isset($b['kv'])) {
             // Two key/value columns side by side
             $pairs = array_values(array_filter((array) $b['kv'], 'is_array'));
@@ -288,7 +420,11 @@ function ch_report_xlsx(array $r, string $file): void
         if (!empty($b['title'])) {
             $rows[] = [['v' => (string) $b['title'], 's' => 'bold']];
         }
-        if (isset($b['kv'])) {
+        if (isset($b['text'])) {
+            foreach (preg_split('/\R/u', (string) $b['text']) as $line) {
+                $rows[] = [$line];
+            }
+        } elseif (isset($b['kv'])) {
             foreach ((array) $b['kv'] as $pair) {
                 $rows[] = [$cell($pair[0] ?? '', 'dim'), $cell($pair[1] ?? '')];
             }

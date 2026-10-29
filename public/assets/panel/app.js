@@ -22,6 +22,7 @@ export const TABS = [
     { code: 'da', label: 'Final DA', group: 'acc' },
     { code: 'account', label: 'Account', group: 'acc', tip: 'Armatöre gönderilmiş DA’lerin son kontrolü ve muhasebe çıktısı' },
     { code: 'ch-voyage', label: 'Voyage Estimator', group: 'ch', tip: 'Voyage estimate: intake, bunker, freight, TCE, breakeven ve sensitivity' },
+    { code: 'ch-laytime', label: 'Laytime & Demurrage', group: 'ch', tip: 'SOF’tan time sheet: NOR, turn time, SHEX/SHEXUU, tatiller, once on demurrage, reversible/averaged, ATS/WTS, claim mektubu ve time bar' },
     { code: 'ch-calc', label: 'Calculators', group: 'ch', tip: 'TPC/draft, intake & SF, deadfreight, bunker, ETA, EU ETS, komisyon, birim çevirici' },
     { code: 'gecmis', label: 'History', tip: 'Kim ne zaman neyi değiştirdi; silinen kayıtlar ve geri alma' },
 ];

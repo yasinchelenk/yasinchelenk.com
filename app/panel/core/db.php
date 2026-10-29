@@ -87,6 +87,8 @@ function panel_migrations(): array
         104 => 'seed_petitions',
         // Chartering, Faz 1: gemi teknik bilgileri ve voyage estimate'ler (modules/chartering.php)
         105 => 'chartering_migrate_105',
+        // Chartering, Faz 2: laytime hesapları ve tatil takvimi (Türkiye hazır)
+        106 => 'chartering_migrate_106',
     ];
 }
 
