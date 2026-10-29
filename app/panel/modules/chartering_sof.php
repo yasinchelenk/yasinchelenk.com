@@ -33,6 +33,21 @@ function chartering_migrate_113(PDO $pdo): void
         SQL);
 }
 
+/** Attachments (letters of protest, the scanned signed SOF): kept outside the web root, served only to signed-in users. */
+function chartering_migrate_114(PDO $pdo): void
+{
+    $pdo->exec(<<<'SQL'
+        CREATE TABLE ch_sof_files (
+            id INTEGER PRIMARY KEY, sof_id INTEGER NOT NULL REFERENCES ch_sofs(id) ON DELETE CASCADE, kind TEXT NOT NULL,
+            name TEXT NOT NULL, original TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, note TEXT,
+            created_at TEXT, created_by TEXT
+        );
+        CREATE INDEX idx_ch_sof_files ON ch_sof_files(sof_id);
+        SQL);
+}
+
+const CH_SOF_FILE_TYPES = ['application/pdf' => 'pdf', 'image/png' => 'png', 'image/jpeg' => 'jpg'];
+
 entity_define('ch_sof', [
     'table'  => 'ch_sofs',
     'page'   => 'ch-sof',
@@ -85,6 +100,10 @@ function module_routes_chartering_sof(): void
     }, 'ch-sof');
     crud_routes('ch_sof', '/api/chartering/sofs');
     route('POST', '/api/chartering/sofs/{id}/unlock', 'ch_sof_unlock', 'ch-sof');
+    route('GET', '/api/chartering/sofs/{id}/files', fn($p) => json_response(rows('SELECT id, kind, original, mime, size, note, created_at, created_by FROM ch_sof_files WHERE sof_id = ? ORDER BY id', [$p['id']])), 'ch-sof');
+    route('POST', '/api/chartering/sofs/{id}/files', 'ch_sof_file_upload', 'ch-sof');
+    route('GET', '/api/chartering/sof-files/{id}', 'ch_sof_file_get', 'ch-sof');
+    route('DELETE', '/api/chartering/sof-files/{id}', 'ch_sof_file_delete', 'ch-sof');
 
     route('GET', '/api/chartering/sof-dictionary', fn() => json_response(array_map(
         fn($r) => json_decode((string) $r['data'], true) + ['code' => $r['code'], 'active' => (bool) $r['active']],
@@ -92,6 +111,70 @@ function module_routes_chartering_sof(): void
     route('GET', '/api/chartering/sof-templates', fn() => json_response(array_map(
         fn($r) => json_decode((string) $r['data'], true) + ['key' => $r['key'], 'name' => $r['name'], 'is_default' => (bool) $r['is_default'], 'custom' => true],
         rows('SELECT key, name, data, is_default FROM ch_sof_templates ORDER BY name'))), 'ch-sof');
+}
+
+/**
+ * Upload: kind 'lop' (letter of protest), 'signed' (scanned signed SOF → status Signed) or 'other'. PDF / PNG / JPG, 10 MB.
+ */
+function ch_sof_file_upload(array $p, array $in): never
+{
+    $sof = row('SELECT * FROM ch_sofs WHERE id = ?', [$p['id']]) ?? api_error('SOF bulunamadı.', 404);
+    if ($sof['status'] === 'locked') {
+        api_error('Kilitli SOF’a dosya eklenemez.', 423);
+    }
+    $kind = in_array($in['kind'] ?? '', ['lop', 'signed', 'other'], true) ? $in['kind'] : 'other';
+    $file = $_FILES['file'] ?? null;
+    if (!is_array($file) || $file['error'] !== UPLOAD_ERR_OK || $file['size'] > 10 * 1024 * 1024) {
+        api_error('Dosya yüklenemedi (en fazla 10 MB).');
+    }
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+    $ext = CH_SOF_FILE_TYPES[$mime] ?? api_error('Yalnızca PDF, PNG veya JPG yüklenebilir.');
+    $dir = panel_storage('sof-files');
+    if (!is_dir($dir)) {
+        mkdir($dir, 0775, true);
+    }
+    $name = bin2hex(random_bytes(12)) . ".{$ext}";
+    move_uploaded_file($file['tmp_name'], "{$dir}/{$name}") || api_error('Dosya kaydedilemedi.', 500);
+    $original = mb_substr(preg_replace('/[^\pL\pN ._()-]+/u', '_', basename((string) $file['name'])), 0, 120) ?: "file.{$ext}";
+    $a = actor();
+    $id = insert('ch_sof_files', ['sof_id' => $sof['id'], 'kind' => $kind, 'name' => $name, 'original' => $original, 'mime' => $mime, 'size' => (int) $file['size'],
+        'note' => mb_substr(trim((string) ($in['note'] ?? '')), 0, 300) ?: null, 'created_at' => now(), 'created_by' => $a['name']]);
+    $label = trim("{$sof['ref']} {$sof['vessel']}");
+    gecmis_log('ch_sof', $sof['id'], $label, 'file', 'update', null, "{$kind}: {$original}");
+    if ($kind === 'signed' && !in_array($sof['status'], ['signed', 'sent'], true)) {
+        update('ch_sofs', $sof['id'], ['status' => 'signed', 'updated_at' => now(), 'updated_by' => $a['name']]);
+        gecmis_log('ch_sof', $sof['id'], $label, 'status', 'update', $sof['status'], 'signed');
+    }
+    feed('ch_sof', 'update', ent_row('ch_sof', $sof['id']), $sof['id']);
+    json_response(row('SELECT id, kind, original, mime, size, note, created_at, created_by FROM ch_sof_files WHERE id = ?', [$id]) + ['status' => scalar('SELECT status FROM ch_sofs WHERE id = ?', [$sof['id']])], 201);
+}
+
+function ch_sof_file_get(array $p): never
+{
+    $f = row('SELECT * FROM ch_sof_files WHERE id = ?', [$p['id']]) ?? api_error('Dosya bulunamadı.', 404);
+    $path = panel_storage('sof-files/' . basename((string) $f['name']));
+    if (!is_file($path)) {
+        api_error('Dosya diskte yok.', 404);
+    }
+    header('Content-Type: ' . $f['mime']);
+    header('Content-Length: ' . filesize($path));
+    header('Content-Disposition: inline; filename="' . str_replace('"', '', $f['original']) . '"');
+    header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: private, no-store');
+    readfile($path);
+    exit;
+}
+
+function ch_sof_file_delete(array $p): never
+{
+    $f = row('SELECT f.*, s.status, s.ref, s.vessel FROM ch_sof_files f JOIN ch_sofs s ON s.id = f.sof_id WHERE f.id = ?', [$p['id']]) ?? api_error('Dosya bulunamadı.', 404);
+    if ($f['status'] === 'locked') {
+        api_error('Kilitli SOF’tan dosya silinemez.', 423);
+    }
+    q('DELETE FROM ch_sof_files WHERE id = ?', [$f['id']]);
+    @unlink(panel_storage('sof-files/' . basename((string) $f['name'])));
+    gecmis_log('ch_sof', $f['sof_id'], trim("{$f['ref']} {$f['vessel']}"), 'file', 'update', "{$f['kind']}: {$f['original']}", null);
+    json_response(['ok' => true]);
 }
 
 /** Locked SOFs open only with a reason, which goes to the audit log. */

@@ -135,15 +135,47 @@ export function dailyLog(a, { total = null } = {}) {
         const reasons = {};
         for (const s of inDay) reasons[s.label] = (reasons[s.label] ?? 0) + minutes(s.from, s.to);
         const qtyToday = a.timed.filter((r) => r.ms >= d0 && r.ms < d1 && r.qty !== null && r.qty !== '' && Number.isFinite(Number(r.qty))).map((r) => Number(r.qty));
+        const hatches = [...new Set(a.timed.filter((r) => r.ms >= d0 && r.ms < d1 && r.hatch).flatMap((r) => String(r.hatch).split(/[\s,;/&+]+/)).filter(Boolean))];
         const cum = qtyToday.length ? Math.max(prevCum, ...qtyToday) : null;
         const row = {
             date, dow: new Date(Date.parse(date + 'T00:00:00Z')).toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' }),
             span: minutes(a0, a1), stopped, worked: minutes(a0, a1) - stopped, reasons,
-            quantity: cum !== null ? cum - prevCum : null, cumulative: cum ?? (prevCum || null),
+            quantity: cum !== null ? cum - prevCum : null, cumulative: cum ?? (prevCum || null), hatches: hatches.join(', '), gangs: null,
         };
         if (cum !== null) prevCum = cum;
         row.balance = total !== null && row.cumulative !== null ? total - row.cumulative : null;
         out.push(row);
     }
     return out;
+}
+
+export const LOG_EDITABLE = ['worked', 'stopped', 'quantity', 'gangs', 'hatches', 'note'];
+
+/**
+ * Manual corrections over the derived log: overrides = { 'YYYY-MM-DD': { worked, stopped (minutes), quantity, gangs, hatches, note } }.
+ * Overridden cells are listed in row.edited; cumulative and balance are recomputed from the (corrected) day quantities.
+ */
+export function applyLogOverrides(log, overrides = {}, { total = null } = {}) {
+    let cum = 0;
+    let any = false;
+    return log.map((r) => {
+        const o = overrides?.[r.date] ?? {};
+        const edited = LOG_EDITABLE.filter((k) => o[k] !== undefined && o[k] !== null && o[k] !== '');
+        const row = { ...r, ...Object.fromEntries(edited.map((k) => [k, ['worked', 'stopped', 'quantity'].includes(k) ? Number(o[k]) : o[k]])), edited };
+        if (row.quantity !== null && row.quantity !== undefined && Number.isFinite(row.quantity)) { cum += row.quantity; any = true; }
+        row.cumulative = any ? cum : null;
+        row.balance = total !== null && row.cumulative !== null ? total - row.cumulative : null;
+        return row;
+    });
+}
+
+/** "9:30", "9h30", "9.5", "570m" → minutes; '' → null */
+export function parseHm(s) {
+    const t = String(s ?? '').trim().toLowerCase();
+    if (!t) return null;
+    let m = t.match(/^(\d{1,3})\s*[:h]\s*(\d{1,2})\s*m?$/);
+    if (m) return +m[1] * 60 + +m[2];
+    if ((m = t.match(/^(\d+)\s*m$/))) return +m[1];
+    if ((m = t.match(/^(\d+(?:[.,]\d+)?)\s*h?$/))) return Math.round(parseFloat(m[1].replace(',', '.')) * 60);
+    return null;
 }

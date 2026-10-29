@@ -64,6 +64,16 @@ export function validate(a, sof, dict) {
         if (Math.abs(diffPct) > tol) add('warn', `Final quantity ${q.toLocaleString('en-US')} t differs from B/L ${bl.toLocaleString('en-US')} t by ${diffPct.toFixed(2)}% (tolerance ${tol}%).`);
     }
 
+    // ---- Required custom header fields
+    for (const c of sof.custom ?? []) {
+        const v = h[c.key];
+        if (c.required && (v === null || v === undefined || v === '' || v === false)) add('warn', `Required header field is empty: ${c.label}.`);
+    }
+
+    // ---- Signatures: protest qualifier without a protest remark
+    const protested = (sof.signatures ?? []).some((s) => s.qualifier === 'under_protest');
+    if (protested && !(sof.remarks ?? []).some((r) => r.type === 'protest')) add('warn', 'A signature is “signed under protest” but no Protest remark is recorded.');
+
     // ---- Mixed LT / UTC entries
     const zones = new Set(a.timed.map((r) => (r.zone === 'UTC' ? 'UTC' : 'LT')));
     if (zones.size > 1) add('warn', 'Both LT and UTC entries in this SOF — check that every time is in the zone shown on its row.');

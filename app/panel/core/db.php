@@ -103,6 +103,8 @@ function panel_migrations(): array
         112 => 'chartering_migrate_112',
         // Chartering · SOF sekmesi: SOF kayıtları, kullanıcı şablonları ve olay sözlüğü eklemeleri
         113 => 'chartering_migrate_113',
+        // SOF ekleri (protesto mektupları, imzalı SOF taraması) — web kökünün dışında, storage/sof-files
+        114 => 'chartering_migrate_114',
     ];
 }
 

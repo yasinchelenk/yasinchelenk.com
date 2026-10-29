@@ -1243,6 +1243,21 @@ ul.sof-issues { list-style: none; margin: 4px 0; padding: 0; display: grid; gap:
 ul.sof-issues li { cursor: pointer; padding: 3px 6px; border-radius: 4px; }
 ul.sof-issues li.error { background: #fdecea; color: #a3291c; }
 ul.sof-issues li.warn { background: var(--lt-mid-bg); color: var(--lt-mid-tx); }
+table.sof-log td.is-edited input { background: #fff6d6; border-color: #e8c33a; }
+table.sof-log td.sof-reasons { white-space: normal; font-size: 12px; min-width: 160px; }
+table.sof-log tfoot td { font-weight: 700; color: var(--navy); }
+ol.sof-remarks { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
+ol.sof-remarks li { padding: 4px 6px; border-radius: 6px; }
+ol.sof-remarks li.is-protest { background: #fdf1ef; }
+ol.sof-remarks textarea { width: 100%; }
+.sof-remark__head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; font-size: 12.5px; }
+.sof-sigs { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.sof-sig { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: grid; gap: 5px; background: #fff; }
+.sof-sig__head { display: flex; gap: 4px; }
+.sof-sig__role { font-weight: 600; flex: 1; }
+.sof-sig__line { border-top: 1px dashed var(--line); margin-top: 18px; padding-top: 2px; font-size: 11px; color: var(--dim); text-align: center; }
+.sof-file { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; font-size: 12.5px; }
+.sof-secrow { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
 @media (max-width: 1250px) { .ch-split--sof { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) {
     dl.ch-gloss { grid-template-columns: minmax(0, 1fr); } dl.ch-gloss dt { border-bottom: 0; padding-bottom: 0; }

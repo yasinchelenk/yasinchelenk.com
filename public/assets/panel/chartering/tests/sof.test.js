@@ -2,7 +2,7 @@
 import { test, eq } from './harness.js';
 import { dictionary } from '../engine/sof/dictionary.js';
 import { rowStartMs, rowEndMs, minutes, utcText, local } from '../engine/sof/time.js';
-import { analyse, dailyLog } from '../engine/sof/events.js';
+import { analyse, dailyLog, applyLogOverrides, parseHm } from '../engine/sof/events.js';
 import { validate } from '../engine/sof/validate.js';
 import { SOF_TEMPLATES, newSof } from '../engine/sof/templates.js';
 
@@ -67,4 +67,20 @@ test('SOF 7 — daily working log', () => {
     eq(log.length, 1, 'one day');
     eq([log[0].date, log[0].worked, log[0].stopped], ['2026-11-01', 540, 60], '01.11: worked 9 h, stopped 1 h');
     eq(a.summary.working, 540, 'summary working time 9 h');
+});
+
+test('SOF — daily log over two days, quantities, hatches and manual corrections', () => {
+    const a = analyse(sof([
+        row('2026-11-01', '20:00', 'commenced', { qty: 0 }),
+        row('2026-11-01', '23:00', 'rain', { timeTo: '01:00', hatch: '2' }),
+        row('2026-11-01', '23:59', 'other', { qty: 1500, hatch: '1, 3' }),
+        row('2026-11-02', '12:00', 'completed', { qty: 9000 }),
+    ]), dict);
+    const log = dailyLog(a, { total: 9100 });
+    eq(log.map((d) => [d.date, d.worked, d.stopped]), [['2026-11-01', 180, 60], ['2026-11-02', 660, 60]], 'rain split at midnight: 1 h each day');
+    eq(log.map((d) => [d.quantity, d.cumulative, d.balance]), [[1500, 1500, 7600], [7500, 9000, 100]], 'quantity per day from the cumulative column');
+    eq(log[0].hatches, '2, 1, 3', 'hatches worked that day');
+    const fixed = applyLogOverrides(log, { '2026-11-01': { quantity: 1600 }, '2026-11-02': { gangs: '2 gangs' } }, { total: 9100 });
+    eq([fixed[0].edited, fixed[1].cumulative, fixed[1].balance, fixed[1].gangs], [['quantity'], 9100, 0, '2 gangs'], 'override recomputes cumulative and balance');
+    eq([parseHm('9:30'), parseHm('9h30'), parseHm('9.5'), parseHm('45m'), parseHm('')], [570, 570, 570, 45, null], 'hours input');
 });

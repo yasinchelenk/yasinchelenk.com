@@ -23,7 +23,7 @@ export const HEADER_FIELDS = [
 export const HEADER_GROUPS = [...new Set(HEADER_FIELDS.map((f) => f[3]))];
 
 const DRY_SIGS = ['Master', 'Agents', 'Shippers / receivers', 'Stevedores'];
-const REMARKS = [
+export const STANDARD_REMARKS = [
     "Time lost due to ship's crane breakdown for Owners' account.",
     'NOR tendered WIBON / WIPON as per CP.',
     'Weather as per port log.',
@@ -41,7 +41,7 @@ export const SOF_TEMPLATES = {
         events: ['eosp', 'anchored', 'nor_tendered', 'free_pratique', 'anchor_aweigh', 'pob_in', 'all_fast', 'pilot_off_in', 'hold_insp_start', 'hold_insp_end', 'hold_passed', 'nor_accepted',
             'ids_start', 'ids_end', 'commenced', 'completed', 'fds_start', 'fds_end', 'hatches_closed', 'docs_on_board', 'pob_out', 'last_line', 'sailed'],
         keyEvents: ['nor_tendered', 'nor_accepted', 'free_pratique', 'all_fast', 'commenced', 'completed', 'docs_on_board', 'sailed'],
-        remarks: REMARKS, signatures: DRY_SIGS,
+        remarks: STANDARD_REMARKS, signatures: DRY_SIGS,
     },
     dry_disch: {
         name: 'Dry Bulk – Discharge Port', call: 'disch',
@@ -49,7 +49,7 @@ export const SOF_TEMPLATES = {
         events: ['eosp', 'anchored', 'nor_tendered', 'free_pratique', 'clearance_in', 'anchor_aweigh', 'pob_in', 'all_fast', 'pilot_off_in', 'nor_accepted',
             'ids_start', 'ids_end', 'hatches_opened', 'commenced', 'completed', 'fds_start', 'fds_end', 'hatches_closed', 'docs_on_board', 'pob_out', 'last_line', 'sailed'],
         keyEvents: ['nor_tendered', 'nor_accepted', 'free_pratique', 'all_fast', 'commenced', 'completed', 'sailed'],
-        remarks: REMARKS, signatures: DRY_SIGS,
+        remarks: STANDARD_REMARKS, signatures: DRY_SIGS,
     },
     general: {
         name: 'General Cargo / Breakbulk', call: 'load',
@@ -57,7 +57,7 @@ export const SOF_TEMPLATES = {
         events: ['arrived', 'nor_tendered', 'free_pratique', 'pob_in', 'all_fast', 'nor_accepted', 'surveyors_on_board', 'hatches_opened', 'commenced', 'completed',
             'lashing_done', 'hatches_closed', 'docs_on_board', 'bl_signed', 'last_line', 'sailed'],
         keyEvents: ['nor_tendered', 'all_fast', 'commenced', 'completed', 'docs_on_board', 'sailed'],
-        remarks: REMARKS, signatures: DRY_SIGS,
+        remarks: STANDARD_REMARKS, signatures: DRY_SIGS,
     },
     tanker: {
         name: 'Tanker – Load / Discharge', call: 'load',
@@ -65,11 +65,18 @@ export const SOF_TEMPLATES = {
         events: ['eosp', 'anchored', 'nor_tendered', 'free_pratique', 'pob_in', 'all_fast', 'nor_accepted', 'hoses_connected', 'ullage_survey', 'commenced', 'completed',
             'hoses_disconnected', 'docs_on_board', 'last_line', 'sailed'],
         keyEvents: ['nor_tendered', 'all_fast', 'hoses_connected', 'commenced', 'completed', 'hoses_disconnected', 'docs_on_board', 'sailed'],
-        remarks: ['Ullage / ROB as per independent surveyor.', ...REMARKS.slice(1, 3)], signatures: ['Master', 'Agents', 'Terminal', 'Surveyor'],
+        remarks: ['Ullage / ROB as per independent surveyor.', ...STANDARD_REMARKS.slice(1, 3)], signatures: ['Master', 'Agents', 'Terminal', 'Surveyor'],
     },
     blank: { name: 'Blank', call: 'other', sections: ['header', 'events', 'log', 'remarks', 'signatures'], events: [], keyEvents: [], remarks: [], signatures: ['Master', 'Agents'] },
 };
 for (const [k, t] of Object.entries(SOF_TEMPLATES)) t.key = k;
+
+export const REMARK_TYPES = { general: 'General', master: "Master's remark", agent: "Agent's remark", receivers: "Receivers' / shippers' remark", protest: 'Protest' };
+export const QUALIFIERS = {
+    signed: 'Signed', under_protest: 'Signed under protest', receipt_only: 'For receipt only',
+    without_prejudice: 'Without prejudice', subject_owners: "Subject to Owners' approval",
+};
+export const SECTIONS = { header: 'Header', events: 'Events', log: 'Daily Working Log', remarks: 'Remarks & Protests', signatures: 'Signatures' };
 
 export const SOF_STATUS = { draft: 'Draft', in_progress: 'In progress', ready: 'Ready for signature', signed: 'Signed', sent: 'Sent to Laytime', locked: 'Locked' };
 
