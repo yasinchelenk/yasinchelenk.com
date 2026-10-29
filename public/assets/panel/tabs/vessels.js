@@ -1,8 +1,8 @@
 // VESSELS (spec §6.4): gemi sicili; satıra tıklayınca gemi kartı.
-import { h, fmtDate, debounce } from '../core/dom.js';
-import { get } from '../core/api.js';
+import { h, fmtDate, debounce, toast } from '../core/dom.js';
+import { get, post } from '../core/api.js';
 import { Grid, resetLayoutButton } from '../core/grid.js';
-import { searchBox } from '../core/ui.js';
+import { searchBox, confirmBox, modal } from '../core/ui.js';
 import { live } from '../core/live.js';
 import { flag } from '../core/flags.js';
 import { portalShortcuts } from '../core/ports.js';
@@ -45,12 +45,40 @@ export async function mount(el, ctx) {
         counter.textContent = `${res.total} gemi`;
     }
 
+    // Yönetici: başka sistemden dışa aktarılmış gemi listesi (JSON) → IMO ile eşleştirip ekle/güncelle
+    const fileInput = h('input', { type: 'file', accept: '.json,application/json', hidden: true, on: { change: () => importFile(fileInput.files[0]) } });
+    async function importFile(file) {
+        fileInput.value = '';
+        if (!file) return;
+        let data;
+        try {
+            data = JSON.parse(await file.text());
+        } catch {
+            toast('Dosya okunamadı: geçerli bir JSON değil.', 'error');
+            return;
+        }
+        const list = Array.isArray(data) ? data : data?.rows;
+        if (!Array.isArray(list) || !list.length) {
+            toast('Dosyada gemi listesi bulunamadı.', 'error');
+            return;
+        }
+        if (!await confirmBox(`${list.length} gemi aktarılacak. IMO'su paneldekiyle aynı olan gemilerin dolu alanları güncellenir, diğerleri yeni gemi olarak eklenir.`, { title: 'Gemi aktarımı', yes: 'Aktar', danger: false })) return;
+        const res = await post('vessels/ice-aktar', { rows: list });
+        await load();
+        const summary = `${res.added} yeni gemi eklendi · ${res.updated} gemi güncellendi · ${res.same} gemi zaten aynıydı`;
+        const notes = [...res.skipped, ...res.warnings];
+        if (!notes.length) return toast(summary);
+        modal({ title: 'Gemi aktarımı', width: 560, body: h('div', h('p', summary), h('p', 'Aktarılmayan alanlar / satırlar:'), h('ul', notes.map((n) => h('li', n)))), actions: [{ label: 'Tamam', primary: true }] });
+    }
+
     el.append(
         h('div.toolbar',
             canEdit ? h('button.primary', { type: 'button', on: { click: () => openVesselCard(null, { onSaved: () => load() }) } }, '+ New Vessel') : null,
             searchBox('Gemi adı, IMO, bayrak veya owner ara…', (v) => { search = v; load(); }),
             portalShortcuts(),
             counter,
+            ctx.user.role === 'yonetici' ? h('button', { type: 'button', title: 'JSON dosyasından gemi ekle/güncelle', on: { click: () => fileInput.click() } }, '⇪ Import JSON') : null,
+            fileInput,
             resetLayoutButton(grid, '↺ columns')),
         grid.el,
     );

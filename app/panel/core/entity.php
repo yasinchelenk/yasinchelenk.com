@@ -137,6 +137,10 @@ function values_equal(mixed $a, mixed $b): bool
     if (($a === null || $a === '') && ($b === null || $b === '')) {
         return true;
     }
+    // Aynı yazı her zaman eşittir ("3E2630" gibi çağrı işaretleri sayı sanılıp INF'e dönmesin)
+    if ((string) $a === (string) $b) {
+        return true;
+    }
     if (is_numeric($a) && is_numeric($b)) {
         return abs((float) $a - (float) $b) < 1e-9;
     }

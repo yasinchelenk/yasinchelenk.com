@@ -61,6 +61,7 @@ function module_routes_vessels(): void
 {
     route('GET', '/api/vessels', 'vessels_list');
     route('GET', '/api/vessels/imo-kontrol', 'vessels_imo_check');
+    route('POST', '/api/vessels/ice-aktar', 'vessels_import', 'admin');
     route('GET', '/api/vessels/{id}', 'vessels_get');
     crud_routes('vessel', '/api/vessels');
 
@@ -94,6 +95,88 @@ function vessels_imo_check(array $p, array $in): never
 {
     $imo = preg_replace('/\D/', '', (string) ($in['imo'] ?? ''));
     json_response(['vessel' => $imo === '' ? null : row('SELECT id, name, imo, flag FROM vessels WHERE imo = ? AND id <> ?', [$imo, (int) ($in['haric'] ?? 0)])]);
+}
+
+/**
+ * Toplu gemi aktarımı (yönetici): {rows: [...]} ya da düz dizi; alan adları vessels tablosuyla aynı.
+ * Eşleşme IMO ile (IMO yoksa IMO'suz kayıtlarda gemi adıyla). Var olan gemide yalnızca dolu gelen
+ * alanlar yazılır, paneldeki bilgi boş değerle silinmez. Owner/registry kuralları eski kayıtlar için aranmaz.
+ */
+function vessels_import(array $p, array $in): never
+{
+    $list = isset($in['rows']) && is_array($in['rows']) ? $in['rows'] : (array_is_list($in) ? $in : []);
+    $list = array_values(array_filter($list, 'is_array'));
+    if (!$list) {
+        api_error('Dosyada gemi bulunamadı (rows listesi bekleniyor).');
+    }
+
+    $fields = ent('vessel')['fields'];
+    $added = $updated = $same = 0;
+    $skipped = $warnings = [];
+    db()->beginTransaction();
+    foreach ($list as $i => $src) {
+        $name = tr_upper(trim((string) ($src['name'] ?? '')));
+        if ($name === '') {
+            $skipped[] = 'Satır ' . ($i + 1) . ': gemi adı yok';
+            continue;
+        }
+        $data = [];
+        foreach ($fields as $field => $type) {
+            $v = $src[$field] ?? null;
+            if ($v === null || (is_string($v) && trim($v) === '')) {
+                continue;
+            }
+            $cast = match ($type) {
+                'int'   => ($n = parse_number($v)) === null ? null : (int) round($n),
+                'num'   => parse_number($v),
+                'date'  => parse_date((string) $v),
+                default => cast_field($type, $v),
+            };
+            if ($cast === null) {
+                $warnings[] = "{$name}: {$field} okunamadı ({$v})";
+                continue;
+            }
+            $data[$field] = $cast;
+        }
+        if (isset($data['imo'])) {
+            $data['imo'] = preg_replace('/\D/', '', (string) $data['imo']) ?: $data['imo'];
+        }
+
+        $before = isset($data['imo'])
+            ? row('SELECT * FROM vessels WHERE imo = ?', [$data['imo']])
+            : row("SELECT * FROM vessels WHERE (imo IS NULL OR imo = '') AND name = ?", [$name]);
+        $a = actor();
+        if (!$before) {
+            $id = insert('vessels', $data + ['created_at' => now(), 'created_by' => $a['name'], 'updated_at' => now(), 'updated_by' => $a['name']]);
+            $raw = ent_raw('vessel', $id);
+            gecmis_log('vessel', $id, $raw['name'], null, 'insert', null, null, $raw);
+            $added++;
+            continue;
+        }
+        $changed = array_filter($data, fn($v, $k) => !values_equal($before[$k], $v), ARRAY_FILTER_USE_BOTH);
+        if (!$changed) {
+            $same++;
+            continue;
+        }
+        update('vessels', $before['id'], $changed + ['updated_at' => now(), 'updated_by' => $a['name']]);
+        foreach ($changed as $field => $value) {
+            gecmis_log('vessel', $before['id'], $data['name'] ?? $before['name'], $field, 'update', $before[$field], $value);
+        }
+        if (array_intersect(array_keys($changed), ['name', 'imo', 'flag'])) {
+            $row = ent_raw('vessel', $before['id']);
+            foreach (rows('SELECT id FROM positions WHERE vessel_id = ?', [$row['id']]) as $pos) {
+                update('positions', $pos['id'], ['vessel_name' => $row['name'], 'imo' => $row['imo'], 'flag' => $row['flag']]);
+            }
+        }
+        $updated++;
+    }
+    db()->commit();
+
+    feed('vessel', 'import', null, null, null, $added + $updated);
+    if ($updated) {
+        feed('position', 'import', null);
+    }
+    json_response(['added' => $added, 'updated' => $updated, 'same' => $same, 'skipped' => $skipped, 'warnings' => $warnings]);
 }
 
 function vessels_get(array $p): never
