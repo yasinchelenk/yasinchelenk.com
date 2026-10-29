@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<title>Chartering engine tests</title>
+<style>
+    body { font: 14px "Segoe UI", system-ui, sans-serif; background: #f2f5f8; color: #1d2733; margin: 0; padding: 24px; }
+    h1 { font-size: 18px; color: #0c2540; margin: 0 0 4px; }
+    #summary { font-weight: 600; margin-bottom: 16px; }
+    .pass { color: #1a7f4e; } .fail { color: #c0392b; }
+    section { background: #fff; border: 1px solid #d7dfe8; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+    section h2 { font-size: 14px; margin: 0 0 6px; }
+    li { list-style: none; padding: 1px 0; } li small { color: #68788c; margin-left: 6px; }
+</style>
+</head>
+<body>
+<h1>Chartering engine — acceptance tests</h1>
+<div id="summary">Running…</div>
+<div id="out"></div>
+<script type="module">
+import { allResults } from './harness.js';
+import './voyage.test.js';
+import './calculators.test.js';
+
+const results = allResults();
+const out = document.getElementById('out');
+let pass = 0, fail = 0;
+for (const t of results) {
+    const failed = t.error || t.checks.some((c) => !c.ok);
+    failed ? fail++ : pass++;
+    const s = document.createElement('section');
+    s.innerHTML = `<h2 class="${failed ? 'fail' : 'pass'}">${failed ? '✗' : '✓'} ${t.name}</h2>`;
+    const ul = document.createElement('ul');
+    if (t.error) ul.innerHTML = `<li class="fail">Error: ${t.error}</li>`;
+    for (const c of t.checks) {
+        const li = document.createElement('li');
+        li.className = c.ok ? 'pass' : 'fail';
+        li.textContent = `${c.ok ? '✓' : '✗'} ${c.label}`;
+        const small = document.createElement('small');
+        small.textContent = c.detail;
+        li.append(small);
+        ul.append(li);
+    }
+    s.append(ul);
+    out.append(s);
+}
+const summary = document.getElementById('summary');
+summary.className = fail ? 'fail' : 'pass';
+summary.textContent = `${pass} passed, ${fail} failed`;
+document.title = `${fail ? 'FAIL' : 'PASS'} ${pass}/${pass + fail} — Chartering tests`;
+</script>
+</body>
+</html>

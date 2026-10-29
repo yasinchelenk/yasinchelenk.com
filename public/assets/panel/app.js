@@ -21,9 +21,11 @@ export const TABS = [
     { code: 'dues', label: 'Dues & Payments', group: 'acc', tip: 'Fener ve kılavuzluk tahakkukları, ödeme takibi' },
     { code: 'da', label: 'Final DA', group: 'acc' },
     { code: 'account', label: 'Account', group: 'acc', tip: 'Armatöre gönderilmiş DA’lerin son kontrolü ve muhasebe çıktısı' },
+    { code: 'ch-voyage', label: 'Voyage Estimator', group: 'ch', tip: 'Voyage estimate: intake, bunker, freight, TCE, breakeven ve sensitivity' },
+    { code: 'ch-calc', label: 'Calculators', group: 'ch', tip: 'TPC/draft, intake & SF, deadfreight, bunker, ETA, EU ETS, komisyon, birim çevirici' },
     { code: 'gecmis', label: 'History', tip: 'Kim ne zaman neyi değiştirdi; silinen kayıtlar ve geri alma' },
 ];
-const GROUPS = { ops: 'Operations', acc: 'Account' };
+const GROUPS = { ops: 'Operations', acc: 'Account', ch: 'Chartering' };
 const KEEP_ALIVE = ['transits', 'positions', 'tasks', 'da', 'vessels', 'customs', 'cash'];
 
 const root = document.getElementById('app');

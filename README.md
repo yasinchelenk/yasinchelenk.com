@@ -65,6 +65,24 @@ SMTP tanımlı değilse mail pencereleri gönderimi kapatır ve eksik ayarları 
 | Final DA | DA numaraları, kuyruk, açık DA'ler, hazırlama editörü (tahakkuk + tarife + ekstra kalemler), TCMB kuru, PDF + XLSX, armatöre mail, Invoices |
 | Account | Gönderilmiş DA'ların muhasebe kopyası (USD/EUR/TL), kontrol ve PDF |
 | History | Tüm değişiklikler, filtreler, geri alma, eski kayıtları temizleme |
+| Chartering · Voyage Estimator | Çok bacaklı itinerary (deniz / yükleme / tahliye / bunker / kanal / boğaz / hava), intake (DWT / hacim / draft / CP; bağlayan kısıt), bunker + ECA + EU ETS, net navlun, TCE, breakeven ve hedef TCE için navlun, sensitivity, kayıtlı estimate'ler, karşılaştırma, PDF/Excel/e-posta metni; teknik bilgiler gemi kartına kaydedilir |
+| Chartering · Calculators | TPC/draft, FWA/DWA, SF & intake, tolerans & deadfreight, bunker stem/redelivery, bunker sapması, mesafe/ETA (saat dilimli), EU ETS, komisyon, birim çevirici, lay-up vs trading |
+
+### Chartering modülü
+
+Hesap motoru tarayıcıda çalışan saf fonksiyonlardır (`public/assets/panel/chartering/engine/`), arayüzden bağımsızdır.
+Yöntem handybulk derslerini izler (bağlantılar `chartering/links.js`; metin kopyalanmaz, link verilir). Sunucu yalnızca
+girdileri/sonuçları saklar (`ch_vessel_specs`, `ch_estimates`) ve ekrandaki sonuçların PDF/Excel kopyasını üretir.
+
+Kabul testleri (handybulk "M/V Apollon" voyage estimate'i, TPC/FWA/DWA, SF, ETA, EU ETS vb.):
+
+```powershell
+php -S localhost:8000 -t public public/index.php      # ayrı pencerede
+.\bin\chartering-tests.ps1                            # headless Edge ile; -All tüm kontrolleri değerleriyle yazar
+```
+
+Ya da tarayıcıda `http://localhost:8000/assets/panel/chartering/tests/` açın. Apollon'da MDO tüketimi bunker ve Süveyş
+günlerinin ikisinde de 1 mt/gün sayıldığı için TCE handybulk'tan ~%0,3 düşük çıkar (12.531 / 12.567; tolerans ±%0,5).
 
 Canlı işbirliği 3 sn'lik sorgu ile çalışır (çevrimiçi kullanıcılar, düzenlenen hücre, değişen satırın yanıp sönmesi).
 Yedekler günde üç kez `storage/backups/` altına alınır.

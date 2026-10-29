@@ -18,6 +18,7 @@ const PAGES = [
     'positions' => 'Positions', 'tasks' => 'Tasks', 'transits' => 'Transits', 'vessels' => 'Vessels',
     'customs' => 'Customs', 'cash' => 'Cash', 'supply' => 'Supply', 'talepname' => 'Petitions',
     'tariffs' => 'Tariffs', 'dues' => 'Dues & Payments', 'da' => 'Final DA', 'account' => 'Account', 'gecmis' => 'History',
+    'ch-voyage' => 'Chartering · Voyage Estimator', 'ch-calc' => 'Chartering · Calculators',
 ];
 
 const USER_COLORS = [
