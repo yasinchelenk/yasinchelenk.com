@@ -93,6 +93,8 @@ function panel_migrations(): array
         107 => 'chartering_migrate_107',
         // Chartering ayrı sayfaya taşındı: kendi gemi profilleri, paneldeki Vessels'a bağ kalmadı
         108 => 'chartering_migrate_108',
+        // Chartering, Faz 4: tonnage list, cargo order'lar, mesafe matrisi
+        109 => 'chartering_migrate_109',
     ];
 }
 

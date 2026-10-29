@@ -24,10 +24,13 @@ function merge(base, data) {
     return data === undefined ? base : data;
 }
 
-export async function mount(el, ctx) {
-    let est = merge(blankEstimate(), store.get('ch_voyage_draft', null) ?? {});
-    let savedId = store.get('ch_voyage_id', null);
-    let dirty = store.get('ch_voyage_dirty', false);
+export async function mount(el, ctx, param) {
+    // Opened from the Tonnage & Cargo board ("Estimate →"): start from that vessel + cargo as a new, unsaved estimate
+    const incoming = param?.estimate ?? null;
+    let est = merge(blankEstimate(), incoming ?? store.get('ch_voyage_draft', null) ?? {});
+    let savedId = incoming ? null : store.get('ch_voyage_id', null);
+    let dirty = incoming ? true : store.get('ch_voyage_dirty', false);
+    if (incoming && store.get('ch_voyage_dirty', false)) toast('Kaydedilmemiş önceki estimate taslağının yerine eşleşmeden gelen estimate açıldı.');
     let res = null;
     let profiles = [];
     const canEdit = ctx.allowed('ch-voyage');

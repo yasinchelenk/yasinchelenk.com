@@ -55,6 +55,8 @@ test('Intake constraints', () => {
     eq(draft.binding, 'draft-limited', '1 m draft restriction binds');
     near(draft.intake, 57150 - 5000, 'draft limit removes 100 cm × TPC 50', 1e-6);
     eq(cargoIntake({ ...base, sf: 0.5 }).binding, 'DWT-limited', 'heavy cargo without restrictions is DWT-limited');
+    const noTpc = cargoIntake({ ...base, sf: 0.5, maxDraft: 11.2, tpc: null });
+    eq([noTpc.draftIntake, noTpc.draftUnknown], [null, true], 'draft restriction without TPC → flagged, no fake figure');
     const r = toleranceRange(45000, 10);
     near(r.max, 49500, 'MOLOO max', 1e-9);
     near(r.min, 40500, 'MOLOO min', 1e-9);

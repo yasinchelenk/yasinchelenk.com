@@ -178,6 +178,7 @@ export function estimate(est) {
     };
 
     if (!qty) warnings.push('Intake sıfır: gemi DWT’si, kargo miktarı veya stowage factor eksik.');
+    if (intake.draftUnknown) warnings.push('Liman draft kısıtı gemi draft’ından düşük ama TPC girilmemiş: draft’a göre intake azaltılamadı.');
     if (intake.belowMin) warnings.push(`Intake (${Math.round(qty)} t) CP minimumunun altında: deadfreight riski.`);
     if (rows.some((r) => r.type === 'sea' && r.nm > 0 && !r.kn)) warnings.push('Bir deniz bacağında hız yok: gemi profiline veya bacağa hız girin.');
     if (rows.some((r) => (r.type === 'load' || r.type === 'disch') && !r.rateOk)) warnings.push('Bir limanda yük/tahliye rate’i yok: liman günü hesaplanamadı.');

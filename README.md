@@ -80,6 +80,7 @@ Chartering değişiklikleri, panel kullanıcıları listelenmez). Kullanıcı y�
 | Sekme | İçerik |
 |---|---|
 | Market | Özet şeridi (BDI, en çok değişen segment, İstanbul VLSFO/MGO, EUA, TCMB USD/TRY), Baltic endeksleri ve TC kazançları (günlük form veya rapor paragrafını yapıştırarak), trip charter rate'leri (satır yapıştırma, segment sekmeleri, Türkiye/Akdeniz/Karadeniz filtresi, bölge kısaltma ipuçları), 1 yıllık period ve route TC, bunker fiyatları ve spread'ler, grafikler (çizgi + tablo görünümü), haftalık yorumlar, haber linkleri, yaklaşan time bar'lar |
+| Tonnage & Cargo | Broker e-postasından pozisyon ayrıştırıcı (bir e-postada birden çok gemi; tahmin edilen alanlar sarı, okunamayanlar kırmızı), aynı gemi tekrar gelince güncelleme + eski open'ların geçmişi; cargo order ayrıştırıcı ve kayıtları; eşleştirme (ballast mesafesi → laycan'a varış, intake ve CP min, LOA/beam/air draft, gear/grab, varsayımlarla hızlı TCE, puan ve yeşil/sarı/kırmızı; "Estimate →" ile Voyage Estimator'da açılır); kendi mesafe matrisi (`ch_distances`, eşleştirme satırından da girilir) |
 | Voyage Estimator | Çok bacaklı itinerary (deniz / yükleme / tahliye / bunker / kanal / boğaz / hava), intake (DWT / hacim / draft / CP; bağlayan kısıt), bunker + ECA + EU ETS, net navlun, TCE, breakeven ve hedef TCE için navlun, sensitivity, kayıtlı estimate'ler, karşılaştırma, PDF/Excel/e-posta metni; teknik bilgiler gemi profili olarak saklanır, Market'teki son bunker fiyatları tek tıkla |
 | Laytime & Demurrage | Liman başına SOF (yapıştırarak da), NOR + turn time / GENCON 94 başlangıcı, NOR ofis saatleri, SHINC/SHEX/SHEXUU/SSHEX/SATPM/FHEX/WWD, ülke tatil takvimi (Türkiye 2025–2027 hazır, arifeler 13:00'ten), once on demurrage, ayrı / reversible / averaged, ATS/WTS despatch, time sheet (PDF/Excel), claim mektubu taslağı, claim durumu ve time bar uyarısı |
 | Calculators | TPC/draft, FWA/DWA, SF & intake, tolerans & deadfreight, bunker stem/redelivery, bunker sapması, mesafe/ETA (saat dilimli), EU ETS, komisyon, birim çevirici, lay-up vs trading |
@@ -89,7 +90,7 @@ Chartering değişiklikleri, panel kullanıcıları listelenmez). Kullanıcı y�
 Hesap motoru tarayıcıda çalışan saf fonksiyonlardır (`public/assets/panel/chartering/engine/`), arayüzden bağımsızdır.
 Yöntem handybulk derslerini izler (bağlantılar `chartering/links.js`; metin kopyalanmaz, link verilir). Sunucu yalnızca
 girdileri/sonuçları saklar (`ch_vessel_profiles`, `ch_estimates`, `ch_laytime_calcs`, `ch_holidays`, `ch_market_indices`,
-`ch_charter_rates`, `ch_tc_rates`, `ch_bunker_prices`, `ch_market_notes`) ve ekrandaki sonuçların
+`ch_charter_rates`, `ch_tc_rates`, `ch_bunker_prices`, `ch_market_notes`, `ch_tonnage`, `ch_cargo_orders`, `ch_distances`) ve ekrandaki sonuçların
 PDF/Excel kopyasını üretir. Laytime'da SOF saatleri limanın yerel saatidir; hafta günleri ve tatiller o yerel tarihe göre işlenir.
 
 Kabul testleri (handybulk "M/V Apollon" voyage estimate'i, TPC/FWA/DWA, SF, ETA, EU ETS vb.):

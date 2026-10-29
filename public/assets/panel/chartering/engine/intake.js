@@ -41,9 +41,13 @@ export function cargoIntake(p) {
     }
 
     let draftIntake = null;
+    let draftUnknown = false;
     if (has(p.maxDraft) && n(p.maxDraft) < n(p.summerDraft)) {
-        draftIntake = dwcc - (n(p.summerDraft) - n(p.maxDraft)) * 100 * n(p.tpc);
-        limits.push({ key: 'draft-limited', value: draftIntake });
+        // Without TPC the reduction cannot be computed: say so instead of showing an unreduced figure
+        if (n(p.tpc) > 0) {
+            draftIntake = dwcc - (n(p.summerDraft) - n(p.maxDraft)) * 100 * n(p.tpc);
+            limits.push({ key: 'draft-limited', value: draftIntake });
+        } else draftUnknown = true;
     }
 
     if (has(p.cpMax)) limits.push({ key: 'CP-limited', value: n(p.cpMax) });
@@ -55,6 +59,7 @@ export function cargoIntake(p) {
         dwcc,
         cubicIntake,
         draftIntake,
+        draftUnknown,
         cpMax: has(p.cpMax) ? n(p.cpMax) : null,
         intake,
         binding: best.key,
