@@ -68,7 +68,7 @@ function panel_import_map(): array
 {
     $assets = dirname(__DIR__, 2) . '/public/assets/';
     $modules = [];
-    foreach (['panel/*.js', 'panel/core/*.js', 'panel/tabs/*.js', 'panel/chartering/*.js', 'panel/chartering/engine/*.js'] as $pattern) {
+    foreach (['panel/*.js', 'panel/core/*.js', 'panel/tabs/*.js', 'panel/chartering/*.js', 'panel/chartering/engine/*.js', 'panel/chartering/engine/sof/*.js'] as $pattern) {
         foreach (glob($assets . $pattern) ?: [] as $file) {
             $rel = substr($file, strlen($assets));
             $modules['/assets/' . $rel] = asset($rel);

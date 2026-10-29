@@ -13,6 +13,7 @@ export const TABS = [
     { code: 'ch-board', label: 'Tonnage & Cargo', tip: 'Market positions, cargo orders, matching and the distance matrix' },
     { code: 'ch-voyage', label: 'Voyage Estimator', tip: 'Intake, bunkers, freight, TCE, breakeven and sensitivity' },
     { code: 'ch-fixtures', label: 'Fixtures', tip: 'Fixture register from recaps, post-fixture checklist, deadlines, document templates' },
+    { code: 'ch-sof', label: 'SOF', tip: 'Statement of facts: templates, chronological events, stoppages, checks' },
     { code: 'ch-laytime', label: 'Laytime & Demurrage', tip: 'Time sheets from the SOF, demurrage / despatch, claim letter' },
     { code: 'ch-tc', label: 'TC Desk', tip: 'Hire statement and schedule, off-hire, speed & consumption claim' },
     { code: 'ch-calc', label: 'Calculators', tip: 'TPC/draft, intake & SF, draft survey, deadfreight, bunkers, ETA, EU ETS, commissions' },

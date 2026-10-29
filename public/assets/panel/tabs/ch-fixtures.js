@@ -162,7 +162,10 @@ export async function mount(el, ctx, param) {
         const docs = h('div.ch-chips', [...new Set([...Object.keys(DEFAULT_TEMPLATES), ...templates.map((t) => t.key)])].map((key) =>
             h('button.tiny', { type: 'button', on: { click: () => documentDialog(w, key) } }, templateOf(key).name ?? key)));
         const inv = !isTc(w) ? freightInvoice(w) : null;
-        modal({ title: `${f.ref} — ${f.vessel ?? ''}`, width: 1250,
+        // Buttons that open another tab close the card first
+        const go = (fn) => () => { card?.close(); fn(); };
+        let card;
+        card = modal({ title: `${f.ref} — ${f.vessel ?? ''}`, width: 1250,
             body: h('div.ch-fx',
                 h('section', h('h4', 'Fixture'), specForm(w, FORM, { cols: 4 }), f.recap_text ? h('details', h('summary', 'Recap text'), h('pre.ch-src', f.recap_text)) : null),
                 h('section', h('h4', 'Post-fixture checklist'), tasksBox),
@@ -171,8 +174,10 @@ export async function mount(el, ctx, param) {
                         inv ? h('p', `Freight ${usd(inv.gross, 2)} − address ${usd(inv.address, 2)}${inv.deadfreight ? ` + deadfreight ${usd(inv.deadfreight, 2)}` : ''} = `, h('b', usd(inv.net, 2)), h('small.dim', ` (B/L qty ${w.bl_qty ? fmt(w.bl_qty, 0) : 'not entered — CP qty used'})`)) : null),
                     h('section', h('h4', 'Documents'), docs, h('p.dim', 'Şablonlar fixture bilgileriyle doldurulur; düzenleyip kopyalayın veya PDF alın.'),
                         h('h4', 'Linked'), h('div.ch-chips',
-                            h('button.tiny', { type: 'button', on: { click: () => openLaytime(w) } }, 'Laytime calculation →'),
-                            isTc(w) ? h('button.tiny', { type: 'button', on: { click: () => ctx.open('ch-tc', { fixture: w }) } }, 'Hire statement →') : null,
+                            !isTc(w) && ctx.allowed('ch-sof') ? h('button.tiny', { type: 'button', title: 'Yükleme limanı SOF’u (yoksa şablondan oluşturulur)', on: { click: go(() => ctx.open('ch-sof', { fixture: w, call: 'load' })) } }, 'SOF load port →') : null,
+                            !isTc(w) && ctx.allowed('ch-sof') ? h('button.tiny', { type: 'button', on: { click: go(() => ctx.open('ch-sof', { fixture: w, call: 'disch' })) } }, 'SOF disch port →') : null,
+                            h('button.tiny', { type: 'button', on: { click: go(() => openLaytime(w)) } }, 'Laytime calculation →'),
+                            isTc(w) ? h('button.tiny', { type: 'button', on: { click: go(() => ctx.open('ch-tc', { fixture: w })) } }, 'Hire statement →') : null,
                             ...(f.tc ?? []).map((t) => h('span.ch-badge.green', `${t.kind}: ${t.name}`)))))),
             actions: [
                 canEdit ? { label: 'Delete', danger: true, onClick: async () => {

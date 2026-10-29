@@ -1214,6 +1214,36 @@ details.ch-lessons li { break-inside: avoid; margin-bottom: 3px; }
 .ch-calc--wide .ch-calc__body { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
 table.ch-ds input.ch-num { width: 110px; }
 table.ch-ds tr.ch-ds__sub td { background: var(--thead-bg) !important; color: var(--navy); font-weight: 600; font-size: 12px; }
+/* SOF */
+.ch-split--sof { grid-template-columns: minmax(0, 1fr) 340px; }
+.ch-split--sof > * { min-width: 0; }
+.ch-split--sof .ch-sec, .ch-split--sof .ch-sec__body { min-width: 0; max-width: 100%; }
+.ch-split--sof .ch-sec__body { grid-template-columns: minmax(0, 1fr); }
+.ch-sof__hgroup { margin-bottom: 6px; }
+.ch-sof__hgroup h5 { margin: 4px 0; font-size: 12px; color: var(--navy); }
+.ch-sof__summary { display: grid; gap: 10px; }
+.ch-sof__card { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.ch-sof__card h4 { margin: 8px 0 4px; font-size: 13px; }
+.ch-sof__card dt.sof-sub { padding-left: 10px; color: var(--dim); }
+table.ch-sof-events td { padding: 2px 3px; }
+table.ch-sof-events input[type=date] { width: 128px; padding: 2px 4px; font-size: 12.5px; }
+table.ch-sof-events input.sof-time { width: 64px; font-variant-numeric: tabular-nums; }
+table.ch-sof-events input.sof-ev { width: 250px; }
+table.ch-sof-events tr.sof-row td:first-child { border-left: 4px solid var(--cat, var(--line)); }
+table.ch-sof-events tr.is-pending td { background: #fafbfc !important; }
+table.ch-sof-events tr.is-pending input.sof-ev { color: var(--dim); }
+table.ch-sof-events tr.has-error td { background: #fdecea !important; }
+table.ch-sof-events tr.has-warn td:first-child { box-shadow: inset 3px 0 0 #e3a21a; }
+table.ch-sof-events tr.is-flash td { background: #fff3c4 !important; transition: background .3s; }
+.sof-zone { min-width: 38px; }
+.sof-star { color: #c99a06; font-size: 13px; }
+.sof-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11.5px; color: var(--dim); margin-top: 6px; }
+.sof-legend__item { border-left: 4px solid var(--cat); padding-left: 5px; }
+ul.sof-issues { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 4px; font-size: 12.5px; }
+ul.sof-issues li { cursor: pointer; padding: 3px 6px; border-radius: 4px; }
+ul.sof-issues li.error { background: #fdecea; color: #a3291c; }
+ul.sof-issues li.warn { background: var(--lt-mid-bg); color: var(--lt-mid-tx); }
+@media (max-width: 1250px) { .ch-split--sof { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) {
     dl.ch-gloss { grid-template-columns: minmax(0, 1fr); } dl.ch-gloss dt { border-bottom: 0; padding-bottom: 0; }
     .ch-calc--wide .ch-calc__body { grid-template-columns: minmax(0, 1fr); }

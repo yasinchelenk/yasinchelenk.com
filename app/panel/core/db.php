@@ -101,6 +101,8 @@ function panel_migrations(): array
         111 => 'chartering_migrate_111',
         // Chartering, Faz 7: liman veritabanı, kişiler, Knowledge Base tabloları
         112 => 'chartering_migrate_112',
+        // Chartering · SOF sekmesi: SOF kayıtları, kullanıcı şablonları ve olay sözlüğü eklemeleri
+        113 => 'chartering_migrate_113',
     ];
 }
 
