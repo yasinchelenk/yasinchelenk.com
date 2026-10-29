@@ -1,6 +1,7 @@
 # Çalışma zamanı verileri
 storage/*.sqlite*
 storage/*.txt
+storage/*.lock
 storage/backups/*
 storage/messages/*.jsonl
 storage/outbox/*
