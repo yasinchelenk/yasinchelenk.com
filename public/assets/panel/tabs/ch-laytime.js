@@ -38,12 +38,15 @@ export function timeBarBadge(date, status) {
     return h('span.badge.' + cls, { title: `Time bar ${fmtDate(date)}` }, left < 0 ? `time-barred ${-left} d ago` : `time bar in ${left} d`);
 }
 
-export async function mount(el, ctx) {
+export async function mount(el, ctx, param) {
     el.lang = 'en';
-    let calc = merge(blankLaytime(), store.get('ch_lay_draft', null) ?? {});
+    // Opened from the Position Monitor for a vessel: a new calculation with that vessel, unless a draft is unsaved
+    const fromMonitor = param?.vesselName && !store.get('ch_lay_dirty', false);
+    let calc = merge(blankLaytime(), fromMonitor ? { vessel: { name: param.vesselName, vesselId: null } } : store.get('ch_lay_draft', null) ?? {});
     calc.ports = (calc.ports ?? []).map((p) => merge(blankPort(p.kind), p));
-    let savedId = store.get('ch_lay_id', null);
-    let dirty = store.get('ch_lay_dirty', false);
+    let savedId = fromMonitor ? null : store.get('ch_lay_id', null);
+    let dirty = fromMonitor ? true : store.get('ch_lay_dirty', false);
+    if (param?.vesselName && !fromMonitor) toast('Kaydedilmemiş bir laytime taslağı var; o açıldı (yeni hesap için önce kaydedin veya “+ New”).');
     let res = null;
     let holidays = {};
     const canEdit = ctx.allowed('ch-laytime');

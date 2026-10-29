@@ -95,6 +95,8 @@ function panel_migrations(): array
         108 => 'chartering_migrate_108',
         // Chartering, Faz 4: tonnage list, cargo order'lar, mesafe matrisi
         109 => 'chartering_migrate_109',
+        // Chartering, Faz 5: Position Monitor (izleme listesi, AIS konum geçmişi, toplama kayıtları)
+        110 => 'chartering_migrate_110',
     ];
 }
 

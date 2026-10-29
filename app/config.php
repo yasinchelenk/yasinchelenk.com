@@ -46,6 +46,10 @@ return [
         'account' => $env('MAIL_ACCOUNT'),              // armatöre DA (ör. account@…)
         'outbox'  => $env('MAIL_OUTBOX') === '1',       // geliştirme: göndermek yerine storage/outbox'a yaz
     ],
+    // Chartering Desk · Position Monitor: canlı AIS. Anahtar yalnızca sunucudaki .env'de (AISSTREAM_API_KEY), tarayıcıya gitmez.
+    'ais' => [
+        'aisstream_key' => $env('AISSTREAM_API_KEY'),
+    ],
     // Operasyon panelinin (/panel) çıktılarda ve e-postalarda kullandığı acente bilgileri.
     'agency' => [
         'name'       => 'Çelenk Shipping Agency',

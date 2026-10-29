@@ -1164,6 +1164,23 @@ table.ch-match__table td { vertical-align: middle; }
 .ch-verdict.green { background: var(--green); } .ch-verdict.amber { background: #e3a21a; } .ch-verdict.red { background: var(--red); }
 input.ch-nm { width: 90px; padding: 2px 6px; font-size: 12.5px; }
 @media (max-width: 900px) { .ch-match { grid-template-columns: minmax(0, 1fr); } }
+.ch-mon__status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
+.ch-mon__chip { background: var(--chip-bg); border-radius: 12px; padding: 2px 10px; font-weight: 600; color: var(--navy); }
+.ch-mon__chip.is-demo { background: var(--lt-mid-bg); color: var(--lt-mid-tx); }
+.ch-mon__body { display: grid; gap: 8px; min-height: 0; flex: 1; }
+.ch-mon__split { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; min-height: 520px; height: calc(100vh - 200px); }
+.ch-mon__map { border: 1px solid var(--line); border-radius: 8px; min-height: 420px; height: 100%; z-index: 0; }
+.ch-mon__map.is-picking { cursor: crosshair; outline: 2px solid var(--amber); }
+.ch-mon__tool { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; align-content: start; overflow: auto; }
+.ch-mon__tool h4 { font-size: 14px; }
+.ch-mon__result { display: grid; gap: 4px; font-size: 13px; padding: 6px 0; border-top: 1px solid var(--row-line); }
+.ch-mon__note { font-size: 11.5px; margin: 0; }
+.ch-ship-icon { background: none !important; border: 0 !important; }
+.ch-pop { display: grid; gap: 2px; font-size: 12.5px; min-width: 220px; }
+.ch-pop__actions { display: flex; gap: 4px; margin-top: 4px; }
+.ch-row-actions { display: inline-flex; gap: 2px; }
+.ch-row-actions button { opacity: .7; }
+@media (max-width: 900px) { .ch-mon__split { grid-template-columns: minmax(0, 1fr); height: auto; } .ch-mon__map { height: 60vh; } }
 @media (max-width: 1250px) { .ch-dash__grid { grid-template-columns: minmax(0, 1fr); } .ch-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 900px) { .ch-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1250px) { .ch-split, .ch-split--laytime { grid-template-columns: minmax(0, 1fr); } .ch-results { position: static; } }
