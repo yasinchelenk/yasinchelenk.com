@@ -91,6 +91,8 @@ function panel_migrations(): array
         106 => 'chartering_migrate_106',
         // Chartering, Faz 3: piyasa verileri (Baltic, charter rate, period/route TC, bunker, notlar)
         107 => 'chartering_migrate_107',
+        // Chartering ayrı sayfaya taşındı: kendi gemi profilleri, paneldeki Vessels'a bağ kalmadı
+        108 => 'chartering_migrate_108',
     ];
 }
 

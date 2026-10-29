@@ -121,6 +121,24 @@ function izinli(array $user, string $page): bool
     return $user['role'] === 'yonetici' || $user['pages'] === null || in_array($page, $user['pages'], true);
 }
 
+/**
+ * Yalnızca Chartering Desk sayfalarına yetkili kullanıcı (ör. broker'a açılan hesap): operasyon panelinin
+ * hiçbir verisini — "her oturum okuyabilir" uçları dahil — göremez; yalnızca /api/chartering/*, oturum ve canlı akış.
+ */
+function chartering_only(array $user): bool
+{
+    if ($user['role'] === 'yonetici' || !is_array($user['pages'])) {
+        return false;
+    }
+    foreach ($user['pages'] as $page) {
+        if (!str_starts_with((string) $page, 'ch-')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 function public_user(array $u): array
 {
     $pages = is_array($u['pages']) || $u['pages'] === null ? $u['pages'] : json_decode((string) $u['pages'], true);

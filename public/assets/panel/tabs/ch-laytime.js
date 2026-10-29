@@ -46,7 +46,6 @@ export async function mount(el, ctx) {
     let dirty = store.get('ch_lay_dirty', false);
     let res = null;
     let holidays = {};
-    let vessels = [];
     const canEdit = ctx.allowed('ch-laytime');
 
     const left = h('div.ch-inputs');
@@ -89,11 +88,8 @@ export async function mount(el, ctx) {
     function cpSection() {
         const c = calc.cp;
         const v = calc.vessel;
-        const picker = h('input', { type: 'text', list: 'ch-lay-vessels', value: v.name ?? '', placeholder: 'Vessels listesinden seçin veya yazın',
-            on: { input: (e) => { v.name = e.target.value; v.vesselId = null; changed(); }, change: (e) => {
-                const hit = vessels.find((x) => `${x.name}${x.imo ? ' · ' + x.imo : ''}` === e.target.value || x.name === e.target.value.trim().toUpperCase());
-                if (hit) { v.vesselId = hit.id; v.name = hit.name; e.target.value = hit.name; changed(); }
-            } } });
+        const picker = h('input', { type: 'text', list: 'ch-lay-vessels', value: v.name ?? '', placeholder: 'Gemi adı (kayıtlı profillerden seçilebilir)',
+            on: { input: (e) => { v.name = e.target.value; v.vesselId = null; changed(); } } });
         return section('lay-cp', 'Voyage & charter party', 'blue', [
             h('div.ch-grid', { style: { '--cols': 4 } },
                 h('label.ch-field.span-2', h('span.ch-field__label', 'Vessel'), picker),
@@ -284,7 +280,7 @@ export async function mount(el, ctx) {
         if (!canEdit) return;
         if (!calc.name?.trim()) { calc.name = autoName(); nameIn.value = calc.name; }
         const payload = {
-            name: asCopy && savedId ? `${calc.name.trim()} (copy)` : calc.name.trim(), vessel_id: calc.vessel.vesselId, vessel_name: calc.vessel.name || null,
+            name: asCopy && savedId ? `${calc.name.trim()} (copy)` : calc.name.trim(), vessel_id: null, vessel_name: calc.vessel.name || null,
             ports: calc.ports.map((p) => p.name).filter(Boolean).join(' / ') || null,
             demurrage: res.demurrage, despatch: res.despatch, net: res.net, claim_status: calc.claim.status, time_bar: timeBar(calc, calc.claim.timeBarDays), data: calc,
         };
@@ -469,10 +465,7 @@ export async function mount(el, ctx) {
     drawStatus();
     drawInputs();
 
-    get('vessels', { limit: 10000 }).then((r) => {
-        vessels = r.rows;
-        vesselList.replaceChildren(...vessels.map((x) => h('option', { value: `${x.name}${x.imo ? ' · ' + x.imo : ''}` })));
-    }).catch(() => {});
+    get('chartering/vessel-profiles').then((list) => vesselList.replaceChildren(...list.map((x) => h('option', { value: x.name })))).catch(() => {});
 
     const onKey = (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && el.isConnected && !el.closest('.is-hidden')) {

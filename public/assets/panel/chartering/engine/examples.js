@@ -15,7 +15,7 @@ export const TR_HOLIDAYS_SAMPLE = [
 export function laytimeExample() {
     const c = blankLaytime();
     c.name = 'Example — Constanta / Iskenderun wheat (Kurban Bayramı)';
-    c.vessel.name = 'AYANA SEA';
+    c.vessel.name = 'MV EXAMPLE TRADER';
     Object.assign(c.cp, { cpDate: '2026-04-28', form: 'GENCON 94', owners: 'Example Owners Ltd', charterers: 'Example Grain Trading SA', cargo: '20,000 mt wheat in bulk 10% MOLOO',
         demRate: 9000, desRate: 4500, desBasis: 'WTS', mode: 'separate' });
     const ev = (type, at, until, note) => ({ type, at, ...(until ? { until } : {}), ...(note ? { note } : {}) });

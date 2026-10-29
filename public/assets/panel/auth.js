@@ -7,8 +7,8 @@ const PASSWORD_HINT = h('span', 'En az 8 karakter; içinde bir ', h('b', 'büyü
 
 const logo = (firma) => h('div.auth__logo', firma.logo ? h('img', { src: firma.logo, alt: firma.ad }) : firma.kisa ?? firma.ad);
 
-/** Giriş / kayıt ekranı. Başarılı girişte onDone(user) çağrılır. */
-export function renderLogin(root, info, onDone) {
+/** Giriş / kayıt ekranı. Başarılı girişte onDone(user) çağrılır. register: false → yalnızca giriş (Chartering Desk) */
+export function renderLogin(root, info, onDone, { register = true } = {}) {
     let mode = info.kurulum ? 'kayit' : 'giris';
     let color = null;
     const card = h('form.auth__card');
@@ -40,7 +40,7 @@ export function renderLogin(root, info, onDone) {
         fill(card, 
             logo(info.firma),
             info.kurulum ? notice('info', 'Henüz hesap yok. Açtığınız ', h('b', 'ilk hesap yönetici'), ' olur (ve diğer hesapları o onaylar). Kurulum kodu sunucuda ', h('code', 'storage/panel-kurulum-kodu.txt'), ' dosyasındadır.') : null,
-            info.kurulum ? null : segmented([{ value: 'giris', label: 'Sign in' }, { value: 'kayit', label: 'Create account' }], mode, (v) => { mode = v; draw(); }),
+            info.kurulum || !register ? null : segmented([{ value: 'giris', label: 'Sign in' }, { value: 'kayit', label: 'Create account' }], mode, (v) => { mode = v; draw(); }),
             ok, err,
             isReg ? field('Full name', name) : null,
             field('Username', user),

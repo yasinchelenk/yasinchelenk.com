@@ -35,7 +35,9 @@ function live_poll(array $p, array $in, array $user): never
     }
     maybe_backup();
 
-    $users = rows('SELECT p.session_id, p.user_id, p.tab, p.row_id, p.field, u.name, u.color FROM presence p JOIN users u ON u.id = p.user_id WHERE p.at >= ? ORDER BY u.name', [$now - PRESENCE_TTL]);
+    // Yalnız Chartering'e yetkili kullanıcı panel kullanıcılarını ve paneldeki değişiklikleri görmez
+    $chOnly = chartering_only($user);
+    $users = $chOnly ? [] : rows('SELECT p.session_id, p.user_id, p.tab, p.row_id, p.field, u.name, u.color FROM presence p JOIN users u ON u.id = p.user_id WHERE p.at >= ? ORDER BY u.name', [$now - PRESENCE_TTL]);
 
     $since = (int) ($in['since'] ?? 0);
     $last = (int) scalar('SELECT COALESCE(MAX(id), 0) FROM changes');
@@ -51,7 +53,7 @@ function live_poll(array $p, array $in, array $user): never
             'count'  => $c['count'] === null ? null : (int) $c['count'],
             'by'     => $c['user_name'],
             'byId'   => $c['user_id'] === null ? null : (int) $c['user_id'],
-        ], rows('SELECT c.*, u.name AS user_name FROM changes c LEFT JOIN users u ON u.id = c.user_id WHERE c.id > ? ORDER BY c.id LIMIT 500', [$since]));
+        ], rows('SELECT c.*, u.name AS user_name FROM changes c LEFT JOIN users u ON u.id = c.user_id WHERE c.id > ?' . ($chOnly ? " AND c.entity LIKE 'ch\\_%' ESCAPE '\\'" : '') . ' ORDER BY c.id LIMIT 500', [$since]));
     }
 
     json_response([

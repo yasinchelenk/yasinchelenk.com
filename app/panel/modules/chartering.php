@@ -132,15 +132,39 @@ entity_define('ch_holiday', [
     },
 ]);
 
-entity_define('ch_vessel_spec', [
-    'table'  => 'ch_vessel_specs',
+/**
+ * Chartering Desk'in kendi gemi profilleri. Operasyon panelindeki Vessels kayıtları (eski şirketin verisi)
+ * Chartering'de kullanılmaz; 105'te kurulan ch_vessel_specs tablosu artık okunmaz.
+ */
+function chartering_migrate_108(PDO $pdo): void
+{
+    $pdo->exec(<<<'SQL'
+        CREATE TABLE ch_vessel_profiles (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            data TEXT NOT NULL,
+            created_at TEXT, created_by TEXT, updated_at TEXT, updated_by TEXT
+        );
+        UPDATE ch_estimates SET vessel_id = NULL;
+        UPDATE ch_laytime_calcs SET vessel_id = NULL;
+        SQL);
+}
+
+entity_define('ch_vessel_profile', [
+    'table'  => 'ch_vessel_profiles',
     'page'   => 'ch-voyage',
     'undo'   => true,
-    'label'  => fn($r) => (string) (scalar('SELECT name FROM vessels WHERE id = ?', [$r['vessel_id']]) ?? 'Vessel') . ' · specs',
-    'fields' => [
-        'vessel_id' => 'int', 'dwt' => 'num', 'summer_draft' => 'num3', 'tpc' => 'num3', 'fwa' => 'num', 'grain' => 'num', 'bale' => 'num',
-        'constants' => 'num', 'fw' => 'num', 'stores' => 'num', 'scrubber' => 'bool', 'speeds' => 'json', 'port' => 'json',
-    ],
+    'label'  => fn($r) => "{$r['name']} · vessel profile",
+    'fields' => ['name' => 'upper', 'data' => 'json'],
+    'prepare' => function (array $d, ?array $before): array {
+        if ((array_key_exists('name', $d) || !$before) && trim((string) ($d['name'] ?? '')) === '') {
+            api_error('Gemi adı gerekli.');
+        }
+        if (isset($d['name']) && scalar('SELECT 1 FROM ch_vessel_profiles WHERE name = ? AND id <> ?', [$d['name'], $before['id'] ?? 0])) {
+            api_error("{$d['name']} adında bir profil zaten var.");
+        }
+        return $d;
+    },
 ]);
 
 entity_define('ch_estimate', [
@@ -169,8 +193,9 @@ function module_routes_chartering(): void
     route('GET', '/api/chartering/estimates/{id}', 'ch_estimates_get', 'ch-voyage');
     crud_routes('ch_estimate', '/api/chartering/estimates');
 
-    route('GET', '/api/chartering/vessels/{id}/specs', 'ch_specs_get', 'ch-voyage');
-    route('PUT', '/api/chartering/vessels/{id}/specs', 'ch_specs_save', 'ch-voyage');
+    // The desk's own vessel profiles (independent of the operations panel's Vessels register)
+    route('GET', '/api/chartering/vessel-profiles', 'ch_profiles_list', '*');
+    crud_routes('ch_vessel_profile', '/api/chartering/vessel-profiles');
 
     route('GET', '/api/chartering/laytime', 'ch_laytime_list', 'ch-laytime');
     route('GET', '/api/chartering/laytime/{id}', 'ch_laytime_get', 'ch-laytime');
@@ -210,25 +235,10 @@ function ch_estimates_get(array $p): never
     json_response($row);
 }
 
-function ch_specs_get(array $p): never
+function ch_profiles_list(): never
 {
-    $vessel = row('SELECT id, name, imo, flag, type, built_year, grt, nrt, loa, beam FROM vessels WHERE id = ?', [$p['id']]) ?? api_error('Gemi bulunamadı.', 404);
-    $spec = row('SELECT * FROM ch_vessel_specs WHERE vessel_id = ?', [$p['id']]);
-    if ($spec) {
-        $spec['speeds'] = json_decode((string) $spec['speeds'], true);
-        $spec['port'] = json_decode((string) $spec['port'], true);
-    }
-    json_response(['vessel' => $vessel, 'spec' => $spec]);
-}
-
-/** Upsert the technical specs typed in the estimator back onto the vessel. */
-function ch_specs_save(array $p, array $in): never
-{
-    row('SELECT id FROM vessels WHERE id = ?', [$p['id']]) ?? api_error('Gemi bulunamadı.', 404);
-    $data = array_intersect_key($in, array_flip(['dwt', 'summer_draft', 'tpc', 'fwa', 'grain', 'bale', 'constants', 'fw', 'stores', 'scrubber', 'speeds', 'port']));
-    $id = scalar('SELECT id FROM ch_vessel_specs WHERE vessel_id = ?', [$p['id']]);
-    $row = $id ? ent_update('ch_vessel_spec', (int) $id, $data) : ent_insert('ch_vessel_spec', $data + ['vessel_id' => (int) $p['id']]);
-    json_response($row);
+    json_response(array_map(fn($r) => ['data' => json_decode((string) $r['data'], true)] + $r,
+        rows('SELECT id, name, data, updated_at, updated_by FROM ch_vessel_profiles ORDER BY name COLLATE NOCASE')));
 }
 
 // ---------------------------------------------------------------- Report export

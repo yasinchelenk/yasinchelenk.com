@@ -80,6 +80,9 @@ function dispatch_api(string $method, string $path): never
             if (!str_starts_with($path, '/api/oturum/') && setting('iki_adim_zorunlu') === '1' && !$user['totp_since']) {
                 api_error('İki adımlı doğrulamayı kurmanız gerekiyor.', 403, ['ikiAdimGerekli' => true]);
             }
+            if (chartering_only($user) && !preg_match('#^/api/(chartering/|oturum/|live$)#', $path)) {
+                api_error('Bu işlem için yetkiniz yok.', 403);
+            }
             if ($r['page'] === 'admin' && $user['role'] !== 'yonetici') {
                 api_error('Bu işlem için yönetici yetkisi gerekir.', 403);
             }

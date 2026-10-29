@@ -30,8 +30,8 @@ header('X-Frame-Options: SAMEORIGIN');
 $path   = rtrim(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/', '/') ?: '/';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
-// Operasyon paneli ve API
-if ($path === '/panel' || str_starts_with($path, '/panel/') || str_starts_with($path, '/api/')) {
+// Operasyon paneli, Chartering Desk ve API
+if ($path === '/panel' || str_starts_with($path, '/panel/') || str_starts_with($path, '/api/') || $path === '/chartering') {
     require dirname(__DIR__) . '/app/panel/bootstrap.php';
     handle_panel($path, $method);
 }

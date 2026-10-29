@@ -29,7 +29,7 @@ export async function mount(el, ctx) {
     let savedId = store.get('ch_voyage_id', null);
     let dirty = store.get('ch_voyage_dirty', false);
     let res = null;
-    let vessels = [];
+    let profiles = [];
     const canEdit = ctx.allowed('ch-voyage');
 
     const left = h('div.ch-inputs');
@@ -70,18 +70,17 @@ export async function mount(el, ctx) {
 
     function vesselSection() {
         const v = est.vessel;
-        const label = (x) => `${x.name}${x.imo ? ' · ' + x.imo : ''}`;
         const picker = h('input', {
-            type: 'text', list: 'ch-vessel-list', value: v.name ?? '', placeholder: 'Vessels listesinden seçin veya yazın',
+            type: 'text', list: 'ch-vessel-list', value: v.name ?? '', placeholder: 'Kayıtlı profilden seçin veya yeni gemi adı yazın',
             on: {
-                input: (e) => { v.name = e.target.value; v.vesselId = null; saveSpecsBtn.disabled = true; changed(); },
+                input: (e) => { v.name = e.target.value; changed(); },
                 change: (e) => {
-                    const hit = vessels.find((x) => label(x) === e.target.value || x.name === e.target.value.trim().toUpperCase());
-                    if (hit) loadVessel(hit);
+                    const hit = profiles.find((x) => x.name === e.target.value.trim().toUpperCase());
+                    if (hit) loadProfile(hit);
                 },
             },
         });
-        const saveSpecsBtn = h('button.tiny', { type: 'button', disabled: !v.vesselId || !canEdit, title: 'DWT, draft, kapasite ve hız/tüketimi gemi kartına kaydet', on: { click: saveSpecs } }, 'Save specs to vessel');
+        const saveSpecsBtn = h('button.tiny', { type: 'button', disabled: !canEdit, title: 'DWT, draft, kapasite ve hız/tüketimi bu adla gemi profili olarak sakla', on: { click: () => saveProfile().catch(() => {}) } }, 'Save vessel profile');
         const f = (label, key, opts = {}) => fld(label, numInput(v, key, changed, opts));
         const speedRow = (mode) => h('tr', h('th', SEA_MODES[mode]),
             ...['kn', 'ifo', 'mgo'].map((k) => h('td', numInput(v.speeds[mode], k, changed, { small: true }))));
@@ -102,32 +101,29 @@ export async function mount(el, ctx) {
         ], { actions: saveSpecsBtn });
     }
 
-    async function loadVessel(x) {
-        est.vessel.vesselId = x.id;
-        est.vessel.name = x.name;
-        const { spec } = await get(`chartering/vessels/${x.id}/specs`);
-        if (spec) {
-            const v = est.vessel;
-            const map = { dwt: 'dwt', summer_draft: 'summerDraft', tpc: 'tpc', grain: 'grain', bale: 'bale', constants: 'constants', fw: 'fw', stores: 'stores' };
-            for (const [from, to] of Object.entries(map)) if (spec[from] !== null) v[to] = spec[from];
-            v.scrubber = !!spec.scrubber;
-            if (spec.speeds) v.speeds = merge(blankEstimate().vessel.speeds, spec.speeds);
-            if (spec.port) v.port = merge(blankEstimate().vessel.port, spec.port);
-            toast(`${x.name}: kayıtlı teknik bilgiler yüklendi.`);
-        } else {
-            toast(`${x.name} için kayıtlı teknik bilgi yok — girip "Save specs to vessel" ile saklayabilirsiniz.`);
-        }
+    /** Vessel profile → estimate (the profile keeps everything in est.vessel except the name). */
+    function loadProfile(p) {
+        est.vessel = merge(blankEstimate().vessel, { ...p.data, name: p.name, vesselId: null });
+        toast(`${p.name}: profil yüklendi.`);
         changed();
         drawInputs();
     }
 
-    async function saveSpecs() {
+    async function saveProfile() {
         const v = est.vessel;
-        await put(`chartering/vessels/${v.vesselId}/specs`, {
-            dwt: v.dwt, summer_draft: v.summerDraft, tpc: v.tpc, grain: v.grain, bale: v.bale, constants: v.constants, fw: v.fw, stores: v.stores,
-            scrubber: !!v.scrubber, speeds: v.speeds, port: v.port,
-        });
-        toast(`${v.name}: teknik bilgiler gemi kartına kaydedildi.`);
+        const name = (v.name ?? '').trim().toUpperCase();
+        if (!name) { toast('Önce gemi adını yazın.', 'error'); return; }
+        const { name: _n, vesselId: _i, ...data } = v;
+        const existing = profiles.find((x) => x.name === name);
+        if (existing && !(await confirmBox(`${name} profili güncellensin mi?`, { title: 'Vessel profile', yes: 'Güncelle', danger: false }))) return;
+        await (existing ? put(`chartering/vessel-profiles/${existing.id}`, { data }) : post('chartering/vessel-profiles', { name, data }));
+        await loadProfiles();
+        toast(`${name}: gemi profili kaydedildi.`);
+    }
+
+    async function loadProfiles() {
+        profiles = await get('chartering/vessel-profiles');
+        vesselList.replaceChildren(...profiles.map((x) => h('option', { value: x.name }, [x.data?.dwt ? `${fmt(x.data.dwt, 0)} dwt` : ''])));
     }
 
     function cargoSection() {
@@ -401,7 +397,7 @@ export async function mount(el, ctx) {
             nameIn.value = est.name;
         }
         const payload = {
-            name: est.name.trim(), vessel_id: est.vessel.vesselId, vessel_name: est.vessel.name || null, cargo: est.cargo.name || null,
+            name: est.name.trim(), vessel_id: null, vessel_name: est.vessel.name || null, cargo: est.cargo.name || null,
             load_port: est.route.find((x) => x.type === 'load')?.name || null, disch_port: est.route.filter((x) => x.type === 'disch').at(-1)?.name || null,
             intake: res.intake.intake, days: res.days.total, tce: res.tce, result: res.result, data: est,
         };
@@ -567,10 +563,7 @@ export async function mount(el, ctx) {
     drawStatus();
     drawInputs();
 
-    get('vessels', { limit: 10000 }).then((r) => {
-        vessels = r.rows;
-        vesselList.replaceChildren(...vessels.map((x) => h('option', { value: `${x.name}${x.imo ? ' · ' + x.imo : ''}` })));
-    }).catch(() => {});
+    loadProfiles().catch(() => {});
 
     const onKey = (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && el.isConnected && !el.closest('.is-hidden')) {

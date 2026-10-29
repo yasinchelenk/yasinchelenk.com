@@ -1,17 +1,6 @@
 <?php
 $firma = firma_public();
-
-// Tüm panel modülleri import map ile tek bir sürümlü adrese bağlanır:
-// - "../core/dom.js" ile "dom.js?v=…" aynı modül olur (iki kez çalışmaz),
-// - dosya değişince ?v= değişir, tarayıcı ve Cloudflare eski kopyayı kullanmaz.
-$assets = dirname(__DIR__, 2) . '/public/assets/';
-$modules = [];
-foreach (['panel/*.js', 'panel/core/*.js', 'panel/tabs/*.js', 'panel/chartering/*.js', 'panel/chartering/engine/*.js'] as $pattern) {
-    foreach (glob($assets . $pattern) ?: [] as $file) {
-        $rel = substr($file, strlen($assets));
-        $modules['/assets/' . $rel] = asset($rel);
-    }
-}
+$modules = panel_import_map();
 ?>
 <!doctype html>
 <html lang="tr">
