@@ -1258,6 +1258,17 @@ ol.sof-remarks textarea { width: 100%; }
 .sof-sig__line { border-top: 1px dashed var(--line); margin-top: 18px; padding-top: 2px; font-size: 11px; color: var(--dim); text-align: center; }
 .sof-file { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; font-size: 12.5px; }
 .sof-secrow { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
+.sof-tpl { display: grid; gap: 12px; }
+.sof-tpl h4 { margin: 8px 0 4px; font-size: 13px; }
+.sof-tpl textarea { width: 100%; }
+ol.sof-tpl-events { margin: 0; padding-left: 26px; max-height: 420px; overflow: auto; font-size: 13px; }
+ol.sof-tpl-events li { display: flex; align-items: center; gap: 6px; padding: 1px 0; border-bottom: 1px solid var(--row-line); }
+.sof-tpl-ev { min-width: 0; flex: 0 1 auto; }
+.sof-tpl-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 4px 14px; font-size: 12.5px; }
+.sof-tpl-fields h5 { margin: 6px 0 2px; color: var(--navy); }
+.sof-tpl-fields .check { display: flex; }
+section.sof-dict-cat { border-left: 4px solid var(--cat); padding-left: 10px; margin-bottom: 12px; }
+section.sof-dict-cat h4 { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
 @media (max-width: 1250px) { .ch-split--sof { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) {
     dl.ch-gloss { grid-template-columns: minmax(0, 1fr); } dl.ch-gloss dt { border-bottom: 0; padding-bottom: 0; }

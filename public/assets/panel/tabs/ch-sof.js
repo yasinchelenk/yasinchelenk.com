@@ -3,14 +3,15 @@
 // with the port's time zone (engine/sof). Templates / parser / laytime link come in the next phases.
 import { h, fill, toast, store, debounce, fmtDateTime } from '../core/dom.js';
 import { api, get, post, put, del } from '../core/api.js';
-import { modal, confirmBox, popover } from '../core/ui.js';
+import { modal, confirmBox, popover, segmented } from '../core/ui.js';
 import { Grid, resetLayoutButton } from '../core/grid.js';
 import { live } from '../core/live.js';
 import { dictionary, eventLabel, matchEvent, CATEGORIES, EFFECTS } from '../chartering/engine/sof/dictionary.js';
 import { normTime, local, utcText, offsetText, fmtMin, nowLocal } from '../chartering/engine/sof/time.js';
 import { analyse, dailyLog, applyLogOverrides, parseHm } from '../chartering/engine/sof/events.js';
 import { validate } from '../chartering/engine/sof/validate.js';
-import { HEADER_FIELDS, HEADER_GROUPS, SOF_TEMPLATES, SOF_STATUS, REMARK_TYPES, QUALIFIERS, SECTIONS, STANDARD_REMARKS, newSof, rowId } from '../chartering/engine/sof/templates.js';
+import { HEADER_FIELDS, HEADER_GROUPS, SOF_TEMPLATES, SOF_STATUS, REMARK_TYPES, QUALIFIERS, SECTIONS, STANDARD_REMARKS, newSof, rowId, templateFromSof, templateKey } from '../chartering/engine/sof/templates.js';
+import { templatesView, dictionaryView, loadTemplates, eventEditor } from '../chartering/sof-admin.js';
 import { section, fmt } from '../chartering/ui.js';
 
 const STATUS_CAT = { draft: 'cat-gray', in_progress: 'cat-blue', ready: 'cat-yellow', signed: 'cat-green', sent: 'cat-purple', locked: 'cat-brown' };
@@ -47,14 +48,25 @@ export async function mount(el, ctx, param) {
         lists.querySelector('#sof-ports').replaceChildren(...ports.map((x) => h('option', { value: x.name })));
         lists.querySelector('#sof-contacts').replaceChildren(...[...new Set(contacts.map((x) => x.company).filter(Boolean))].map((x) => h('option', { value: x })));
         lists.querySelector('#sof-events').replaceChildren(...[...dict.values()].filter((d) => d.active !== false).map((d) => h('option', { value: d.label_en }, d.label_tr)));
+        return dict;
     }
 
-    // ================================================================ List
+    // ================================================================ List / Templates / Dictionary
+
+    let listView = store.get('ch_sof_view', 'sofs');
+    const viewSwitch = () => segmented([{ value: 'sofs', label: 'SOFs' }, { value: 'templates', label: 'Templates' }, { value: 'dictionary', label: 'Event dictionary' }],
+        listView, (v) => { listView = v; store.set('ch_sof_view', v); showList(); });
 
     async function showList() {
         if (cur && dirty) await save();
         cur = null;
         store.set('ch_sof_open', null);
+        if (listView !== 'sofs') {
+            const box = h('div.ch-board');
+            fill(body, h('div.toolbar', h('strong', 'SOF'), viewSwitch()), box);
+            await (listView === 'templates' ? templatesView : dictionaryView)(box, { dict, canEdit, refresh: loadRefs });
+            return;
+        }
         list = await get('chartering/sofs');
         grid?.destroy?.();
         grid = new Grid({
@@ -79,12 +91,12 @@ export async function mount(el, ctx, param) {
             return { key: k, className: STATUS_CAT[k], rows: rs, head: h('div.grp.' + STATUS_CAT[k], h('span.grp__name', label), h('span.grp__pill', String(rs.length))) };
         }).filter((s) => s.rows.length || ['draft', 'in_progress'].includes(s.key)));
         fill(body, h('div.toolbar',
-            h('strong', 'SOF'),
+            h('strong', 'SOF'), viewSwitch(),
             canEdit ? h('button.primary', { type: 'button', on: { click: () => newDialog() } }, '+ New SOF') : null,
             h('input.search-input', { type: 'search', placeholder: 'Search vessel, port, fixture…', value: search, style: { width: '240px' },
                 on: { input: debounce((e) => { search = e.target.value; showList(); }, 250) } }),
             h('span.count', `${rows.length} SOFs`), resetLayoutButton(grid, '↺ columns')),
-        h('p.dim', 'Statement of Facts: limandaki olayların kronolojik kaydı. Saatler liman yerel saatiyle girilir, motor UTC’de hesaplar (gece yarısı ve yaz saati dahil). Laytime’a aktarım, metinden içe aktarma, PDF ve şablon yönetimi sonraki adımlarda.'),
+        h('p.dim', 'Statement of Facts: limandaki olayların kronolojik kaydı. Saatler liman yerel saatiyle girilir, motor UTC’de hesaplar (gece yarısı ve yaz saati dahil). Şablonlar ve olay sözlüğü üstteki sekmelerde.'),
         grid.el);
         setTimeout(() => body.querySelector('input[type=search]')?.focus(), 0);
     }
@@ -99,11 +111,16 @@ export async function mount(el, ctx, param) {
     // ================================================================ New SOF
 
     async function newDialog(pre = {}) {
-        const fixtures = ctx.allowed('ch-fixtures') ? await get('chartering/fixtures').catch(() => []) : [];
-        const w = { template: pre.call === 'disch' ? 'dry_disch' : 'dry_load', fixture_id: pre.fixture?.id ?? '', call: pre.call ?? 'load', port: '' };
+        const [fixtures, tpl] = await Promise.all([ctx.allowed('ch-fixtures') ? get('chartering/fixtures').catch(() => []) : [], loadTemplates()]);
+        const byKey = (k) => tpl.list.find((t) => t.key === k);
+        // the default template, unless it is for the other port call (fixture → disch port)
+        const preferred = byKey(tpl.default) && (!pre.call || [pre.call, 'other'].includes(byKey(tpl.default).call)) ? tpl.default : pre.call === 'disch' ? 'dry_disch' : 'dry_load';
+        const w = { template: preferred, fixture_id: pre.fixture?.id ?? '', call: pre.call ?? byKey(preferred)?.call ?? 'load', port: '' };
+        if (w.call === 'other') w.call = 'load';
         const portIn = h('input', { type: 'text', list: 'sof-ports', placeholder: 'from the fixture if empty' });
-        const tplSel = h('select', { on: { change: (e) => { w.template = e.target.value; const t = SOF_TEMPLATES[w.template]; if (t?.call && t.call !== 'other') { w.call = t.call; callSel.value = t.call; } } } },
-            Object.values(SOF_TEMPLATES).map((t) => h('option', { value: t.key, selected: t.key === w.template }, t.name)));
+        const tplSel = h('select', { on: { change: (e) => { w.template = e.target.value; const t = byKey(w.template); if (t?.call && t.call !== 'other') { w.call = t.call; callSel.value = t.call; } } } },
+            h('optgroup', { label: 'Your templates' }, tpl.list.filter((t) => t.user).map((t) => h('option', { value: t.key, selected: t.key === w.template }, t.name + (t.key === tpl.default ? ' (default)' : '')))),
+            h('optgroup', { label: 'Built-in' }, tpl.list.filter((t) => !t.user).map((t) => h('option', { value: t.key, selected: t.key === w.template }, t.name + (t.key === tpl.default ? ' (default)' : '')))));
         const callSel = h('select', { on: { change: (e) => { w.call = e.target.value; } } }, Object.entries(CALLS).map(([k, l]) => h('option', { value: k, selected: k === w.call }, l)));
         const fxSel = h('select', { on: { change: (e) => { w.fixture_id = e.target.value; } } }, h('option', { value: '' }, '— no fixture —'),
             fixtures.map((f) => h('option', { value: f.id, selected: String(f.id) === String(w.fixture_id) }, `${f.ref} ${f.vessel ?? ''} · ${f.load_port ?? '?'} → ${f.disch_port ?? '?'}`)));
@@ -117,7 +134,7 @@ export async function mount(el, ctx, param) {
                 const fixture = w.fixture_id ? (pre.fixture?.id === Number(w.fixture_id) ? pre.fixture : fixtures.find((f) => String(f.id) === String(w.fixture_id))) : null;
                 const portName = portIn.value.trim() || (fixture ? (w.call === 'disch' ? fixture.disch_port : fixture.load_port) : '');
                 const port = ports.find((p) => p.name.toLowerCase() === String(portName ?? '').toLowerCase()) ?? null;
-                const doc = newSof(SOF_TEMPLATES[w.template], { fixture, call: w.call, port });
+                const doc = newSof(byKey(w.template) ?? SOF_TEMPLATES.blank, { fixture, call: w.call, port });
                 if (portName && !doc.header.port) doc.header.port = portName;
                 const row = await post('chartering/sofs', { data: doc, fixture_id: fixture?.id ?? null, port_call: doc.call, template: w.template, vessel: doc.header.vessel ?? null, port: doc.header.port ?? null, tz: doc.tz, events_n: 0 });
                 openSof(row.id);
@@ -215,6 +232,7 @@ export async function mount(el, ctx, param) {
                 canEdit && cur.status === 'locked' ? h('button', { type: 'button', on: { click: unlock } }, 'Unlock…') : null,
                 h('span.spacer'),
                 h('button', { type: 'button', title: 'Bölümlerin sırası, gizleme ve özel bölüm', on: { click: (e) => sectionsMenu(e.currentTarget) } }, 'Sections ▾'),
+                canEdit ? h('button', { type: 'button', title: 'Bu SOF’un yapısını (olay sırası, bölümler, alanlar, remark ve imzalar) şablon olarak kaydet', on: { click: saveAsTemplate } }, 'Save as template…') : null,
                 statusEl,
                 !ro() ? h('button.primary', { type: 'button', on: { click: () => save().then(() => toast('SOF kaydedildi.')).catch(() => {}) } }, 'Save') : null,
                 canEdit && cur.status !== 'locked' ? h('button.ghost', { type: 'button', on: { click: remove } }, 'Delete') : null),
@@ -482,6 +500,24 @@ export async function mount(el, ctx, param) {
         return section('sof-' + cs.id, cs.title, 'gray', box, { badge: String(cs.rows.length) });
     }
 
+    function saveAsTemplate() {
+        const doc = cur.doc;
+        const name = h('input', { type: 'text', value: `${doc.header.cargo ? doc.header.cargo + ' – ' : ''}${doc.header.port ?? ''} ${doc.call === 'disch' ? 'discharge' : 'load'}`.trim() });
+        modal({ title: 'Save SOF as template', width: 560,
+            body: h('div.ch-entry-wrap', h('label.ch-field', h('span.ch-field__label', 'Template name'), name),
+                h('p.dim', 'Saatler, değerler ve imza isimleri alınmaz; olay sırası, key event’ler, bölümler, özel alanlar, remark kalıpları ve imza blokları şablona girer.')),
+            actions: [{ label: 'Cancel' }, { label: 'Save template', primary: true, onClick: async () => {
+                const n = name.value.trim();
+                if (!n) { toast('Şablon adı gerekli.', 'error'); return false; }
+                const key = templateKey(n);
+                if (SOF_TEMPLATES[key]) { toast('Bu ad hazır bir şablonla çakışıyor.', 'error'); return false; }
+                const { list: existing } = await loadTemplates();
+                if (existing.some((t) => t.user && t.key === key) && !(await confirmBox(`“${n}” adında bir şablon var. Üzerine yazılsın mı?`, { yes: 'Üzerine yaz' }))) return false;
+                await put(`chartering/sof-templates/${key}`, { name: n, data: templateFromSof(doc, n) });
+                toast('Şablon kaydedildi — Templates sekmesinde.');
+            } }] });
+    }
+
     async function lock() {
         if (!(await confirmBox('SOF kilitlensin mi? Kilitli SOF düzenlenemez; açmak için gerekçe gerekir.', { title: 'Lock SOF', yes: 'Lock', danger: false }))) return;
         await save();
@@ -543,8 +579,10 @@ export async function mount(el, ctx, param) {
             return wrap;
         };
         const tzHint = h('span.dim', offsetText(Date.now(), doc.tz));
-        const groups = HEADER_GROUPS.map((g) => h('div.ch-sof__hgroup', h('h5', g, g === 'Port' ? [' · ', tzHint] : null),
-            h('div.ch-grid', { style: { '--cols': 4 } }, HEADER_FIELDS.filter((f) => f[3] === g).map(field))));
+        // a template may show only some of the standard fields (vessel, port and time zone always)
+        const shown = (f) => !doc.headerKeys?.length || doc.headerKeys.includes(f[0]) || ['vessel', 'port', 'tz'].includes(f[0]) || (H[f[0]] ?? '') !== '';
+        const groups = HEADER_GROUPS.map((g) => [g, HEADER_FIELDS.filter((f) => f[3] === g && shown(f))]).filter(([, fs]) => fs.length).map(([g, fs]) => h('div.ch-sof__hgroup', h('h5', g, g === 'Port' ? [' · ', tzHint] : null),
+            h('div.ch-grid', { style: { '--cols': 4 } }, fs.map(field))));
         const custom = doc.custom.length ? h('div.ch-sof__hgroup', h('h5', 'Custom fields'), h('div.ch-grid', { style: { '--cols': 4 } }, doc.custom.map((c) => {
             const v = H[c.key];
             const control = c.type === 'check'
@@ -669,7 +707,15 @@ export async function mount(el, ctx, param) {
             durCells.set(r.id, dur);
             const effSel = h('select.tiny', { disabled: dis, title: def ? `Default: ${EFFECTS[def.effect]}` : '', on: { change: (e) => { r.effect = e.target.value || null; changed(); } } },
                 h('option', { value: '' }, def ? `${EFFECTS[def.effect]} ·` : '—'), Object.entries(EFFECTS).map(([k, l]) => h('option', { value: k, selected: r.effect === k }, l)));
-            const tag = !def ? h('span.ch-badge.amber', { title: 'Sözlükte yok — kategori ve laytime etkisini seçin' }, 'custom')
+            const tag = !def ? [h('span.ch-badge.amber', { title: 'Sözlükte yok — kategori ve laytime etkisini seçin' }, 'custom'),
+                !dis && r.text ? h('button.tiny.ghost', { type: 'button', title: 'Bu olayı kalıcı olarak sözlüğe ekle', on: { click: () => eventEditor({ label_en: r.text, category: r.category ?? 'other', effect: r.effect ?? 'info', kind: r.timeTo ? 'range' : 'point', aliases: [r.text.toLowerCase()] }, dict, {
+                    isNew: true,
+                    onSaved: async (saved) => {
+                        await loadRefs();
+                        Object.assign(r, { code: saved.code, text: '', category: undefined });
+                        changed({ redraw: true });
+                    },
+                }) } }, '+ dict') : null]
                 : def.key ? h('span.sof-star', { title: 'Key event' }, '★') : null;
             const catSel = !def ? h('select.tiny', { disabled: dis, on: { change: (e) => { r.category = e.target.value; changed({ redraw: true }); } } },
                 Object.entries(CATEGORIES).map(([k, c]) => h('option', { value: k, selected: (r.category ?? 'other') === k }, c.label))) : null;

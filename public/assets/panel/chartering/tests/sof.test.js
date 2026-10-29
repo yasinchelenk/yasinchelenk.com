@@ -4,7 +4,7 @@ import { dictionary } from '../engine/sof/dictionary.js';
 import { rowStartMs, rowEndMs, minutes, utcText, local } from '../engine/sof/time.js';
 import { analyse, dailyLog, applyLogOverrides, parseHm } from '../engine/sof/events.js';
 import { validate } from '../engine/sof/validate.js';
-import { SOF_TEMPLATES, newSof } from '../engine/sof/templates.js';
+import { SOF_TEMPLATES, newSof, templateFromSof, templateKey, exportBundle, readBundle } from '../engine/sof/templates.js';
 
 const dict = dictionary();
 let n = 0;
@@ -83,4 +83,24 @@ test('SOF — daily log over two days, quantities, hatches and manual correction
     const fixed = applyLogOverrides(log, { '2026-11-01': { quantity: 1600 }, '2026-11-02': { gangs: '2 gangs' } }, { total: 9100 });
     eq([fixed[0].edited, fixed[1].cumulative, fixed[1].balance, fixed[1].gangs], [['quantity'], 9100, 0, '2 gangs'], 'override recomputes cumulative and balance');
     eq([parseHm('9:30'), parseHm('9h30'), parseHm('9.5'), parseHm('45m'), parseHm('')], [570, 570, 570, 45, null], 'hours input');
+});
+
+test('SOF templates — save a SOF as template, new SOF from it, JSON export / import', () => {
+    const doc = newSof(SOF_TEMPLATES.dry_disch, { call: 'disch' });
+    doc.events.push({ id: 'x1', code: null, text: 'Waiting for customs launch', category: 'arrival', date: '2026-11-01', time: '10:00', zone: 'LT' });
+    doc.events.push({ id: 'x2', code: 'rain', date: '2026-11-01', time: '12:00', timeTo: '13:00', zone: 'LT' });
+    doc.custom.push({ key: 'c_ice', label: 'Ice class', type: 'text' });
+    doc.customSections = [{ id: 'cs_b', title: 'Bunker Operations', columns: ['Time', 'Qty'], rows: [['10:00', '200']] }];
+    doc.sections.push('cs_b');
+    doc.hidden = ['log'];
+    const t = templateFromSof(doc, 'Iron ore – İskenderun disch');
+    eq(templateKey(t.name), 'iron_ore_iskenderun_disch', 'template key from the name');
+    eq([t.call, t.events.length, t.events.at(-2), t.events.at(-1)], ['disch', SOF_TEMPLATES.dry_disch.events.length + 2, { text: 'Waiting for customs launch', category: 'arrival', effect: null }, 'rain'], 'event order incl. a free-text row');
+    eq([t.customSections[0].rows, t.hidden, t.custom[0].label], [undefined, ['log'], 'Ice class'], 'structure only, no section rows');
+    const again = newSof({ ...t, key: 'iron' });
+    eq([again.events.length, again.events.every((r) => !r.time), again.events.at(-2).text, again.customSections[0].rows, again.sections.includes('cs_b')], [t.events.length, true, 'Waiting for customs launch', [], true], 'new SOF from it: same rows, no times');
+    const file = JSON.stringify(exportBundle({ templates: [{ ...t, key: 'iron' }], dictionary: [{ code: 'u_launch', label_en: 'Waiting for launch' }, { code: 'Bad Code', label_en: 'x' }] }));
+    const back = readBundle(file);
+    eq([back.templates.length, back.templates[0].key, back.dictionary.length, back.errors.length], [1, 'iron', 1, 1], 'import keeps valid entries, reports the bad one');
+    eq(readBundle('{"kind":"other"}').errors.length, 1, 'a foreign JSON file is refused');
 });

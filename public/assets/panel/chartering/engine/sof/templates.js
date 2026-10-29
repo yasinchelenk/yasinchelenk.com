@@ -106,13 +106,76 @@ export function newSof(template, { fixture = null, call = null, port = null } = 
     const fromPort = port ? { tz: port.tz, port: port.name, berth: null } : {};
     const { tz, ...header } = Object.fromEntries(Object.entries({ ...fromFixture, ...fromPort }).filter(([, v]) => v !== null && v !== undefined && v !== ''));
     const linked = Object.fromEntries(Object.keys(header).map((k) => [k, { source: k in fromPort ? 'port' : 'fixture', value: header[k] }]));
+    const customSections = (t.customSections ?? []).map((s) => ({ id: s.id, title: s.title, columns: [...s.columns], rows: [] }));
     return {
         template: t.key ?? null, call: c, tz: tz || 'Europe/Istanbul',
-        header, linked, custom: [],
-        sections: [...(t.sections ?? SOF_TEMPLATES.blank.sections)], hidden: [],
+        header, linked, custom: structuredClone(t.custom ?? []), headerKeys: t.headerKeys?.length ? [...t.headerKeys] : null,
+        sections: [...(t.sections ?? SOF_TEMPLATES.blank.sections), ...customSections.map((s) => s.id).filter((id) => !(t.sections ?? []).includes(id))],
+        hidden: [...(t.hidden ?? [])], customSections,
         keyEvents: [...(t.keyEvents ?? [])],
-        events: (t.events ?? []).map((code) => ({ id: rowId(), code, date: '', time: '', zone: 'LT' })),
+        // template events: a dictionary code, or { text, category, effect } for a free-text row
+        events: (t.events ?? []).map((e) => (typeof e === 'string'
+            ? { id: rowId(), code: e, date: '', time: '', zone: 'LT' }
+            : { id: rowId(), code: null, text: e.text, category: e.category ?? 'other', effect: e.effect ?? null, date: '', time: '', zone: 'LT' })),
         remarks: [], remarkTemplates: [...(t.remarks ?? [])],
         signatures: (t.signatures ?? []).map((role) => ({ role, name: '', title: '', date: '', qualifier: 'signed' })),
+        pdf: { ...PDF_DEFAULTS, ...(t.pdf ?? {}) },
     };
+}
+
+/** PDF layout options a template can set (used by the PDF export). */
+export const PDF_DEFAULTS = { utcColumn: false, dailyLog: true, remarks: true, signatures: true, emptyRows: 0 };
+export const PDF_OPTIONS = { utcColumn: 'Show a UTC column next to local time', dailyLog: 'Include the daily working log', remarks: 'Include remarks & protests', signatures: 'Include signature blocks' };
+
+/** "Save this SOF as a template": structure only — event order, sections, fields, remarks, signature roles; no times or values. */
+export function templateFromSof(doc, name) {
+    const seen = new Set();
+    const events = [];
+    for (const r of doc.events ?? []) {
+        const k = r.code ?? `t:${(r.text ?? '').toLowerCase()}`;
+        if (seen.has(k) || (!r.code && !r.text)) continue;
+        seen.add(k);
+        events.push(r.code ?? { text: r.text, category: r.category ?? 'other', effect: r.effect ?? null });
+    }
+    return {
+        name, call: doc.call, events, keyEvents: [...(doc.keyEvents ?? [])],
+        sections: [...(doc.sections ?? [])], hidden: [...(doc.hidden ?? [])],
+        headerKeys: doc.headerKeys ?? null, custom: structuredClone(doc.custom ?? []),
+        customSections: (doc.customSections ?? []).map((s) => ({ id: s.id, title: s.title, columns: [...s.columns] })),
+        remarks: [...(doc.remarkTemplates ?? [])], signatures: (doc.signatures ?? []).map((s) => s.role).filter(Boolean),
+        pdf: { ...PDF_DEFAULTS, ...(doc.pdf ?? {}) },
+    };
+}
+
+/** Template key from a name: "Iron ore – Tubarão" → "iron_ore_tubarao" */
+export const templateKey = (name) => String(name ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ı/g, 'i')
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'template';
+
+export const EXPORT_KIND = 'chartering-sof-templates';
+
+/** JSON backup / sharing file for user templates and dictionary entries. */
+export function exportBundle({ templates = [], dictionary = [] }) {
+    return { kind: EXPORT_KIND, version: 1, exported_at: new Date().toISOString(), templates, dictionary };
+}
+
+/**
+ * Reads an exported file. Returns { templates, dictionary, errors } with only well-formed entries.
+ * A template needs a name and an event list; a dictionary entry a code and an English label.
+ */
+export function readBundle(json) {
+    let o;
+    try { o = typeof json === 'string' ? JSON.parse(json) : json; } catch { return { templates: [], dictionary: [], errors: ['Dosya JSON değil.'] }; }
+    if (!o || o.kind !== EXPORT_KIND) return { templates: [], dictionary: [], errors: ['Bu dosya bir SOF şablon dışa aktarımı değil.'] };
+    const errors = [];
+    const templates = (Array.isArray(o.templates) ? o.templates : []).filter((t, i) => {
+        const ok = t && typeof t.name === 'string' && t.name.trim() && Array.isArray(t.events);
+        if (!ok) errors.push(`Template #${i + 1} skipped (name / events missing).`);
+        return ok;
+    }).map((t) => ({ ...t, key: templateKey(t.key || t.name) }));
+    const dictionary = (Array.isArray(o.dictionary) ? o.dictionary : []).filter((d, i) => {
+        const ok = d && /^[a-z0-9_]{2,40}$/.test(d.code ?? '') && typeof d.label_en === 'string' && d.label_en.trim();
+        if (!ok) errors.push(`Dictionary entry #${i + 1} skipped (code / label missing).`);
+        return ok;
+    });
+    return { templates, dictionary, errors };
 }

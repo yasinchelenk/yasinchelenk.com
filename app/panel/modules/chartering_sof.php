@@ -108,9 +108,117 @@ function module_routes_chartering_sof(): void
     route('GET', '/api/chartering/sof-dictionary', fn() => json_response(array_map(
         fn($r) => json_decode((string) $r['data'], true) + ['code' => $r['code'], 'active' => (bool) $r['active']],
         rows('SELECT code, data, active FROM ch_sof_events ORDER BY code'))), 'ch-sof');
-    route('GET', '/api/chartering/sof-templates', fn() => json_response(array_map(
-        fn($r) => json_decode((string) $r['data'], true) + ['key' => $r['key'], 'name' => $r['name'], 'is_default' => (bool) $r['is_default'], 'custom' => true],
-        rows('SELECT key, name, data, is_default FROM ch_sof_templates ORDER BY name'))), 'ch-sof');
+    route('GET', '/api/chartering/sof-templates', fn() => json_response([
+        'templates' => array_map(
+            fn($r) => json_decode((string) $r['data'], true) + ['key' => $r['key'], 'name' => $r['name'], 'user' => true, 'updated_at' => $r['updated_at'], 'updated_by' => $r['updated_by']],
+            rows('SELECT key, name, data, updated_at, updated_by FROM ch_sof_templates ORDER BY name')),
+        'default' => setting('ch_sof_default_template', 'dry_load'),
+    ]), 'ch-sof');
+    route('PUT', '/api/chartering/sof-templates/{key}', fn($p, $in) => json_response(ch_sof_template_save((string) $p['key'], $in)), 'ch-sof');
+    route('DELETE', '/api/chartering/sof-templates/{key}', 'ch_sof_template_delete', 'ch-sof');
+    route('PUT', '/api/chartering/sof-default-template', function ($p, $in) {
+        $key = preg_replace('/[^a-z0-9_]/', '', (string) ($in['key'] ?? ''));
+        $key !== '' || api_error('Şablon seçin.');
+        $old = setting('ch_sof_default_template', 'dry_load');
+        setting_set('ch_sof_default_template', $key);
+        gecmis_log('ch_sof_template', $key, "SOF template {$key}", 'default', 'update', $old, $key);
+        json_response(['default' => $key]);
+    }, 'ch-sof');
+    route('PUT', '/api/chartering/sof-dictionary/{code}', fn($p, $in) => json_response(ch_sof_event_save((string) $p['code'], $in)), 'ch-sof');
+    route('DELETE', '/api/chartering/sof-dictionary/{code}', function ($p) {
+        $code = (string) $p['code'];
+        q('DELETE FROM ch_sof_events WHERE code = ?', [$code]);
+        gecmis_log('ch_sof_event', $code, "SOF event {$code}", 'data', 'update', null, 'reset / removed');
+        json_response(['ok' => true]);
+    }, 'ch-sof');
+    route('POST', '/api/chartering/sof-import', 'ch_sof_import', 'ch-sof');
+}
+
+/** Upserts a user template: { name, data: {…structure…} }. */
+function ch_sof_template_save(string $key, array $in): array
+{
+    $key = preg_replace('/[^a-z0-9_]/', '', strtolower($key));
+    $name = mb_substr(trim((string) ($in['name'] ?? '')), 0, 120);
+    $data = $in['data'] ?? null;
+    if ($key === '' || $name === '' || !is_array($data) || !is_array($data['events'] ?? null)) {
+        api_error('Şablon adı ve olay listesi gerekli.');
+    }
+    unset($data['key'], $data['name'], $data['user'], $data['updated_at'], $data['updated_by']);
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE);
+    if (strlen($json) > 200000) {
+        api_error('Şablon çok büyük.');
+    }
+    $a = actor();
+    $old = scalar('SELECT name FROM ch_sof_templates WHERE key = ?', [$key]);
+    q('INSERT INTO ch_sof_templates (key, name, data, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (key) DO UPDATE SET name = excluded.name, data = excluded.data, updated_at = excluded.updated_at, updated_by = excluded.updated_by',
+        [$key, $name, $json, now(), $a['name'], now(), $a['name']]);
+    gecmis_log('ch_sof_template', $key, "SOF template {$name}", 'data', $old === null ? 'insert' : 'update', null, 'şablon kaydedildi');
+
+    return ['key' => $key, 'name' => $name];
+}
+
+function ch_sof_template_delete(array $p): never
+{
+    $key = (string) $p['key'];
+    $name = scalar('SELECT name FROM ch_sof_templates WHERE key = ?', [$key]) ?? api_error('Şablon bulunamadı.', 404);
+    q('DELETE FROM ch_sof_templates WHERE key = ?', [$key]);
+    if (setting('ch_sof_default_template') === $key) {
+        setting_set('ch_sof_default_template', 'dry_load');
+    }
+    gecmis_log('ch_sof_template', $key, "SOF template {$name}", 'data', 'delete', null, null);
+    json_response(['ok' => true]);
+}
+
+/** Upserts a dictionary entry (new event, or an override of a built-in one): { data: {label_en, …}, active }. */
+function ch_sof_event_save(string $code, array $in): array
+{
+    if (!preg_match('/^[a-z0-9_]{2,40}$/', $code)) {
+        api_error('Kod yalnızca küçük harf, rakam ve alt çizgi olabilir.');
+    }
+    $d = is_array($in['data'] ?? null) ? $in['data'] : [];
+    if (trim((string) ($d['label_en'] ?? '')) === '') {
+        api_error('Olay adı (EN) gerekli.');
+    }
+    $allowed = ['label_en', 'label_tr', 'category', 'kind', 'pair', 'effect', 'key', 'aliases', 'lt'];
+    $d = array_intersect_key($d, array_flip($allowed));
+    $d['aliases'] = array_values(array_slice(array_filter(array_map(fn($x) => mb_substr(trim((string) $x), 0, 80), (array) ($d['aliases'] ?? []))), 0, 40));
+    $active = array_key_exists('active', $in) ? (int) (bool) $in['active'] : 1;
+    $a = actor();
+    q('INSERT INTO ch_sof_events (code, data, active, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (code) DO UPDATE SET data = excluded.data, active = excluded.active, updated_at = excluded.updated_at, updated_by = excluded.updated_by',
+        [$code, json_encode($d, JSON_UNESCAPED_UNICODE), $active, now(), $a['name'], now(), $a['name']]);
+    gecmis_log('ch_sof_event', $code, "SOF event {$d['label_en']}", 'data', 'update', null, $active ? 'kaydedildi' : 'pasif');
+
+    return $d + ['code' => $code, 'active' => (bool) $active];
+}
+
+/** JSON import (validated in the browser by readBundle): existing keys / codes are replaced only with overwrite. */
+function ch_sof_import(array $p, array $in): never
+{
+    $overwrite = !empty($in['overwrite']);
+    $n = ['templates' => 0, 'dictionary' => 0, 'skipped' => 0];
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        foreach (array_slice((array) ($in['dictionary'] ?? []), 0, 500) as $d) {
+            $code = (string) ($d['code'] ?? '');
+            if (!$overwrite && scalar('SELECT 1 FROM ch_sof_events WHERE code = ?', [$code])) { $n['skipped']++; continue; }
+            ch_sof_event_save($code, ['data' => $d, 'active' => $d['active'] ?? true]);
+            $n['dictionary']++;
+        }
+        foreach (array_slice((array) ($in['templates'] ?? []), 0, 100) as $t) {
+            $key = preg_replace('/[^a-z0-9_]/', '', (string) ($t['key'] ?? ''));
+            if (!$overwrite && scalar('SELECT 1 FROM ch_sof_templates WHERE key = ?', [$key])) { $n['skipped']++; continue; }
+            ch_sof_template_save($key, ['name' => $t['name'] ?? '', 'data' => $t]);
+            $n['templates']++;
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+    json_response($n);
 }
 
 /**
