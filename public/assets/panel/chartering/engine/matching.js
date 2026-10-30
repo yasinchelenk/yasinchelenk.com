@@ -11,7 +11,8 @@ export const MATCH_DEFAULTS = {
     ifoPrice: 600, mgoPrice: 800, safetyPct: 5,
 };
 
-export const normPort = (s) => String(s ?? '').trim().toUpperCase().replace(/\s+/g, ' ');
+// Port names compare without accents / Turkish letters: "Aliağa", "ALİAĞA" (server tr_upper) and "Aliaga" are one port
+export const normPort = (s) => String(s ?? '').trim().replace(/ı/g, 'i').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ');
 const day = (iso) => (iso ? Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000 : null);
 const isoOf = (d) => new Date(Math.round(d) * 86400000).toISOString().slice(0, 10);
 

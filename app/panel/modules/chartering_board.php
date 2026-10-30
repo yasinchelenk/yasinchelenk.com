@@ -86,6 +86,9 @@ function module_routes_chartering_board(): void
     crud_routes('ch_tonnage', '/api/chartering/tonnage');
     crud_routes('ch_order', '/api/chartering/orders');
     route('POST', '/api/chartering/distances/set', 'ch_distance_set', 'ch-board');
+    // Voyage Estimator: a distance typed for a sea leg is saved to the shared matrix and offered for the same pair next time
+    route('GET', '/api/chartering/voyage/distances', fn() => json_response(rows('SELECT id, from_port, to_port, nm, via, note, created_at, created_by, updated_at, updated_by FROM ch_distances ORDER BY coalesce(updated_at, created_at) DESC')), 'ch-voyage');
+    route('POST', '/api/chartering/voyage/distance', 'ch_distance_set', 'ch-voyage');
     crud_routes('ch_distance', '/api/chartering/distances');
 }
 
@@ -141,12 +144,29 @@ function ch_tonnage_import(array $p, array $in): never
     json_response(['added' => $added, 'updated' => $updated]);
 }
 
-/** Upsert a distance for a port pair (either direction). */
+/** Port name key without accents / Turkish letters: "Aliağa", "ALİAĞA", "Aliaga" → "ALIAGA" (same as normPort in matching.js). */
+function ch_port_key(string $s): string
+{
+    $s = strtr(trim($s), ['ı' => 'i', 'İ' => 'I', 'ğ' => 'g', 'Ğ' => 'G', 'ş' => 's', 'Ş' => 'S', 'ç' => 'c', 'Ç' => 'C', 'ö' => 'o', 'Ö' => 'O', 'ü' => 'u', 'Ü' => 'U',
+        'â' => 'a', 'Â' => 'A', 'î' => 'i', 'Î' => 'I', 'û' => 'u', 'Û' => 'U', 'é' => 'e', 'É' => 'E', 'è' => 'e', 'ê' => 'e', 'á' => 'a', 'à' => 'a', 'ã' => 'a', 'õ' => 'o', 'ó' => 'o', 'í' => 'i', 'ú' => 'u', 'ñ' => 'n']);
+    return preg_replace('/\s+/', ' ', strtoupper($s));
+}
+
+/** Upsert a distance for a port pair (either direction); an existing pair is found whatever the spelling of the names. */
 function ch_distance_set(array $p, array $in): never
 {
     $from = tr_upper(trim((string) ($in['from_port'] ?? '')));
     $to = tr_upper(trim((string) ($in['to_port'] ?? '')));
-    $id = scalar('SELECT id FROM ch_distances WHERE (from_port = ? AND to_port = ?) OR (from_port = ? AND to_port = ?)', [$from, $to, $to, $from]);
+    [$kf, $kt] = [ch_port_key($from), ch_port_key($to)];
+    $id = null;
+    foreach (rows('SELECT id, from_port, to_port FROM ch_distances') as $r) {
+        $a = ch_port_key($r['from_port']);
+        $b = ch_port_key($r['to_port']);
+        if (($a === $kf && $b === $kt) || ($a === $kt && $b === $kf)) {
+            $id = (int) $r['id'];
+            break;
+        }
+    }
     $data = ['from_port' => $from, 'to_port' => $to, 'nm' => $in['nm'] ?? null, 'via' => $in['via'] ?? null];
-    json_response($id ? ent_update('ch_distance', (int) $id, ['nm' => $data['nm'], 'via' => $data['via']]) : ent_insert('ch_distance', $data));
+    json_response($id ? ent_update('ch_distance', $id, ['nm' => $data['nm']] + (array_key_exists('via', $in) ? ['via' => $data['via']] : [])) : ent_insert('ch_distance', $data));
 }

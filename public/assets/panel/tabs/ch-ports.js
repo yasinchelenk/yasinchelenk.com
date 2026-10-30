@@ -7,6 +7,7 @@ import { Grid, resetLayoutButton } from '../core/grid.js';
 import { live } from '../core/live.js';
 import { gcNm } from '../chartering/engine/geo.js';
 import { normPort } from '../chartering/engine/matching.js';
+import { holidayInfo } from '../chartering/holidays.js';
 import { parseNum, fmt, specForm } from '../chartering/ui.js';
 
 const REGION = [
@@ -102,9 +103,12 @@ export async function mount(el, ctx, param) {
         const form = specForm(w, FORM, { cols: 4 });
         form.querySelectorAll('.ch-field').forEach((f) => { if (f.textContent.startsWith('Time zone')) f.querySelector('input')?.setAttribute('list', 'ch-tz-list'); });
         const near = row.id ? distances.filter((d) => [d.from_port, d.to_port].map(normPort).includes(normPort(row.name))) : [];
+        const holBox = h('div.ch-hol-box');
+        if (row.id) holidayInfo(holBox, { port: row.name, country: row.holiday_country || row.country || '', to: new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10) }, { label: 'next 12 months' }).catch(() => {});
         modal({ title: row.id ? row.name : 'New port', width: 1000,
             body: h('div.ch-fx', tzList, form,
                 row.id && row.tz ? h('p.dim', `Local time now: ${localTime(row.tz)} (${row.tz})`) : null,
+                row.id ? h('section', h('h4', 'Holidays'), holBox) : null,
                 near.length ? h('section', h('h4', 'Distances from this port'), h('ul.ch-news', near.map((d) => h('li', `${normPort(d.from_port) === normPort(row.name) ? d.to_port : d.from_port} — ${fmt(d.nm, 0)} nm${d.via ? ' via ' + d.via : ''}`)))) : null),
             actions: [
                 canEdit && row.id ? { label: 'Delete', danger: true, onClick: async () => {

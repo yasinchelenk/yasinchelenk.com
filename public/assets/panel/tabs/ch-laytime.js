@@ -1,7 +1,8 @@
 // CHARTERING · Laytime & Demurrage: CP terms + SOF per port on the left, time sheets and amounts on the right.
 // Engine: ../chartering/engine/laytime.js (unit-tested in chartering/tests/laytime.test.js).
 import { h, fill, debounce, toast, store, fmtDateTime, fmtDate } from '../core/dom.js';
-import { get, post, put, del } from '../core/api.js';
+import { api, get, post, put, del } from '../core/api.js';
+import { holidayInfo, clearHolidayCache, HOLIDAY_SOURCES } from '../chartering/holidays.js';
 import { modal, confirmBox, popover } from '../core/ui.js';
 import { laytimeCalc, blankLaytime, blankPort, TERMS, EVENTS, RULES, fmtTime, fmtDur, dayName, parseTime, parseSofText, timeBar } from '../chartering/engine/laytime.js';
 import { laytimeExample } from '../chartering/engine/examples.js';
@@ -78,9 +79,18 @@ export async function mount(el, ctx, param) {
         status.className = 'ch-status' + (dirty ? ' is-dirty' : '');
     }
 
+    /** Dates in a port's SOF (YYYY-MM-DD), for the holiday window. */
+    const sofDates = (p) => (JSON.stringify(p.events ?? []).match(/\d{4}-\d{2}-\d{2}/g) ?? []).sort();
+    const shiftDay = (iso, d) => new Date(Date.parse(iso + 'T00:00:00Z') + d * 86400000).toISOString().slice(0, 10);
+    const holWindow = (p) => { const d = sofDates(p); return d.length ? { from: shiftDay(d[0], -3), to: shiftDay(d[d.length - 1], 10) } : {}; };
+
+    // Per port: country-wide days + the port's own (BIMCO) entries, for the years its SOF covers (public holidays are fetched on demand)
     async function loadHolidays() {
-        const countries = [...new Set(calc.ports.map((p) => p.country).filter(Boolean))].filter((c) => !(c in holidays));
-        await Promise.all(countries.map(async (c) => { holidays[c] = (await get('chartering/holidays', { country: c })).map((x) => ({ date: x.date, name: x.name, from: x.from_time })); }));
+        const keyOf = (p) => `${p.country}|${String(p.name ?? '').trim().toUpperCase()}`;
+        const todo = calc.ports.filter((p) => p.country && !(keyOf(p) in holidays));
+        await Promise.all(todo.map(async (p) => {
+            holidays[keyOf(p)] = (await get('chartering/holidays', { country: p.country, port: p.name ?? '', ...holWindow(p) })).map((x) => ({ date: x.date, name: x.name, from: x.from_time }));
+        }));
     }
 
     // ------------------------------------------------------------ Inputs
@@ -173,6 +183,10 @@ export async function mount(el, ctx, param) {
                     } }] });
                 setTimeout(() => ta.focus(), 50);
             };
+            // Which holidays fall in this port's SOF period (or the next 120 days when there is no SOF yet)
+            const holBox = h('div.ch-hol-box');
+            const win = holWindow(p);
+            holidayInfo(holBox, { port: p.name ?? '', country: p.country ?? '', ...win }, { label: win.from ? 'holidays in the SOF period' : 'next 120 days' }).catch(() => {});
             const laytimeFields = p.laytimeMode === 'fixed'
                 ? [fld('Laytime days', numInput(p, 'days', changed, { small: true })), fld('+ hours', numInput(p, 'hours', changed, { small: true }))]
                 : p.laytimeMode === 'rate' ? [fld('Rate (t/day)', numInput(p, 'rate', changed)), h('span')] : [h('span'), h('span')];
@@ -201,6 +215,7 @@ export async function mount(el, ctx, param) {
                     h('label.ch-field.span-2', h('span.ch-field__label', 'NOR office hours (port local)'), textInput(p, 'norHours', changed, { placeholder: 'Mon-Fri 0800-1700, Sat 0800-1200 (empty = any time)' })),
                     fld('Laytime ends at', selectInput(p, 'endAt', { completed: 'Completed loading / disch', docs: 'Documents on board' }, changed)),
                     h('span')),
+                holBox,
                 h('div.ch-checks',
                     checkInput(p, 'wibon', 'WIBON', changed), checkInput(p, 'wipon', 'WIPON', changed), checkInput(p, 'wifpon', 'WIFPON', changed), checkInput(p, 'wccon', 'WCCON', changed),
                     checkInput(p, 'requireFp', 'laytime not before free pratique', changed), checkInput(p, 'usedBeforeCounts', 'time used before commencement counts', changed)),
@@ -424,32 +439,86 @@ export async function mount(el, ctx, param) {
         const countryIn = h('input', { type: 'text', value: country, maxlength: 2, style: { width: '60px' }, on: { change: () => { country = countryIn.value.trim().toUpperCase(); load(); } } });
         const yearSel = h('select', { on: { change: () => { year = +yearSel.value; load(); } } }, [year - 1, year, year + 1, year + 2].map((y) => h('option', { value: y, selected: y === year }, y)));
         const nd = h('input', { type: 'date' });
+        const np = h('input', { type: 'text', placeholder: 'Port (empty = whole country)', style: { width: '170px' } });
         const nn = h('input', { type: 'text', placeholder: 'Name' });
         const nf = h('input', { type: 'text', placeholder: 'from HH:mm (half day)', style: { width: '150px' } });
+        const status = h('p.dim');
+        const reset = () => { holidays = {}; clearHolidayCache(); };
         async function load() {
-            const rows = (await get('chartering/holidays', { country })).filter((x) => x.date.startsWith(String(year)));
-            list.replaceChildren(rows.length ? h('table.ch-table',
-                h('thead', h('tr', ['Date', 'Day', 'Holiday', 'From', ''].map((x) => h('th', x)))),
-                h('tbody', rows.map((x) => h('tr', h('td', fmtDate(x.date)), h('td', new Date(x.date + 'T00:00:00Z').toUTCString().slice(0, 3)), h('td', x.name), h('td', x.from_time ?? 'all day'),
-                    h('td', canEdit ? h('button.tiny.ghost', { type: 'button', on: { click: async () => { await del(`chartering/holidays/${x.id}`); delete holidays[country]; load(); } } }, '✕') : null)))))
+            // Every row of the country-year, port entries included (a calculation uses only those of its own port)
+            const rows = await get('chartering/holidays', { country, from: `${year}-01-01`, to: `${year}-12-31`, port: '*' });
+            const sync = (await get('chartering/holidays/status', { country }).catch(() => [])).find((s) => +s.year === year);
+            status.textContent = sync ? `Public holidays (Nager.Date) ${year}: ${sync.status === 'ok' ? `${sync.count} days, fetched ${fmtDateTime(sync.fetched_at, true)}` : sync.message ?? sync.status}` : '';
+            list.replaceChildren(rows.length ? h('div.ch-scroll', { style: { maxHeight: '50vh' } }, h('table.ch-table',
+                h('thead', h('tr', ['Date', 'Day', 'Holiday', 'Port', 'From', 'Source', ''].map((x) => h('th', x)))),
+                h('tbody', rows.map((x) => h('tr', h('td', fmtDate(x.date)), h('td', new Date(x.date + 'T00:00:00Z').toUTCString().slice(0, 3)),
+                    h('td', x.name, x.local_name && x.local_name !== x.name ? h('small.dim', ` ${x.local_name}`) : null), h('td', x.port || h('span.dim', 'all')), h('td', x.from_time ?? 'all day'),
+                    h('td', h('span.ch-badge.' + (HOLIDAY_SOURCES[x.source]?.[1] || 'none'), HOLIDAY_SOURCES[x.source]?.[0] ?? x.source)),
+                    h('td', canEdit ? h('button.tiny.ghost', { type: 'button', on: { click: async () => { await del(`chartering/holidays/${x.id}`); reset(); load(); } } }, '✕') : null))))))
                 : h('p.dim', `${country} ${year} için kayıtlı tatil yok.`));
         }
         await load();
         modal({
-            title: 'Holiday calendar', width: 640,
+            title: 'Holiday calendar', width: 820,
             body: h('div.ch-hol',
-                h('div.toolbar', h('span', 'Country'), countryIn, h('span', 'Year'), yearSel),
-                h('p.dim', 'Laytime hesabında SHEX vb. terimlerle “holiday” sayılır. Arifeler 13:00’ten itibaren yarım gün. Dinî bayram tarihlerini her yıl Diyanet takviminden teyit edin.'),
+                h('div.toolbar', h('span', 'Country'), countryIn, h('span', 'Year'), yearSel, h('span.spacer'),
+                    canEdit ? h('button.tiny', { type: 'button', title: 'Ülkenin resmî tatillerini Nager.Date’ten yeniden çek (BIMCO / yerleşik takvim varsa o yıl karıştırılmaz)', on: { click: async () => {
+                        const s = await post('chartering/holidays/sync', { country, year });
+                        toast(s.status === 'ok' ? `${country} ${year}: ${s.count} resmî tatil.` : s.message ?? s.status, s.status === 'ok' || s.status === 'own' ? 'ok' : 'error', 7000);
+                        reset();
+                        load();
+                    } } }, 'Sync public holidays') : null,
+                    canEdit ? h('button.tiny', { type: 'button', on: { click: () => bimcoImport(country, () => { reset(); load(); }) } }, 'Import BIMCO…') : null),
+                h('p.dim', 'Bir tarih için öncelik: BIMCO (abonelikten içe aktarılan) → elle girilen → yerleşik TR (Diyanet, arife 13:00) → resmî tatiller (Nager.Date, ülke geneli). BIMCO veya yerleşik takvimi olan ülke-yıla resmî liste karıştırılmaz. Limana özel satırlar yalnızca o limanın hesabında kullanılır.'),
+                status,
                 list,
-                canEdit ? h('div.toolbar', nd, nn, nf, h('button', { type: 'button', on: { click: async () => {
-                    await post('chartering/holidays', { country, date: nd.value, name: nn.value, from_time: nf.value.trim() || null });
+                canEdit ? h('div.toolbar', nd, np, nn, nf, h('button', { type: 'button', on: { click: async () => {
+                    await post('chartering/holidays', { country, port: np.value.trim(), date: nd.value, name: nn.value, from_time: nf.value.trim() || null });
                     nn.value = ''; nf.value = '';
-                    delete holidays[country];
+                    reset();
                     load();
                 } } }, 'Add')) : null),
             actions: [{ label: 'Close', primary: true }],
-            onClose: () => { holidays = {}; loadHolidays().then(compute); },
+            onClose: () => { reset(); loadHolidays().then(() => { compute(); drawInputs(); }); },
         });
+    }
+
+    /** BIMCO Holiday Calendar rows pasted or uploaded (.xlsx / .csv / .txt): preview, then import as source BIMCO. */
+    function bimcoImport(defaultCountry, done) {
+        const ta = h('textarea', { rows: 8, placeholder: 'One holiday per line — columns by tab, ; or |:\n01.01.2026\tGreece\tAll ports\tNew Year\'s Day\n2026-05-26\tTR\tKurban Bayramı arifesi\tfrom 13:00\nThursday 9 April 2026\tEgypt\tAlexandria\tSham El Nessim\thalf day' });
+        const file = h('input', { type: 'file', accept: '.xlsx,.csv,.txt' });
+        const preview = h('div');
+        const send = async (previewOnly) => {
+            const f = file.files?.[0];
+            const body = { text: ta.value, country: defaultCountry, preview: previewOnly ? 1 : '' };
+            if (f) {
+                const fd = new FormData();
+                fd.append('file', f);
+                Object.entries(body).forEach(([k, v]) => fd.append(k, v));
+                return api('POST', 'chartering/holidays/import', undefined, { form: fd });
+            }
+            return post('chartering/holidays/import', body);
+        };
+        const m = modal({ title: 'Import BIMCO holidays', width: 820,
+            body: h('div.ch-entry-wrap',
+                h('p.dim', 'BIMCO Holiday Calendar lisanslı bir üründür; aboneliğinizden aldığınız listeyi buraya yapıştırın ya da dosyayı seçin. Her satırda tarih ve ülke (TR / Turkey) gerekli; liman ve “half day / from 13:00” isteğe bağlı. Ülke yazmayan satırlar ', h('b', defaultCountry), ' sayılır.'),
+                ta, file, preview),
+            actions: [
+                { label: 'Preview', onClick: async () => {
+                    const r = await send(true);
+                    preview.replaceChildren(h('p', `${r.count} rows read${r.skipped_count ? `, ${r.skipped_count} skipped` : ''}.`),
+                        h('div.ch-scroll', { style: { maxHeight: '35vh' } }, h('table.ch-table', h('thead', h('tr', ['Country', 'Port', 'Date', 'Holiday', 'From'].map((x) => h('th', x)))),
+                            h('tbody', r.rows.map((x) => h('tr', h('td', x.country), h('td', x.port || h('span.dim', 'all')), h('td', fmtDate(x.date)), h('td', x.name), h('td', x.from_time ?? 'all day')))))),
+                        r.skipped.length ? h('p.dim', 'Skipped: ', r.skipped.slice(0, 5).join(' · ')) : null);
+                    return false;
+                } },
+                { label: 'Import', primary: true, onClick: async () => {
+                    const r = await send(false);
+                    toast(`BIMCO: ${r.added} added, ${r.updated} replaced${r.kept_manual ? `, ${r.kept_manual} manual kept` : ''}${r.public_removed ? `, ${r.public_removed} public rows dropped` : ''}.`, 'ok', 8000);
+                    done();
+                } },
+            ] });
+        return m;
     }
 
     function buildReport() {

@@ -368,8 +368,9 @@ function mergeSegments(segs) {
 export function laytimeCalc(calc, holidaysIn = []) {
     const cp = calc.cp ?? {};
     const ports = calc.ports ?? [];
-    // One list for every port, or {TR: [...], RO: [...]} picked by each port's country
-    const holidaysFor = (p) => (Array.isArray(holidaysIn) ? holidaysIn : holidaysIn[p.country] ?? []);
+    // One list for every port, or {TR: [...], RO: [...]} picked by each port's country; a "TR|ISKENDERUN" key
+    // (country + port, as loaded by the Laytime tab with the port's own BIMCO entries) wins over the country list
+    const holidaysFor = (p) => (Array.isArray(holidaysIn) ? holidaysIn : holidaysIn[`${p.country}|${String(p.name ?? '').trim().toUpperCase()}`] ?? holidaysIn[p.country] ?? []);
     const demRate = n(cp.demRate);
     const desRate = has(cp.desRate) ? n(cp.desRate) : demRate / 2;
     const ats = cp.desBasis !== 'WTS';

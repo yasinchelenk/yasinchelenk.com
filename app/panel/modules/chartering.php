@@ -115,9 +115,12 @@ entity_define('ch_holiday', [
     'table'  => 'ch_holidays',
     'page'   => 'ch-laytime',
     'undo'   => true,
-    'label'  => fn($r) => "{$r['country']} {$r['date']} · {$r['name']}",
-    'fields' => ['country' => 'upper', 'date' => 'date', 'name' => 'text', 'from_time' => 'text'],
+    'label'  => fn($r) => trim("{$r['country']} " . ($r['port'] ?? '') . " {$r['date']} · {$r['name']}"),
+    'fields' => ['country' => 'upper', 'port' => 'upper', 'date' => 'date', 'name' => 'text', 'from_time' => 'text', 'source' => 'text'],
     'prepare' => function (array $d, ?array $before): array {
+        // Typed / edited in the panel → a manual entry (it then outranks public and imported rows on that date)
+        $d['source'] = 'manual';
+        $d['port'] = trim((string) ($d['port'] ?? $before['port'] ?? ''));
         $m = array_merge($before ?? [], $d);
         if (!preg_match('/^[A-Z]{2}$/', (string) ($m['country'] ?? '')) || empty($m['date']) || trim((string) ($m['name'] ?? '')) === '') {
             api_error('Ülke kodu (TR), tarih ve ad gerekli.');
@@ -125,7 +128,7 @@ entity_define('ch_holiday', [
         if (!empty($d['from_time']) && !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', (string) $d['from_time'])) {
             api_error('Başlangıç saati SS:dd olmalı (ör. 13:00) ya da boş (tam gün).');
         }
-        if (array_key_exists('date', $d) && scalar('SELECT 1 FROM ch_holidays WHERE country = ? AND date = ? AND id <> ?', [$m['country'], $d['date'], $before['id'] ?? 0])) {
+        if (array_key_exists('date', $d) && scalar('SELECT 1 FROM ch_holidays WHERE country = ? AND port = ? AND date = ? AND id <> ?', [$m['country'], $d['port'], $d['date'], $before['id'] ?? 0])) {
             api_error('Bu tarihte zaten bir tatil kayıtlı.');
         }
         return $d;
@@ -201,9 +204,7 @@ function module_routes_chartering(): void
     route('GET', '/api/chartering/laytime/{id}', 'ch_laytime_get', 'ch-laytime');
     crud_routes('ch_laytime', '/api/chartering/laytime');
 
-    route('GET', '/api/chartering/holidays', fn($p, $in) => json_response(rows(
-        'SELECT id, country, date, name, from_time FROM ch_holidays WHERE country = ? ORDER BY date', [strtoupper((string) ($in['country'] ?? 'TR'))])), 'ch-laytime');
-    crud_routes('ch_holiday', '/api/chartering/holidays');
+    // Holiday calendars: modules/chartering_holidays.php
 
     route('POST', '/api/chartering/report/{format}', 'ch_report', '*');
 }

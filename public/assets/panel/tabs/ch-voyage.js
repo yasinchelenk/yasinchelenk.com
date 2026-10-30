@@ -9,6 +9,8 @@ import { numInput, textInput, selectInput, checkInput, fld, section, kvList, fmt
 import { LESSONS } from '../chartering/links.js';
 import { kbTables, sfFor } from '../chartering/kb.js';
 import { sourceBadge } from '../chartering/sources.js';
+import { normPort } from '../chartering/engine/matching.js';
+import { holidayInfo } from '../chartering/holidays.js';
 
 const TYPE_CAT = { sea: 'blue', load: 'green', disch: 'orange', bunker: 'teal', canal: 'purple', strait: 'indigo', weather: 'gray', other: 'brown' };
 const TYPE_NAME = { sea: 'Sea', load: 'Load', disch: 'Disch', ...STOP_TYPES };
@@ -164,9 +166,67 @@ export async function mount(el, ctx, param) {
         return wrap;
     }
 
+    // ------------------------------------------------------------ Saved port distances (shared matrix, ch_distances)
+
+    let distances = [];
+    let legLookups = [];
+    const portList = h('datalist#ch-port-list');
+    const savedPair = (a, b) => distances.find((d) => (normPort(d.from_port) === normPort(a) && normPort(d.to_port) === normPort(b))
+        || (normPort(d.from_port) === normPort(b) && normPort(d.to_port) === normPort(a))) ?? null;
+
+    async function loadDistances() {
+        const [rows, ports] = await Promise.all([get('chartering/voyage/distances'), get('chartering/ports').catch(() => [])]);
+        distances = rows;
+        const names = new Map();
+        for (const n of [...ports.map((p) => p.name), ...rows.flatMap((d) => [d.from_port, d.to_port])]) if (n && !names.has(normPort(n))) names.set(normPort(n), n);
+        portList.replaceChildren(...[...names.values()].sort((a, b) => a.localeCompare(b)).map((n) => h('option', { value: n })));
+        legLookups.forEach((fn) => fn());   // legs drawn before the list arrived
+    }
+
+    /** A typed distance for a leg with both ports: saved (or updated) in the matrix; History keeps the previous value. */
+    async function saveDistance(item) {
+        const nm = item.nm;
+        if (!canEdit || !item.from?.trim() || !item.to?.trim() || !(nm > 0) || normPort(item.from) === normPort(item.to)) return;
+        const d = savedPair(item.from, item.to);
+        if (d && Math.abs(+d.nm - nm) < 0.5) return;
+        await post('chartering/voyage/distance', { from_port: d ? d.from_port : item.from.trim(), to_port: d ? d.to_port : item.to.trim(), nm });
+        toast(d ? `${item.from} – ${item.to}: ${fmt(nm, 0)} nm olarak güncellendi (önceki ${fmt(+d.nm, 0)} nm).` : `${item.from} – ${item.to}: ${fmt(nm, 0)} nm kaydedildi; bir dahaki sefere otomatik gelir.`);
+        await loadDistances();
+    }
+
+    function distancesDialog() {
+        let q = '';
+        const list = h('div');
+        const draw = () => {
+            const k = normPort(q);
+            const rows = distances.filter((d) => !k || normPort(`${d.from_port} ${d.to_port} ${d.via ?? ''}`).includes(k));
+            list.replaceChildren(rows.length ? h('div.ch-scroll', { style: { maxHeight: '60vh' } }, h('table.ch-table',
+                h('thead', h('tr', ['From', 'To', 'nm', 'Via', 'Saved', ''].map((x, i) => h('th', { class: i === 2 ? 'r' : '' }, x)))),
+                h('tbody', rows.map((d) => h('tr',
+                    h('td', d.from_port), h('td', d.to_port), h('td.r', fmt(+d.nm, 0)), h('td', d.via ?? ''),
+                    h('td.dim', `${fmtDateTime(d.updated_at ?? d.created_at, true)} · ${d.updated_by ?? d.created_by ?? ''}`),
+                    h('td', h('button.tiny', { type: 'button', title: 'Boş mesafeli ilk deniz bacağına yaz', on: { click: () => {
+                        const leg = est.route.find((x) => x.type === 'sea' && !x.nm) ?? est.route.find((x) => x.type === 'sea');
+                        if (!leg) return;
+                        Object.assign(leg, { from: d.from_port, to: d.to_port, nm: +d.nm, nmAuto: true });
+                        m.close();
+                        drawInputs();
+                        changed();
+                    } } }, 'Use'))))))) : h('p.dim', q ? 'Eşleşen mesafe yok.' : 'Henüz kayıtlı mesafe yok. Bir deniz bacağına iki limanı ve mesafeyi yazdığınızda kaydedilir.'));
+        };
+        draw();
+        const m = modal({ title: `Saved distances (${distances.length})`, width: 760,
+            body: h('div.ch-entry-wrap',
+                h('input.search-input', { type: 'search', placeholder: 'Port…', on: { input: (e) => { q = e.target.value; draw(); } } }),
+                list,
+                h('p.dim', 'Ortak mesafe matrisi (Ports → Distances ve Tonnage & Cargo ile aynı). Her ekleme ve değişiklik History’de önceki değeriyle kayıtlı; Türkçe harfler ve aksanlar fark etmez (Aliağa = ALIAGA).')),
+            actions: [{ label: 'Close', primary: true }] });
+    }
+
     function routeSection() {
         rowDays = [];
         qtyInputs = [];
+        legLookups = [];
         const body = h('div.ch-route');
         const redraw = () => { body.replaceChildren(...est.route.map(routeRow), addBar()); changed(); };
 
@@ -184,10 +244,32 @@ export async function mount(el, ctx, param) {
             const f = (label, key, opts = {}) => fld(label, numInput(item, key, changed, opts));
             let fields;
             if (item.type === 'sea') {
+                // Distance from the shared matrix (Ports → Distances) when both ports are known; a typed distance is saved there
+                const nmEl = numInput(item, 'nm', changed);
+                const hint = h('span');
+                const showHint = () => {
+                    const d = item.from && item.to ? savedPair(item.from, item.to) : null;
+                    hint.replaceChildren(!d ? (item.from && item.to && canEdit ? 'new pair — the distance you type is saved' : '')
+                        : Math.abs(+d.nm - (item.nm ?? NaN)) < 0.5 ? `✓ saved${d.via ? ` · via ${d.via}` : ''}` : `saved: ${fmt(+d.nm, 0)} nm${d.via ? ` via ${d.via}` : ''}`);
+                };
+                const lookup = () => {
+                    const d = item.from && item.to ? savedPair(item.from, item.to) : null;
+                    if (d && (item.nm === null || item.nm === undefined || item.nmAuto)) {
+                        item.nm = +d.nm;
+                        item.nmAuto = true;
+                        nmEl.sync();
+                        changed();
+                    }
+                    showHint();
+                };
+                nmEl.addEventListener('input', () => { item.nmAuto = false; showHint(); });
+                nmEl.addEventListener('change', () => { saveDistance(item).then(showHint).catch(() => {}); });
+                legLookups.push(lookup);
+                showHint();
                 fields = [
-                    fld('From', textInput(item, 'from', changed, { placeholder: 'port / position' })),
-                    fld('To', textInput(item, 'to', changed)),
-                    f('Distance (nm)', 'nm'),
+                    fld('From', textInput(item, 'from', changed, { placeholder: 'port / position', list: 'ch-port-list', onCommit: lookup })),
+                    fld('To', textInput(item, 'to', changed, { list: 'ch-port-list', onCommit: lookup })),
+                    fld('Distance (nm)', nmEl, hint),
                     fld('Mode', selectInput(item, 'mode', SEA_MODES, changed)),
                     f('Speed (kn)', 'kn', { small: true, placeholder: 'vessel' }),
                     f('ECA (nm)', 'ecaNm'),
@@ -197,8 +279,12 @@ export async function mount(el, ctx, param) {
             } else if (item.type === 'load' || item.type === 'disch') {
                 const qty = numInput(item, 'qty', changed, { placeholder: 'auto' });
                 qtyInputs[i] = qty;
+                // The port's country and its holidays in the next 120 days (Ports → country; BIMCO / public calendars)
+                const holBox = h('span.ch-hol-box');
+                const showHol = () => holidayInfo(holBox, { port: item.name?.trim() ?? '' }, { compact: true }).catch(() => {});
+                if (item.name?.trim()) showHol();
                 fields = [
-                    fld('Port', textInput(item, 'name', changed)),
+                    fld('Port', textInput(item, 'name', changed, { list: 'ch-port-list', onCommit: showHol })),
                     fld('Quantity (t)', qty),
                     f('Rate (t/day)', 'rate'),
                     fld('Terms', selectInput(item, 'terms', TERMS, changed)),
@@ -207,6 +293,7 @@ export async function mount(el, ctx, param) {
                     f('Port costs (USD)', 'cost'),
                     f('Max draft (m)', 'maxDraft', { small: true, placeholder: 'none' }),
                     h('div.ch-field', h('span.ch-field__label', 'EU ETS'), checkInput(item, 'eu', 'EU port', changed)),
+                    h('div', { style: { gridColumn: '1 / -1' } }, holBox),
                 ];
             } else {
                 fields = [
@@ -243,7 +330,8 @@ export async function mount(el, ctx, param) {
                 h('button.tiny', { type: 'button', on: { click: () => add(t) } }, '+ ' + (t === 'sea' ? 'Sea leg' : TYPE_NAME[t]))));
 
         body.replaceChildren(...est.route.map(routeRow), addBar());
-        return section('route', 'Itinerary', 'purple', body, { badge: String(est.route.length) });
+        return section('route', 'Itinerary', 'purple', body, { badge: String(est.route.length),
+            actions: h('button.tiny', { type: 'button', title: 'Kayıtlı liman mesafeleri (ortak matris)', on: { click: (e) => { e.stopPropagation(); distancesDialog(); } } }, 'Saved distances') });
     }
 
     function costsSection() {
@@ -634,6 +722,7 @@ export async function mount(el, ctx, param) {
     const savedBtn = h('button', { type: 'button', on: { click: (e) => openSaved(e.currentTarget).catch(() => {}) } }, 'Saved ▾');
     el.append(
         vesselList,
+        portList,
         h('div.toolbar.ch-toolbar',
             savedBtn,
             h('button', { type: 'button', on: { click: async () => { if (await discardOk()) replace(blankEstimate()); } } }, '+ New'),
@@ -652,6 +741,7 @@ export async function mount(el, ctx, param) {
     drawInputs();
 
     loadProfiles().catch(() => {});
+    loadDistances().catch(() => {});
 
     const onKey = (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && el.isConnected && !el.closest('.is-hidden')) {

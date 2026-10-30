@@ -119,6 +119,8 @@ function panel_migrations(): array
         119 => 'chartering_migrate_119',
         // Data Sources (HandyBulk): haber günleri (tarih + sayı + link), dersler (başlık + link + kategori), terim–ders bağları, SF önerileri
         120 => 'chartering_migrate_120',
+        // Tatil takvimleri: liman bazlı tatil, kaynak (BIMCO / elle / yerleşik TR / Nager.Date), ülke-yıl eşitleme kaydı
+        121 => 'chartering_migrate_121',
     ];
 }
 
