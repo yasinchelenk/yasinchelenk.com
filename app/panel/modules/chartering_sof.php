@@ -55,7 +55,8 @@ entity_define('ch_sof', [
     'label'  => fn($r) => trim(($r['ref'] ?? 'SOF') . ' ' . ($r['vessel'] ?? '') . ' · ' . ($r['port'] ?? '')),
     'fields' => CH_SOF_FIELDS,
     'prepare' => function (array $d, ?array $before): array {
-        if ($before && $before['status'] === 'locked') {
+        // A locked SOF can still be (re)sent to Laytime — only the link fields may change
+        if ($before && $before['status'] === 'locked' && array_diff(array_keys($d), ['laytime_id', 'laytime_version'])) {
             api_error('Bu SOF kilitli. Değiştirmek için önce gerekçeyle kilidi açın.', 423);
         }
         if (isset($d['tz']) && $d['tz'] !== '' && !in_array($d['tz'], DateTimeZone::listIdentifiers(), true) && $d['tz'] !== 'UTC') {
@@ -75,7 +76,10 @@ entity_define('ch_sof', [
             api_error('Kilitli SOF silinemez. Önce gerekçeyle kilidi açın.', 423);
         }
     },
-    'after' => function (string $action, array $row): void {
+    'after' => function (string $action, array $row, ?array $before = null): void {
+        if ($action === 'update' && $before && ($before['status'] ?? '') !== ($row['status'] ?? '')) {
+            ch_sof_checklist($row);
+        }
         if ($action === 'insert' && empty($row['ref'])) {
             $year = date('Y');
             $seq = (int) scalar('SELECT COUNT(*) FROM ch_sofs WHERE ref LIKE ?', ["SOF-{$year}-%"]) + 1;
@@ -132,6 +136,11 @@ function module_routes_chartering_sof(): void
         json_response(['ok' => true]);
     }, 'ch-sof');
     route('POST', '/api/chartering/sof-import', 'ch_sof_import', 'ch-sof');
+    // For the Laytime tab: current version of the SOFs a calculation was made from ("SOF changed — recalculate")
+    route('GET', '/api/chartering/sof-versions', function ($p, $in) {
+        $ids = array_slice(array_values(array_filter(array_map('intval', explode(',', (string) ($in['ids'] ?? ''))))), 0, 20);
+        json_response($ids ? rows('SELECT id, ref, version, status, port_call, updated_at, updated_by FROM ch_sofs WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')', $ids) : []);
+    }, 'ch-laytime');
 }
 
 /** Upserts a user template: { name, data: {…structure…} }. */
@@ -252,6 +261,7 @@ function ch_sof_file_upload(array $p, array $in): never
     if ($kind === 'signed' && !in_array($sof['status'], ['signed', 'sent'], true)) {
         update('ch_sofs', $sof['id'], ['status' => 'signed', 'updated_at' => now(), 'updated_by' => $a['name']]);
         gecmis_log('ch_sof', $sof['id'], $label, 'status', 'update', $sof['status'], 'signed');
+        ch_sof_checklist(['status' => 'signed'] + $sof);
     }
     feed('ch_sof', 'update', ent_row('ch_sof', $sof['id']), $sof['id']);
     json_response(row('SELECT id, kind, original, mime, size, note, created_at, created_by FROM ch_sof_files WHERE id = ?', [$id]) + ['status' => scalar('SELECT status FROM ch_sofs WHERE id = ?', [$sof['id']])], 201);
@@ -283,6 +293,22 @@ function ch_sof_file_delete(array $p): never
     @unlink(panel_storage('sof-files/' . basename((string) $f['name'])));
     gecmis_log('ch_sof', $f['sof_id'], trim("{$f['ref']} {$f['vessel']}"), 'file', 'update', "{$f['kind']}: {$f['original']}", null);
     json_response(['ok' => true]);
+}
+
+/**
+ * Post-fixture checklist (SOF §8.2): once the SOF of a port is signed (or sent / locked), the fixture's
+ * "SOF collected — load port" / "… discharge port" item is ticked, with a note saying which SOF did it.
+ */
+function ch_sof_checklist(array $sof): void
+{
+    if (empty($sof['fixture_id']) || !in_array($sof['status'] ?? '', ['signed', 'sent', 'locked'], true)) {
+        return;
+    }
+    $side = ($sof['port_call'] ?? 'load') === 'disch' ? '%disch%' : '%load%';
+    $tasks = rows("SELECT id FROM ch_fixture_tasks WHERE fixture_id = ? AND status = 'todo' AND title LIKE '%SOF%' AND title LIKE ?", [$sof['fixture_id'], $side]);
+    foreach ($tasks as $t) {
+        ent_update('ch_task', (int) $t['id'], ['status' => 'done', 'note' => 'auto: ' . trim(($sof['ref'] ?? 'SOF') . ' signed ' . date('d.m.Y'))]);
+    }
 }
 
 /** Locked SOFs open only with a reason, which goes to the audit log. */

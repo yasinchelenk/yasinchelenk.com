@@ -10,6 +10,8 @@ import { dictionary, eventLabel, matchEvent, CATEGORIES, EFFECTS } from '../char
 import { normTime, local, utcText, offsetText, fmtMin, nowLocal } from '../chartering/engine/sof/time.js';
 import { analyse, dailyLog, applyLogOverrides, parseHm } from '../chartering/engine/sof/events.js';
 import { validate } from '../chartering/engine/sof/validate.js';
+import { sofToLaytimePort, mergeIntoCalc } from '../chartering/engine/sof/to-laytime.js';
+import { laytimeCalc, timeBar } from '../chartering/engine/laytime.js';
 import { HEADER_FIELDS, HEADER_GROUPS, SOF_TEMPLATES, SOF_STATUS, REMARK_TYPES, QUALIFIERS, SECTIONS, STANDARD_REMARKS, newSof, rowId, templateFromSof, templateKey } from '../chartering/engine/sof/templates.js';
 import { templatesView, dictionaryView, loadTemplates, eventEditor } from '../chartering/sof-admin.js';
 import { section, fmt } from '../chartering/ui.js';
@@ -233,6 +235,10 @@ export async function mount(el, ctx, param) {
                 h('span.spacer'),
                 h('button', { type: 'button', title: 'Bölümlerin sırası, gizleme ve özel bölüm', on: { click: (e) => sectionsMenu(e.currentTarget) } }, 'Sections ▾'),
                 canEdit ? h('button', { type: 'button', title: 'Bu SOF’un yapısını (olay sırası, bölümler, alanlar, remark ve imzalar) şablon olarak kaydet', on: { click: saveAsTemplate } }, 'Save as template…') : null,
+                cur.laytime_id ? h('span.ch-cell-gap',
+                    cur.laytime_version === cur.version ? h('span.ch-badge.green', { title: `Laytime v${cur.laytime_version}` }, 'in Laytime') : h('span.ch-badge.amber', { title: `Laytime hesabı v${cur.laytime_version} ile yapıldı, SOF şimdi v${cur.version}` }, 'SOF changed — resend'),
+                    ctx.allowed('ch-laytime') ? h('button.ch-link', { type: 'button', on: { click: () => ctx.open('ch-laytime', { openId: cur.laytime_id }) } }, 'Open ↗') : null) : null,
+                canEdit && ctx.allowed('ch-laytime') ? h('button', { type: 'button', title: 'Olayları laytime hesabına aktar (aynı fixture’ın diğer liman SOF’u varsa aynı hesaba)', on: { click: () => sendToLaytime().catch(() => {}) } }, 'Send to Laytime') : null,
                 statusEl,
                 !ro() ? h('button.primary', { type: 'button', on: { click: () => save().then(() => toast('SOF kaydedildi.')).catch(() => {}) } }, 'Save') : null,
                 canEdit && cur.status !== 'locked' ? h('button.ghost', { type: 'button', on: { click: remove } }, 'Delete') : null),
@@ -498,6 +504,64 @@ export async function mount(el, ctx, param) {
                 } } }, 'Delete section')) : null);
         draw();
         return section('sof-' + cs.id, cs.title, 'gray', box, { badge: String(cs.rows.length) });
+    }
+
+    /**
+     * SOF → Laytime (spec SOF §8.1). The port goes into the SOF's own calculation, or into the calculation of the other
+     * port of the same fixture, or into a new one. The calculation is run here and saved with its result, and the SOF
+     * remembers the calculation and the SOF version it was made from.
+     */
+    async function sendToLaytime() {
+        if (dirty) await save();
+        const doc = cur.doc;
+        const a = analyse(doc, dict);
+        const errors = validate(a, doc, dict).filter((x) => x.level === 'error');
+        if (errors.length && !(await confirmBox(h('div', h('p', 'SOF’ta kronoloji hataları var — yine de aktarılsın mı?'), h('ul', errors.map((x) => h('li', x.msg)))), { title: 'Send to Laytime', yes: 'Aktar', danger: false }))) return;
+        const fixture = cur.fixture_id && ctx.allowed('ch-fixtures') ? await get(`chartering/fixtures/${cur.fixture_id}`).catch(() => null) : null;
+        const port = ports.find((p) => p.name.toLowerCase() === String(doc.header.port ?? '').toLowerCase()) ?? null;
+        const { port: lp, warnings, sent } = sofToLaytimePort(doc, a, dict, { fixture, port, sof: { id: cur.id, ref: cur.ref, version: cur.version } });
+
+        // Which calculation?
+        let target = cur.laytime_id ? await get(`chartering/laytime/${cur.laytime_id}`).catch(() => null) : null;
+        if (!target && cur.fixture_id) {
+            const sibling = (await get('chartering/sofs')).find((s) => s.id !== cur.id && s.fixture_id === cur.fixture_id && s.laytime_id);
+            const other = sibling ? await get(`chartering/laytime/${sibling.laytime_id}`).catch(() => null) : null;
+            if (other) {
+                const choice = await new Promise((resolve) => {
+                    let done = false;
+                    modal({ title: 'Send to Laytime', width: 560, body: h('p', `${sibling.ref} (${CALLS[sibling.port_call]}) “${other.name}” hesabında. Bu liman aynı hesaba mı eklensin?`),
+                        onClose: () => done || resolve(null),
+                        actions: [{ label: 'New calculation', onClick: () => { done = true; resolve('new'); } }, { label: `Add to “${other.name}”`, primary: true, onClick: () => { done = true; resolve('same'); } }] });
+                });
+                if (!choice) return;
+                if (choice === 'same') target = other;
+            }
+        }
+        const calc = mergeIntoCalc(target?.data ?? null, lp, { doc, fixture });
+        if (!target && fixture?.time_bar_days) calc.claim.timeBarDays = fixture.time_bar_days;
+
+        // Run the Laytime engine with the holiday calendars of the ports, and save like the Laytime tab does
+        const countries = [...new Set(calc.ports.map((p) => p.country).filter(Boolean))];
+        const holidays = Object.fromEntries(await Promise.all(countries.map(async (c) => [c, (await get('chartering/holidays', { country: c }).catch(() => [])).map((x) => ({ date: x.date, name: x.name, from: x.from_time }))])));
+        const res = laytimeCalc(calc, holidays);
+        const payload = {
+            name: target?.name ?? calc.name, vessel_id: null, vessel_name: calc.vessel.name || null,
+            ports: calc.ports.map((p) => p.name).filter(Boolean).join(' / ') || null,
+            demurrage: res.demurrage, despatch: res.despatch, net: res.net, claim_status: calc.claim.status, time_bar: timeBar(calc, calc.claim.timeBarDays), data: calc,
+        };
+        const saved = target ? await put(`chartering/laytime/${target.id}`, payload) : await post('chartering/laytime', payload);
+        Object.assign(cur, await put(`chartering/sofs/${cur.id}`, { laytime_id: saved.id, laytime_version: cur.version, ...(['locked', 'sent'].includes(cur.status) ? {} : { status: 'sent' }) }));
+        drawEditor();
+
+        const pr = res.ports.find((p) => p.kind === lp.kind && p.name === lp.name) ?? res.ports.at(-1);
+        modal({ title: `Sent to Laytime — ${saved.name}`, width: 640,
+            body: h('div.ch-entry-wrap',
+                h('p', `${sent.length} SOF rows → ${lp.events.length} laytime events (${lp.terms}${lp.rate ? `, ${fmt(lp.rate, 0)} t/day` : ''}${lp.qty ? `, ${fmt(lp.qty, null)} t` : ''}).`),
+                pr ? h('p', `This port: allowed ${fmtMin(pr.allowed)}, used ${fmtMin(pr.used)}${pr.demurrage ? `, on demurrage ${fmtMin(pr.demurrage)}` : ''}.`) : null,
+                h('p', h('b', res.net >= 0 ? `Demurrage USD ${fmt(res.demurrage, 2)}` : `Despatch USD ${fmt(res.despatch, 2)}`), h('span.dim', ` (whole calculation, ${calc.ports.length} port${calc.ports.length > 1 ? 's' : ''})`)),
+                warnings.length || res.warnings.length ? h('div.notice.warn', h('ul', [...warnings, ...res.warnings].map((x) => h('li', x)))) : null,
+                h('p.dim', 'Turn time, NOR kuralları ve terms SOF header’ındaki “Laytime terms” ve fixture’dan okundu; Laytime sekmesinde kontrol edin.')),
+            actions: [{ label: 'Close' }, { label: 'Open in Laytime', primary: true, onClick: () => ctx.open('ch-laytime', { openId: saved.id }) }] });
     }
 
     function saveAsTemplate() {

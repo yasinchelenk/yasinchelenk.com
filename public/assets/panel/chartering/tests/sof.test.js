@@ -4,6 +4,8 @@ import { dictionary } from '../engine/sof/dictionary.js';
 import { rowStartMs, rowEndMs, minutes, utcText, local } from '../engine/sof/time.js';
 import { analyse, dailyLog, applyLogOverrides, parseHm } from '../engine/sof/events.js';
 import { validate } from '../engine/sof/validate.js';
+import { sofToLaytimePort, mergeIntoCalc, cpTerms, firstNumber } from '../engine/sof/to-laytime.js';
+import { laytimeCalc } from '../engine/laytime.js';
 import { SOF_TEMPLATES, newSof, templateFromSof, templateKey, exportBundle, readBundle } from '../engine/sof/templates.js';
 
 const dict = dictionary();
@@ -103,4 +105,31 @@ test('SOF templates — save a SOF as template, new SOF from it, JSON export / i
     const back = readBundle(file);
     eq([back.templates.length, back.templates[0].key, back.dictionary.length, back.errors.length], [1, 'iron', 1, 1], 'import keeps valid entries, reports the bad one');
     eq(readBundle('{"kind":"other"}').errors.length, 1, 'a foreign JSON file is refused');
+});
+
+test('SOF 9 — send to Laytime: ship crane breakdown excluded, rain by the CP', () => {
+    const events = [
+        row('2026-11-02', '08:00', 'nor_tendered'), row('2026-11-02', '10:00', 'all_fast'), row('2026-11-02', '14:00', 'commenced'),
+        row('2026-11-02', '16:00', 'rain', { timeTo: '18:00' }), row('2026-11-03', '09:00', 'ship_breakdown', { timeTo: '12:00' }),
+        row('2026-11-03', '13:00', 'stopped', { text: '' }), row('2026-11-03', '14:00', 'resumed'), row('2026-11-04', '10:00', 'completed'),
+    ];
+    const ww = sof(events, { header: { port: 'Iskenderun', laytime_terms: '10,000 MT PWWD SHINC, WIBON, turn time 12 hrs', bl_qty: '30,000', dem_rate: 'USD 15,000 pdpr' } });
+    const r = sofToLaytimePort(ww, analyse(ww, dict), dict, { sof: { id: 7, ref: 'SOF-2026-007', version: 3 } });
+    const byType = Object.fromEntries(r.port.events.filter((e) => e.until).map((e) => [e.type, e.rule]));
+    eq(byType, { rain: 'deduct', breakdown_ship: 'deduct', stoppage: 'deduct' }, 'PWWD: rain deducted, ship’s crane deducted, generic stop deducted');
+    eq([r.port.terms, r.port.rate, r.port.qty, r.port.turnHrs, r.port.wibon, r.port.tz, r.port.sof.version], ['SHINC', 10000, 30000, 12, true, 'Europe/Istanbul', 3], 'CP terms read from the header');
+    eq(r.port.events.find((e) => e.type === 'nor_tendered').at, '2026-11-02 08:00', 'times go to Laytime in port local time');
+
+    const run = sof(events, { header: { laytime_terms: '10,000 MT SHINC', bl_qty: '30000' } });
+    const r2 = sofToLaytimePort(run, analyse(run, dict), dict);
+    const t2 = Object.fromEntries(r2.port.events.filter((e) => e.until).map((e) => [e.type, e.rule]));
+    eq([t2.rain, t2.breakdown_ship], ['count', 'deduct'], 'running days: rain counts, ship’s breakdown still excluded');
+
+    const calc = mergeIntoCalc(null, r.port, { doc: ww });
+    calc.cp.demRate = firstNumber('USD 15,000 pdpr');
+    const res = laytimeCalc(calc, []);
+    eq([calc.ports.length, res.ports[0].allowed, res.demRate], [1, 3 * 1440, 15000], 'Laytime engine runs on it: 30,000 t ÷ 10,000 = 3 days');
+    const again = mergeIntoCalc(calc, { ...r.port, rate: 12000 }, { doc: ww });
+    eq([again.ports.length, again.ports[0].rate], [1, 12000], 'sending the same SOF again replaces its port');
+    eq(cpTerms('5000 mt pwwd SSHEX UU').terms, 'SSHEX', 'terms parsing picks the longest match');
 });

@@ -319,6 +319,22 @@ export async function mount(el, ctx, param) {
         drawStatus();
         persist();
         drawInputs();
+        checkSofs();
+    }
+
+    // Ports that came from a SOF (“Send to Laytime”): warn when the SOF changed after this calculation
+    const sofNote = h('div');
+    async function checkSofs() {
+        const linked = calc.ports.filter((p) => p.sof?.id);
+        if (!linked.length) { sofNote.replaceChildren(); return; }
+        const now = await get('chartering/sof-versions', { ids: linked.map((p) => p.sof.id).join(',') }).catch(() => null);
+        if (!now) { sofNote.replaceChildren(); return; }
+        const items = linked.map((p) => ({ p, s: now.find((x) => x.id === p.sof.id) }));
+        const stale = items.filter(({ p, s }) => !s || s.version !== p.sof.version);
+        fill(sofNote, h(stale.length ? 'div.notice.warn' : 'p.dim', items.map(({ p, s }) => h('div',
+            `${p.name || (p.kind === 'load' ? 'Load port' : 'Discharge port')}: from ${p.sof.ref ?? 'SOF'} v${p.sof.version}`,
+            !s ? ' — the SOF has been deleted.' : s.version !== p.sof.version ? ` — SOF changed after calculation (now v${s.version}) — recalculate: open the SOF and “Send to Laytime” again. ` : ' — up to date. ',
+            s && ctx.allowed('ch-sof') ? h('button.tiny', { type: 'button', on: { click: () => ctx.open('ch-sof', { openId: s.id }) } }, `Open ${s.ref}`) : null))));
     }
 
     async function openSaved(anchor) {
@@ -475,10 +491,17 @@ export async function mount(el, ctx, param) {
             h('button', { type: 'button', on: { click: () => holidaysDialog().catch(() => {}) } }, 'Holidays'),
             h('button', { type: 'button', on: { click: claimLetter } }, 'Claim letter'),
             exportButtons(buildReport)),
+        sofNote,
         h('div.ch-split.ch-split--laytime', left, right),
     );
     drawStatus();
     drawInputs();
+    checkSofs();
+    // Opened from a SOF (“Open in Laytime”): load that saved calculation
+    if (param?.openId && (!dirty || (await discardOk()))) {
+        const full = await get(`chartering/laytime/${param.openId}`).catch(() => null);
+        if (full) replace(full.data, full.id);
+    }
 
     get('chartering/vessel-profiles').then((list) => vesselList.replaceChildren(...list.map((x) => h('option', { value: x.name })))).catch(() => {});
     get('chartering/ports').then((list) => { portDb = list; portList.replaceChildren(...list.map((x) => h('option', { value: x.name }))); }).catch(() => {});
