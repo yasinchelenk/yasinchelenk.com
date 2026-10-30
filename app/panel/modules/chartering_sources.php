@@ -12,6 +12,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/lib/handybulk_parse.php';
 require_once dirname(__DIR__) . '/lib/handybulk_fetch.php';
+require_once dirname(__DIR__) . '/lib/handybulk_normalize.php';
 
 /** Migration 115: when an index value was fetched from a source. */
 function chartering_migrate_115(PDO $pdo): void
@@ -55,6 +56,30 @@ function chartering_migrate_117(PDO $pdo): void
         SQL);
 }
 
+/** Migration 118: provenance of charter / period / TC rates, trip vs period rows, ISO week of route tables, region mappings. */
+function chartering_migrate_118(PDO $pdo): void
+{
+    $pdo->exec(<<<'SQL'
+        ALTER TABLE ch_charter_rates ADD COLUMN kind TEXT NOT NULL DEFAULT 'trip';
+        ALTER TABLE ch_charter_rates ADD COLUMN period_months REAL;
+        ALTER TABLE ch_charter_rates ADD COLUMN source_url TEXT;
+        ALTER TABLE ch_charter_rates ADD COLUMN as_of_date TEXT;
+        ALTER TABLE ch_charter_rates ADD COLUMN fetched_at TEXT;
+        ALTER TABLE ch_charter_rates ADD COLUMN import_run_id INTEGER;
+        CREATE INDEX idx_ch_rates_key ON ch_charter_rates(date, segment, open_region);
+        ALTER TABLE ch_tc_rates ADD COLUMN source TEXT;
+        ALTER TABLE ch_tc_rates ADD COLUMN source_url TEXT;
+        ALTER TABLE ch_tc_rates ADD COLUMN as_of_date TEXT;
+        ALTER TABLE ch_tc_rates ADD COLUMN fetched_at TEXT;
+        ALTER TABLE ch_tc_rates ADD COLUMN import_run_id INTEGER;
+        ALTER TABLE ch_tc_rates ADD COLUMN week INTEGER;
+        ALTER TABLE ch_tc_rates ADD COLUMN week_year INTEGER;
+        CREATE TABLE ch_region_aliases (
+            alias TEXT PRIMARY KEY, code TEXT NOT NULL, created_at TEXT, created_by TEXT
+        );
+        SQL);
+}
+
 /** Plausibility ranges (spec §3): outside → not written, goes to review. */
 const HB_RANGES = [
     'index' => [0, 20000], 'tc' => [1000, 250000], 'bb' => [0, 5000000], 'bunker' => [100, 3000], 'route_t' => [1, 100],
@@ -67,7 +92,7 @@ function hb_adapters(): array
     return [
         'bdi' => ['label' => 'Baltic Dry Index', 'path' => '/baltic-dry-index/', 'implemented' => true, 'targets' => 'Baltic indices, TC earnings'],
         'bunker' => ['label' => 'Ship Bunker', 'path' => '/ship-bunker/', 'implemented' => true, 'targets' => 'Bunker prices (VLSFO, MGO, …)'],
-        'rates' => ['label' => 'Ship Charter Rates', 'path' => '/ship-charter-rates/', 'implemented' => false, 'phase' => 4, 'targets' => 'Trip & period rates, week TC, 1-year TC'],
+        'rates' => ['label' => 'Ship Charter Rates', 'path' => '/ship-charter-rates/', 'implemented' => true, 'targets' => 'Trip & period rates, week route TC, 1-year TC'],
         'weekly' => ['label' => 'BDI weekly reports', 'path' => '/baltic-dry-index/', 'implemented' => false, 'phase' => 5, 'targets' => 'Reported fixtures, route values'],
         'news' => ['label' => 'Dry Bulk Shipping News', 'path' => '/dry-bulk-shipping-news/', 'implemented' => false, 'phase' => 6, 'targets' => 'Dates + links (no text)'],
         'lessons' => ['label' => 'Chartering Lessons', 'path' => '/chartering-lessons/', 'implemented' => false, 'phase' => 6, 'targets' => 'Lesson titles + links, categories'],
@@ -106,6 +131,14 @@ function module_routes_chartering_sources(): void
     route('GET', '/api/chartering/sources/review', fn($p, $in) => json_response(array_map(fn($r) => ['data' => json_decode($r['data'], true)] + $r,
         rows("SELECT * FROM ch_hb_review WHERE status = ? ORDER BY id DESC LIMIT 500", [in_array($in['status'] ?? 'open', ['open', 'accepted', 'dismissed'], true) ? $in['status'] ?? 'open' : 'open']))), 'ch-market');
     route('POST', '/api/chartering/sources/review/{id}', 'ch_sources_review_resolve', 'ch-market');
+    route('DELETE', '/api/chartering/sources/region-aliases', function ($p, $in) {
+        $alias = mb_strtolower((string) ($in['alias'] ?? ''));
+        $n = q('DELETE FROM ch_region_aliases WHERE alias = ?', [$alias])->rowCount() ?: api_error('Eşleme bulunamadı.', 404);
+        // the name may be flagged again on the next run
+        q("DELETE FROM ch_hb_review WHERE kind = 'unmapped' AND target = 'ch_region_aliases' AND record_key = ? AND status != 'open'", [$alias]);
+        gecmis_log('ch_market', "region:{$alias}", "Region mapping {$alias}", 'code', 'islem', null, 'deleted');
+        json_response(['deleted' => $n]);
+    }, 'ch-market');
     route('PUT', '/api/chartering/sources/schedule', function ($p, $in) {
         $enabled = !empty($in['enabled']);
         $hour = max(0, min(23, (int) ($in['hour'] ?? 7)));
@@ -131,6 +164,8 @@ function ch_sources_overview(): never
     json_response([
         'adapters' => $out, 'schedule' => hb_schedule(), 'user_agent' => HbFetcher::userAgent(config('handybulk.contact')),
         'review_open' => (int) scalar("SELECT COUNT(*) FROM ch_hb_review WHERE status = 'open'"), 'history_done' => setting('ch_handybulk_history'),
+        'region_codes' => array_values(array_unique([...array_values(HB_REGION_ALIASES), ...array_column(rows('SELECT DISTINCT code FROM ch_region_aliases'), 'code')])),
+        'region_aliases' => rows('SELECT * FROM ch_region_aliases ORDER BY alias'),
     ]);
 }
 
@@ -168,6 +203,7 @@ function hb_run(string $key, string $trigger, array $opt = []): array
         [$counts, $asOf, $msg] = match ($key) {
             'bdi' => hb_import_bdi($res['html'], $ctx),
             'bunker' => hb_import_bunker($res['html'], $ctx),
+            'rates' => hb_import_rates($res['html'], $ctx),
         };
     } catch (HbFormatChanged $e) {
         // An old archive month may hold only a news item — that is not a format change of the live page
@@ -378,6 +414,211 @@ function hb_bunker_write(?array $cur, array $base, array $grades, ?int $runId, s
     }
 }
 
+// ---------------------------------------------------------------- Charter Rates adapter
+
+/** Saved region mappings (Review → "Map"): lower-case name → code. */
+function hb_region_aliases(): array
+{
+    return array_column(rows('SELECT alias, code FROM ch_region_aliases'), 'code', 'alias');
+}
+
+/** Region name → code, with an "unmapped" review entry (once per name) when the dictionaries do not know it. */
+function hb_region_ctx(?string $raw, array &$ctx, array &$c): ?string
+{
+    if ($raw === null || trim($raw) === '') {
+        return null;
+    }
+    $r = hb_region($raw, $ctx['aliases'] ??= hb_region_aliases());
+    if (!$r['mapped'] && !isset($ctx['unmapped'][$r['code']])) {
+        $ctx['unmapped'][$r['code']] = true;
+        if (!scalar("SELECT 1 FROM ch_hb_review WHERE kind = 'unmapped' AND target = 'ch_region_aliases' AND record_key = ?", [mb_strtolower($r['code'])])) {
+            hb_review($ctx, 'unmapped', 'ch_region_aliases', mb_strtolower($r['code']), ['name' => $r['code']],
+                "Region “{$r['code']}” is not in the region dictionary — saved as written; map it to a code (e.g. ECSA, USG, Cont) or keep the name");
+            $c['review']++;
+        }
+    }
+    return $r['code'];
+}
+
+/** "US Gulf/China" → "USG – China", "China/Indonesia RV" → "China – Indonesia RV", "Atlantic RV" stays. */
+function hb_route_label(string $label, array &$ctx, array &$c): string
+{
+    $rv = (bool) preg_match('/\s+RV$/i', $label);
+    $parts = array_map(fn($p) => hb_region_ctx(preg_replace('/\s+RV$/i', '', trim($p)), $ctx, $c), explode('/', $label));
+    return implode(' – ', $parts) . ($rv ? ' RV' : '');
+}
+
+/** The Friday of an ISO week; the year comes from the page date (week 52 seen in January belongs to the year before). */
+function hb_week_date(int $week, string $asOf): array
+{
+    $y = (int) substr($asOf, 0, 4);
+    $m = (int) substr($asOf, 5, 2);
+    $y += ($week >= 50 && $m === 1) ? -1 : (($week <= 2 && $m === 12) ? 1 : 0);
+    return [(new DateTimeImmutable())->setISODate($y, $week, 5)->format('Y-m-d'), $y];
+}
+
+/** @return array{0: array, 1: ?string, 2: ?string} counts, as-of date, message */
+function hb_import_rates(string $html, array $ctx): array
+{
+    $page = hb_parse_rates_page($html);
+    if (!$page['as_of'] || (!$page['trips'] && !$page['year_tc'] && !$page['weeks'])) {
+        throw new HbFormatChanged('Format changed: “DD-Month-YYYY Daily Updated Ship Charter Rates”, the “… open … to … fixed around $…” lines or the rate tables not found. Nothing was written — use “+ Add / paste”.');
+    }
+    $date = $page['as_of'];
+    $c = ['added' => 0, 'updated' => 0, 'skipped' => 0, 'review' => 0];
+    db()->beginTransaction();
+    try {
+        foreach ($page['trips'] as $t) {
+            $via = array_values(array_filter(array_map(fn($v) => hb_region_ctx($v, $ctx, $c), $t['via'])));
+            hb_upsert_rate(['date' => $date, 'kind' => 'trip', 'segment' => $t['segment'], 'open_region' => hb_region_ctx($t['open'], $ctx, $c),
+                'via' => $via ? implode(', ', $via) : null, 'to_region' => hb_region_ctx($t['to'], $ctx, $c), 'period_months' => null,
+                'rate' => $t['rate'], 'ballast_bonus' => $t['bb']], $ctx, $c);
+        }
+        foreach ($page['period'] as $t) {
+            hb_upsert_rate(['date' => $date, 'kind' => 'period', 'segment' => $t['segment'], 'open_region' => hb_region_ctx($t['open'], $ctx, $c),
+                'via' => null, 'to_region' => null, 'period_months' => $t['months'], 'rate' => $t['rate'], 'ballast_bonus' => null], $ctx, $c);
+        }
+        foreach ($page['weeks'] as $w) {
+            [$wDate, $wYear] = hb_week_date($w['week'], $date);
+            foreach ($w['routes'] as [$label, $rate]) {
+                hb_upsert_tc($wDate, 'route', $w['segment'], "{$w['segment']} " . hb_route_label($label, $ctx, $c), $rate, $ctx, $c, $w['week'], $wYear);
+            }
+        }
+        foreach ($page['year_tc'] as $t) {
+            hb_upsert_tc($date, 'period', $t['segment'], $t['label'], $t['rate'], $ctx, $c);
+        }
+        foreach (array_unique($page['unknown_segments']) as $seg) {
+            hb_review($ctx, 'unmapped', 'segment', mb_strtolower($seg), ['name' => $seg], "Segment “{$seg}” is not in the segment dictionary — its lines were not imported");
+            $c['review']++;
+        }
+        db()->commit();
+    } catch (Throwable $e) {
+        db()->rollBack();
+        throw $e;
+    }
+    $msg = count($page['trips']) . ' trips, ' . count($page['period']) . ' period, ' . array_sum(array_map(fn($w) => count($w['routes']), $page['weeks'])) . ' week routes'
+        . ($page['weeks'] ? " (week {$page['weeks'][0]['week']})" : '') . ', ' . count($page['year_tc']) . ' 1-year TC' . ($page['skipped'] ? ", {$page['skipped']} lines not understood" : '');
+    return [$c, $date, $msg];
+}
+
+/** Charter / period rate upsert, key (date, kind, segment, open, via, to[, months]) with the range / manual-priority rules. */
+function hb_upsert_rate(array $r, array $ctx, array &$c): void
+{
+    $key = implode('|', [$r['date'], $r['kind'], $r['segment'], $r['open_region'], $r['via'], $r['to_region'], $r['period_months']]);
+    $what = "{$r['segment']} {$r['open_region']}" . ($r['via'] ? " via {$r['via']}" : '') . ($r['to_region'] ? " → {$r['to_region']}" : '') . ($r['kind'] === 'period' ? " period {$r['period_months']} mo" : '');
+    $data = $r + ['url' => $ctx['url']];
+    [$lo, $hi] = HB_RANGES['tc'];
+    [$blo, $bhi] = HB_RANGES['bb'];
+    if ($r['rate'] === null || $r['rate'] < $lo || $r['rate'] > $hi || ($r['ballast_bonus'] !== null && ($r['ballast_bonus'] < $blo || $r['ballast_bonus'] > $bhi))) {
+        hb_review($ctx, 'range', 'ch_charter_rates', $key, $data, "{$what} {$r['date']}: rate {$r['rate']}" . ($r['ballast_bonus'] !== null ? " + BB {$r['ballast_bonus']}" : '') . " outside {$lo}–{$hi} / BB {$blo}–{$bhi}");
+        $c['review']++;
+        $c['skipped']++;
+        return;
+    }
+    $cur = row('SELECT * FROM ch_charter_rates WHERE date = ? AND kind = ? AND segment = ? AND open_region IS ? AND via IS ? AND to_region IS ? AND period_months IS ? ORDER BY id LIMIT 1',
+        [$r['date'], $r['kind'], $r['segment'], $r['open_region'], $r['via'], $r['to_region'], $r['period_months']]);
+    $eq = fn($a, $b) => ($a === null && $b === null) || ($a !== null && $b !== null && abs((float) $a - (float) $b) < 0.5);
+    if ($cur && $eq($cur['rate'], $r['rate']) && $eq($cur['ballast_bonus'], $r['ballast_bonus'])) {
+        $c['skipped']++;
+        return;
+    }
+    if ($cur && ($cur['source'] ?? '') !== 'handybulk') {
+        hb_review($ctx, 'conflict', 'ch_charter_rates', $key, $data + ['manual' => $cur['rate'], 'manual_bb' => $cur['ballast_bonus']],
+            "{$what} {$r['date']}: manual {$cur['rate']}" . ($cur['ballast_bonus'] ? " + BB {$cur['ballast_bonus']}" : '') . " vs HandyBulk {$r['rate']}" . ($r['ballast_bonus'] ? " + BB {$r['ballast_bonus']}" : '') . ' — manual value kept');
+        $c['review']++;
+        $c['skipped']++;
+        return;
+    }
+    hb_rate_write($cur, $r, $ctx['run_id'], $ctx['url'], $ctx['fetched_at'], 'HandyBulk');
+    if ($cur) {
+        gecmis_log('ch_market', $key, "Charter rate {$what} {$r['date']}", 'rate', 'islem', "{$cur['rate']} / BB {$cur['ballast_bonus']}", "{$r['rate']} / BB {$r['ballast_bonus']} · HandyBulk run {$ctx['run_id']}");
+        $c['updated']++;
+    } else {
+        $c['added']++;
+    }
+}
+
+function hb_rate_write(?array $cur, array $r, ?int $runId, ?string $url, string $fetchedAt, string $by): void
+{
+    $set = ['rate' => $r['rate'], 'ballast_bonus' => $r['ballast_bonus'], 'updated_at' => now(), 'updated_by' => $by];
+    if (!$cur || ($cur['source'] ?? '') === 'handybulk') {
+        $set += ['source' => 'handybulk', 'source_url' => $url, 'as_of_date' => $r['date'], 'fetched_at' => $fetchedAt, 'import_run_id' => $runId];
+    }
+    if ($cur) {
+        update('ch_charter_rates', $cur['id'], $set);
+        return;
+    }
+    insert('ch_charter_rates', ['date' => $r['date'], 'kind' => $r['kind'], 'segment' => $r['segment'], 'open_region' => $r['open_region'], 'via' => $r['via'],
+        'to_region' => $r['to_region'], 'period_months' => $r['period_months'], 'created_at' => now(), 'created_by' => $by] + $set);
+}
+
+/** Period / route TC upsert, key (date, kind, label). */
+function hb_upsert_tc(string $date, string $kind, string $segment, string $label, float $rate, array $ctx, array &$c, ?int $week = null, ?int $weekYear = null): void
+{
+    [$lo, $hi] = HB_RANGES['tc'];
+    $data = ['date' => $date, 'kind' => $kind, 'segment' => $segment, 'label' => $label, 'value' => $rate, 'week' => $week, 'week_year' => $weekYear, 'url' => $ctx['url']];
+    $key = "{$date}|{$kind}|{$label}";
+    $what = ($kind === 'route' ? "Route TC {$label}" . ($week ? " (week {$week})" : '') : "1-year TC {$label}") . " {$date}";
+    if ($rate < $lo || $rate > $hi) {
+        hb_review($ctx, 'range', 'ch_tc_rates', $key, $data, "{$what}: {$rate} outside {$lo}–{$hi}");
+        $c['review']++;
+        $c['skipped']++;
+        return;
+    }
+    $cur = row('SELECT * FROM ch_tc_rates WHERE date = ? AND kind = ? AND label = ?', [$date, $kind, $label]);
+    if ($cur && abs((float) $cur['rate'] - $rate) < 0.5) {
+        $c['skipped']++;
+        return;
+    }
+    if ($cur && ($cur['source'] ?? '') !== 'handybulk') {
+        hb_review($ctx, 'conflict', 'ch_tc_rates', $key, $data + ['manual' => (float) $cur['rate']], "{$what}: manual {$cur['rate']} vs HandyBulk {$rate} — manual value kept");
+        $c['review']++;
+        $c['skipped']++;
+        return;
+    }
+    hb_tc_write($cur, $data, $ctx['run_id'], $ctx['fetched_at'], 'HandyBulk');
+    if ($cur) {
+        gecmis_log('ch_market', $key, $what, 'rate', 'islem', $cur['rate'], "{$rate} · HandyBulk run {$ctx['run_id']}");
+        $c['updated']++;
+    } else {
+        $c['added']++;
+    }
+}
+
+function hb_tc_write(?array $cur, array $d, ?int $runId, string $fetchedAt, string $by): void
+{
+    $set = ['rate' => (float) $d['value'], 'updated_at' => now(), 'updated_by' => $by];
+    if (!$cur || ($cur['source'] ?? '') === 'handybulk') {
+        $set += ['source' => 'handybulk', 'source_url' => $d['url'] ?? null, 'as_of_date' => $d['date'], 'fetched_at' => $fetchedAt, 'import_run_id' => $runId,
+            'week' => $d['week'] ?? null, 'week_year' => $d['week_year'] ?? null];
+    }
+    if ($cur) {
+        update('ch_tc_rates', $cur['id'], $set);
+        return;
+    }
+    insert('ch_tc_rates', ['date' => $d['date'], 'kind' => $d['kind'], 'segment' => $d['segment'], 'label' => $d['label'], 'created_at' => now(), 'created_by' => $by] + $set);
+}
+
+/** Saves a region mapping and renames the rows that were stored under the unmapped name. */
+function hb_region_map(string $name, string $code): int
+{
+    q('INSERT INTO ch_region_aliases (alias, code, created_at, created_by) VALUES (?, ?, ?, ?) ON CONFLICT (alias) DO UPDATE SET code = excluded.code, created_at = excluded.created_at, created_by = excluded.created_by',
+        [mb_strtolower($name), $code, now(), actor()['name']]);
+    if ($code === $name) {
+        return 0;
+    }
+    $n = q('UPDATE ch_charter_rates SET open_region = ? WHERE open_region = ?', [$code, $name])->rowCount();
+    $n += q('UPDATE ch_charter_rates SET to_region = ? WHERE to_region = ?', [$code, $name])->rowCount();
+    foreach (rows("SELECT id, via FROM ch_charter_rates WHERE via LIKE ? ESCAPE '\\'", ['%' . addcslashes($name, '%_\\') . '%']) as $r) {
+        $parts = array_map(fn($v) => $v === $name ? $code : $v, explode(', ', $r['via']));
+        if (implode(', ', $parts) !== $r['via']) {
+            update('ch_charter_rates', $r['id'], ['via' => implode(', ', $parts)]);
+            $n++;
+        }
+    }
+    return $n;
+}
+
 /** Review actions: accept (conflict → take the source value; range → write anyway; consistency → acknowledge) or dismiss. */
 function ch_sources_review_resolve(array $p, array $in): never
 {
@@ -401,6 +642,27 @@ function ch_sources_review_resolve(array $p, array $in): never
         hb_bunker_write($cur, $d, [$d['grade'] => (float) $d['value']], $r['run_id'] === null ? null : (int) $r['run_id'], now(), actor()['name']);
         gecmis_log('ch_market', "{$d['date']}|{$d['port']}", "Bunker {$d['port']} {$d['date']}", 'prices', 'islem', $d['manual'] ?? null, "{$d['grade']} {$d['value']} (review accepted)");
         feed('ch_market', 'update', null, 'handybulk');
+    }
+    if ($action === 'accept' && $r['target'] === 'ch_charter_rates' && in_array($r['kind'], ['conflict', 'range'], true)) {
+        $cur = row('SELECT * FROM ch_charter_rates WHERE date = ? AND kind = ? AND segment = ? AND open_region IS ? AND via IS ? AND to_region IS ? AND period_months IS ? ORDER BY id LIMIT 1',
+            [$d['date'], $d['kind'], $d['segment'], $d['open_region'], $d['via'], $d['to_region'], $d['period_months']]);
+        hb_rate_write($cur, $d, $r['run_id'] === null ? null : (int) $r['run_id'], $d['url'] ?? null, now(), actor()['name']);
+        gecmis_log('ch_market', $r['record_key'], "Charter rate {$d['segment']} {$d['open_region']} {$d['date']}", 'rate', 'islem', $d['manual'] ?? null, "{$d['rate']} (review accepted)");
+        feed('ch_market', 'update', null, 'handybulk');
+    }
+    if ($action === 'accept' && $r['target'] === 'ch_tc_rates' && in_array($r['kind'], ['conflict', 'range'], true)) {
+        hb_tc_write(row('SELECT * FROM ch_tc_rates WHERE date = ? AND kind = ? AND label = ?', [$d['date'], $d['kind'], $d['label']]), $d, $r['run_id'] === null ? null : (int) $r['run_id'], now(), actor()['name']);
+        gecmis_log('ch_market', $r['record_key'], "TC {$d['label']} {$d['date']}", 'rate', 'islem', $d['manual'] ?? null, "{$d['value']} (review accepted)");
+        feed('ch_market', 'update', null, 'handybulk');
+    }
+    if ($action === 'accept' && $r['target'] === 'ch_region_aliases') {
+        // "Map": the code typed / picked in the review row; without one the name is kept as it is (and not asked again)
+        $code = trim(mb_substr((string) ($in['code'] ?? ''), 0, 40)) ?: $d['name'];
+        $n = hb_region_map($d['name'], $code);
+        gecmis_log('ch_market', 'region:' . mb_strtolower($d['name']), "Region mapping {$d['name']}", 'code', 'islem', null, "{$code} ({$n} rows renamed)");
+        if ($n) {
+            feed('ch_market', 'update', null, 'handybulk');
+        }
     }
     update('ch_hb_review', $r['id'], ['status' => $action === 'accept' ? 'accepted' : 'dismissed', 'resolved_at' => now(), 'resolved_by' => actor()['name']]);
     json_response(['ok' => true]);

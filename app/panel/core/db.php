@@ -113,6 +113,8 @@ function panel_migrations(): array
         116 => 'chartering_migrate_116',
         // Data Sources (HandyBulk): bunker fiyatlarının kaynağı, ortalama satırı, Ports eşlemesi, ek yakıt türleri
         117 => 'chartering_migrate_117',
+        // Data Sources (HandyBulk): charter / period / TC rate kaynakları, trip/period ayrımı, rota tablolarının haftası, bölge eşlemeleri
+        118 => 'chartering_migrate_118',
     ];
 }
 

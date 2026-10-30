@@ -93,7 +93,7 @@ function ch_market_bundle(array $p, array $in): never
     }
     json_response([
         'indices' => rows('SELECT id, date, code, value, change, source, as_of_date, fetched_at FROM ch_market_indices WHERE date >= ? ORDER BY date', [$since]),
-        'tc'      => rows('SELECT id, date, kind, segment, label, rate FROM ch_tc_rates WHERE date >= ? ORDER BY date', [$since]),
+        'tc'      => rows('SELECT id, date, kind, segment, label, rate, source, as_of_date, fetched_at, week, week_year FROM ch_tc_rates WHERE date >= ? ORDER BY date', [$since]),
         'bunkers' => rows('SELECT id, date, port, vlsfo, mgo, hsfo, extra, is_average, source, as_of_date, fetched_at FROM ch_bunker_prices WHERE date >= ? ORDER BY date', [$since]),
         'rates'   => rows('SELECT * FROM ch_charter_rates WHERE date >= ? ORDER BY date DESC, id DESC', [date('Y-m-d', strtotime('-120 days'))]),
         'notes'   => rows("SELECT * FROM ch_market_notes WHERE (kind = 'news' AND date >= ?) OR (kind = 'weekly' AND date >= ?) ORDER BY date DESC, id DESC",
@@ -160,7 +160,8 @@ function ch_market_save_tc(array $p, array $in): never
             continue;
         }
         q('INSERT INTO ch_tc_rates (date, kind, segment, label, rate, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (date, kind, label) DO UPDATE SET rate = excluded.rate, segment = excluded.segment, updated_at = excluded.updated_at, updated_by = excluded.updated_by',
+            ON CONFLICT (date, kind, label) DO UPDATE SET rate = excluded.rate, segment = excluded.segment, updated_at = excluded.updated_at, updated_by = excluded.updated_by,
+                source = NULL, source_url = NULL, as_of_date = NULL, fetched_at = NULL, import_run_id = NULL',
             [$date, $kind, mb_substr((string) ($r['segment'] ?? ''), 0, 40) ?: null, mb_substr($label, 0, 80), $rate, now(), $a['name'], now(), $a['name']]);
         $n++;
     }

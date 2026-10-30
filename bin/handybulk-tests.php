@@ -28,6 +28,7 @@ if (is_file($root . '/storage/panel.sqlite')) {
 } else {
     require_once $root . '/app/panel/lib/handybulk_parse.php';
     require_once $root . '/app/panel/lib/handybulk_fetch.php';
+    require_once $root . '/app/panel/lib/handybulk_normalize.php';
 }
 
 $pass = 0;
@@ -67,6 +68,40 @@ section('2 · Unchanged');
 $u = $byCode(hb_parse_baltic('The Baltic Handysize Index (BHSI) remained unchanged at 1,020 points, as average daily earnings for handysize bulk carriers decreased by $1 to $18,362 per day.'));
 eq([$u['BHSI'] ?? null, $u['HANDY'] ?? null], [[1020, 0], [18362, -1]], 'BHSI 1,020 (0); TC 18,362 (−1)');
 eq(hb_date('28-October-2026') . ' ' . var_export(hb_date('31-February-2026'), true) . ' ' . var_export(hb_date('28 October 2026'), true), '2026-10-28 NULL NULL', 'dates: DD-Month-YYYY only, real calendar days');
+
+// ---------------------------------------------------------------- 5–8 · Charter Rates
+$rp = hb_parse_rates_page((string) file_get_contents($root . '/tests/handybulk/rates.html'));
+$norm = fn(array $t) => [$t['segment'], hb_region($t['open'])['code'], array_map(fn($v) => hb_region($v)['code'], $t['via']), hb_region($t['to'])['code'], $t['rate'], $t['bb']];
+$trip = fn(string $seg, string $open, string $to) => array_values(array_filter($rp['trips'], fn($t) => $t['segment'] === $seg && $t['open'] === $open && $t['to'] === $to))[0] ?? null;
+
+section('5 · Charter rate lines');
+eq($rp['as_of'], '2026-10-29', 'as of the “29-October-2026 Daily Updated” line');
+eq($norm($trip('Handysize', 'Netherlands', 'Turkiye')), ['Handysize', 'Netherlands', ['Baltic'], 'Turkiye', 26000.0, null], 'Handy open Netherlands via Baltic to Turkiye $26,000 → Handysize, via = [Baltic]');
+eq($norm($trip('Ultramax', 'Argentina', 'Vietnam')), ['Ultramax', 'Argentina', [], 'Vietnam', 20500.0, 1000000.0], 'Ultramax … $20,500 + $1,000,000 BB → BB 1,000,000');
+eq($norm($trip('Panamax', 'Argentina', 'China')), ['Panamax', 'Argentina', [], 'China', 17500.0, 800000.0], 'Panamax … $17,500 +$800,000 BB (no space) → BB 800,000');
+eq($norm($trip('Panamax', 'Continent', 'China')), ['Panamax', 'Cont', [], 'China', 25000.0, null], 'Panamax open Continent … around 25,000 (no $) → rate 25,000, Continent → Cont');
+eq($norm($trip('Handysize', 'North China', 'Philippinnes')), ['Handysize', 'North China', [], 'Philippines', 17500.0, null], 'Handy open North China to Philippinnes → to = Philippines');
+eq($norm($trip('Ultramax', 'West Africa (WAFR)', 'China')), ['Ultramax', 'WAFR', ['ECSA'], 'China', 26500.0, null], 'bracketed abbreviations win: West Africa (WAFR) via East Coast South America (ECSA)');
+eq([hb_region('Mars Base')['mapped'], hb_region('Mars Base', ['mars base' => 'Cont'])['code'], hb_region('South Africa (SAFR)')['code'], hb_region('Mexico West Coast')['code']],
+    [false, 'Cont', 'SAF', 'Mexico West Coast'], 'unknown region → unmapped (a saved mapping then wins); SAFR → SAF; “Mexico West Coast” known');
+eq([count($rp['trips']), $rp['skipped'], (bool) array_filter($rp['trips'], fn($t) => $t['open'] === 'Article')], [8, 0, false], 'all 8 lines of the segment sections; the article after the <h1> is not read');
+eq([hb_segment('Handy'), hb_segment('Kamsarmax'), hb_segment('Post-Panamax'), hb_segment('Capes'), hb_segment('Tanker')], ['Handysize', 'Kamsarmax', 'Post-Panamax', 'Capesize', null], 'segment dictionary');
+
+section('6 · Period');
+$pr = $rp['period'][0] ?? [];
+eq([$pr['segment'] ?? null, hb_region($pr['open'] ?? '')['code'], $pr['rate'] ?? null, $pr['months'] ?? null], ['Supramax', 'FEAST', 17500.0, 12.0], 'Supramax open Far East … $17,500 for a long period (1 year) → (Supramax, FEAST, 17,500, 12 months)');
+eq([hb_period_months('6-8 months'), hb_period_months('about 12 months'), hb_period_months('a short period')], [7.0, 12.0, null], 'durations: 6-8 months → 7, 12 months, none');
+
+section('7 · 1 Year TC table');
+eq(array_column($rp['year_tc'], 'rate', 'label'), ['Handysize 38K' => 15000.0, 'Supramax 58K' => 17500.0, 'Ultramax 64K' => 19500.0, 'Panamax 75K' => 18500.0,
+    'Kamsarmax 82K' => 20500.0, 'Capesize 180K' => 32500.0, 'Newcastlemax 208K' => 44500.0], 'Handysize 38K 15,000 … Newcastlemax 208K 44,500 (labels from the column headings)');
+eq(array_column($rp['year_tc'], 'dwt', 'segment')['Kamsarmax'] ?? null, 82000, 'DWT reference from the heading (82K → 82,000)');
+
+section('8 · Week 44 tables');
+$wk = array_column($rp['weeks'], null, 'segment');
+eq([$wk['Supramax']['week'] ?? null, $wk['Supramax']['routes'] ?? null], [44, [['Atlantic RV', 23352.0], ['US Gulf/China', 29769.0], ['China/Indonesia RV', 18131.0]]], 'Supramax: Atlantic RV 23,352; USG/China 29,769; China/Indonesia RV 18,131');
+eq($wk['Panamax']['routes'] ?? null, [['Atlantic RV', 15845.0], ['Continent/China', 24538.0], ['China/Continent', 13469.0], ['Pacific RV', 20232.0]], 'Panamax: Atlantic RV 15,845; Cont/China 24,538; China/Cont 13,469; Pacific RV 20,232');
+eq(hb_parse_rates_page('<p>nothing here</p>')['as_of'], null, 'no “Daily Updated” date → nothing (format changed)');
 
 // ---------------------------------------------------------------- 9 · Bunker
 section('9 · Bunker');
@@ -172,6 +207,37 @@ if ($tmp) {
     check(in_array(['kind' => 'conflict', 'record_key' => '2026-10-29|Rotterdam|VLSFO'], $rev) && in_array(['kind' => 'range', 'record_key' => '2026-10-29|Piraeus|MGO'], $rev)
         && in_array(['kind' => 'unmapped', 'record_key' => 'la / long beach'], $rev) && !in_array(['kind' => 'conflict', 'record_key' => '2026-10-29|Rotterdam|MGO'], $rev),
         'review: Rotterdam VLSFO conflict (MGO equal → none), Piraeus MGO out of range, “LA / Long Beach” not in Ports', $rev);
+
+    section('5–8 · Charter Rates import (temporary copy of the database)');
+    q("DELETE FROM ch_charter_rates WHERE date = '2026-10-29'");
+    q("DELETE FROM ch_tc_rates WHERE date IN ('2026-10-29', '2026-10-30')");
+    q("DELETE FROM ch_hb_review WHERE target IN ('ch_charter_rates', 'ch_tc_rates', 'ch_region_aliases')");
+    q('DELETE FROM ch_region_aliases');
+    q("INSERT INTO ch_charter_rates (date, kind, segment, open_region, to_region, rate, source) VALUES ('2026-10-29', 'trip', 'Panamax', 'Cont', 'China', 24000, 'broker report')");   // manual
+    q("INSERT INTO ch_tc_rates (date, kind, segment, label, rate) VALUES ('2026-10-29', 'period', 'Capesize', 'Capesize 180K', 32000)");   // manual
+    $rctx = ['run_id' => 0, 'url' => 'https://www.handybulk.com/ship-charter-rates/', 'fetched_at' => '2026-10-29 11:00:00', 'adapter' => 'rates'];
+    $rhtml = (string) file_get_contents($root . '/tests/handybulk/rates.html');
+    [$r1, $rAsOf] = hb_import_rates($rhtml, $rctx);
+    [$r2] = hb_import_rates($rhtml, $rctx);
+    $via = row("SELECT * FROM ch_charter_rates WHERE date = '2026-10-29' AND segment = 'Handysize' AND open_region = 'Netherlands'");
+    $per = row("SELECT * FROM ch_charter_rates WHERE date = '2026-10-29' AND kind = 'period'");
+    $man = row("SELECT rate, source FROM ch_charter_rates WHERE date = '2026-10-29' AND segment = 'Panamax' AND open_region = 'Cont'");
+    $cap = row("SELECT rate, source FROM ch_tc_rates WHERE date = '2026-10-29' AND label = 'Capesize 180K'");
+    $routes = array_column(rows("SELECT label, rate, week, week_year FROM ch_tc_rates WHERE kind = 'route' AND date = '2026-10-30' ORDER BY id"), null, 'label');
+    $rrev = array_column(rows("SELECT kind || ':' || record_key k FROM ch_hb_review WHERE status = 'open' AND target IN ('ch_charter_rates', 'ch_tc_rates', 'ch_region_aliases')"), 'k');
+    // 6 of 8 trips (Panamax Cont–China is manual, the $900 line is out of range), 1 period, 7 week routes, 6 of 7 × 1-year TC (Capesize is manual)
+    eq([$rAsOf, $r1['added'], $r2['added'], $r2['updated']], ['2026-10-29', 20, 0, 0], '20 records added; the same page again → 0 new, 0 updated');
+    eq([$via['via'], $via['to_region'], $via['source'], $via['as_of_date'], $via['kind']], ['Baltic', 'Turkiye', 'handybulk', '2026-10-29', 'trip'], 'trip row: via, source = handybulk, as_of_date, kind = trip');
+    eq([$per['segment'], $per['open_region'], (float) $per['rate'], (float) $per['period_months'], $per['to_region']], ['Supramax', 'FEAST', 17500.0, 12.0, null], 'period row: Supramax FEAST 17,500, 12 months');
+    eq([(float) $man['rate'], $man['source'], (float) $cap['rate'], $cap['source']], [24000.0, 'broker report', 32000.0, null], 'manual Panamax Cont → China 24,000 and manual Capesize 180K 32,000 kept');
+    eq([array_keys($routes), $routes['Supramax USG – China']['week'] ?? null, $routes['Supramax USG – China']['week_year'] ?? null],
+        [['Supramax Atlantic RV', 'Supramax USG – China', 'Supramax China – Indonesia RV', 'Panamax Atlantic RV', 'Panamax Cont – China', 'Panamax China – Cont', 'Panamax Pacific RV'], 44, 2026],
+        'week 44 routes stored on Friday 30.10.2026 as “Supramax USG – China” … (week + year kept)');
+    check(in_array('conflict:2026-10-29|trip|Panamax|Cont||China|', $rrev) && in_array('conflict:2026-10-29|period|Capesize 180K', $rrev)
+        && in_array('range:2026-10-29|trip|Ultramax|China||Japan|', $rrev) && in_array('unmapped:mars base', $rrev), 'review: 2 conflicts with manual data, $900 out of range, “Mars Base” unmapped', $rrev);
+    $n = hb_region_map('Mars Base', 'Black Sea');
+    $mapped = scalar("SELECT open_region FROM ch_charter_rates WHERE date = '2026-10-29' AND segment = 'Handysize' AND rate = 12000");
+    eq([$n, $mapped, hb_region('mars base', hb_region_aliases())['code']], [1, 'Black Sea', 'Black Sea'], 'mapping “Mars Base” → Black Sea renames the stored row and is used from then on');
 }
 
 // ---------------------------------------------------------------- Snapshots (structure only, when present)
@@ -185,6 +251,12 @@ if (is_file("{$snap}/baltic-dry-index.html")) {
 if (is_file("{$snap}/ship-bunker.html")) {
     $p = hb_parse_bunker_page((string) file_get_contents("{$snap}/ship-bunker.html"));
     check($p['as_of'] !== null && count($p['prices']) >= 5 && ($p['prices'][0]['is_average'] ?? false), 'Bunker snapshot: as of ' . $p['as_of'] . ', ports ' . count($p['prices']) . ', average row first');
+}
+if (is_file("{$snap}/ship-charter-rates.html")) {
+    $p = hb_parse_rates_page((string) file_get_contents("{$snap}/ship-charter-rates.html"));
+    check($p['as_of'] !== null && count($p['trips']) > 0 && count($p['year_tc']) === 7 && count($p['weeks']) > 0 && !$p['unknown_segments']
+        && !array_filter($p['trips'], fn($t) => !is_float($t['rate']) || !$t['segment']),
+        "Charter rates snapshot: as of {$p['as_of']}, trips " . count($p['trips']) . ', period ' . count($p['period']) . ', week tables ' . count($p['weeks']) . ', 1Y TC ' . count($p['year_tc']) . ", lines not understood {$p['skipped']}");
 }
 
 echo "\n" . ($fail ? "FAIL {$pass}/" . ($pass + $fail) : "PASS {$pass}/{$pass}") . " — HandyBulk tests\n";

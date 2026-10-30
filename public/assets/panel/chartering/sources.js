@@ -2,7 +2,7 @@
 // daily schedule (off by default), import log and review list. Everything is fetched and parsed on the server;
 // the browser only starts runs and shows the results. Internal use only (signed-in users).
 import { h, fill, toast, fmtDateTime } from '../core/dom.js';
-import { api, get, post, put } from '../core/api.js';
+import { api, get, post, put, del } from '../core/api.js';
 import { modal } from '../core/ui.js';
 
 const STATUS = {
@@ -87,11 +87,17 @@ export async function sourcesView(box, { canEdit, onManual, onChanged }) {
             h('thead', h('tr', ['Found', 'Kind', 'What', ''].map((x) => h('th', x)))),
             h('tbody', review.map((r) => h('tr',
                 h('td', fmtDateTime(r.created_at, true)), h('td', KIND[r.kind] ?? r.kind), h('td', r.message),
-                h('td', canEdit ? h('span.ch-row-actions',
+                h('td', canEdit && r.target === 'ch_region_aliases' ? regionMapper(r, done) : canEdit ? h('span.ch-row-actions',
                     h('button.tiny', { type: 'button', title: r.kind === 'conflict' ? 'HandyBulk değerini yaz (elle girileni değiştirir)' : r.kind === 'range' ? 'Değeri yine de yaz' : 'Gördüm', on: { click: async () => { await post(`chartering/sources/review/${r.id}`, { action: 'accept' }); done(); } } },
                         r.kind === 'conflict' ? 'Use HandyBulk' : r.kind === 'range' ? 'Write anyway' : 'OK'),
                     h('button.tiny.ghost', { type: 'button', title: r.kind === 'conflict' ? 'Elle girilen değer kalsın' : 'Yoksay', on: { click: async () => { await post(`chartering/sources/review/${r.id}`, { action: 'dismiss' }); done(); } } },
                         r.kind === 'conflict' ? 'Keep manual' : 'Dismiss')) : null)))))) : h('p.dim', 'Makullük dışı değer, tutarsızlık veya elle girilen kayıtla çakışma yok.'),
+        h('datalist#hb-region-codes', (ov.region_codes ?? []).map((c) => h('option', { value: c }))),
+        ov.region_aliases?.length ? h('details.hb-aliases',
+            h('summary', `Region mappings (${ov.region_aliases.length})`),
+            h('table.ch-table', h('thead', h('tr', ['Name in the source', 'Code', 'Saved', ''].map((x) => h('th', x)))),
+                h('tbody', ov.region_aliases.map((a) => h('tr', h('td', a.alias), h('td', h('b', a.code)), h('td.dim', `${fmtDateTime(a.created_at, true)} · ${a.created_by ?? ''}`),
+                    h('td', canEdit ? h('button.tiny.ghost', { type: 'button', title: 'Eşlemeyi sil (kayıtlar olduğu gibi kalır; ad sonraki çekimde yeniden sorulur)', on: { click: async () => { await del('chartering/sources/region-aliases', { alias: a.alias }); reload(); } } }, '✕') : null)))))) : null,
         h('h4', 'Import log'),
         runs.length ? h('div.ch-scroll', h('table.ch-table.ch-wrap',
             h('thead', h('tr', ['Started', 'User', 'Source', 'Trigger', 'Status', 'New', 'Updated', 'Skipped', 'Review', 'Note'].map((x, i) => h('th', { class: i >= 5 && i <= 8 ? 'r' : '' }, x)))),
@@ -99,6 +105,16 @@ export async function sourcesView(box, { canEdit, onManual, onChanged }) {
                 h('td', fmtDateTime(r.started_at, true)), h('td', r.user ?? ''), h('td', ov.adapters.find((a) => a.key === r.adapter)?.label ?? r.adapter),
                 h('td', r.trigger), h('td', badge(r.status)), h('td.r', r.added), h('td.r', r.updated), h('td.r', r.skipped), h('td.r', r.review),
                 h('td.dim', r.message ?? (r.url ?? '').replace('https://www.handybulk.com', ''))))))) : h('p.dim', 'Henüz çalıştırılmadı.'));
+}
+
+/** Unmapped region in the review list: a code (suggestions from the dictionary) → Map; Keep name stores it as written. */
+function regionMapper(r, done) {
+    const code = h('input', { type: 'text', list: 'hb-region-codes', placeholder: 'code, e.g. ECSA', size: 12 });
+    const send = async (value) => { await post(`chartering/sources/review/${r.id}`, { action: 'accept', code: value }); done(); };
+    return h('span.ch-row-actions', code,
+        h('button.tiny', { type: 'button', title: 'Bu ad bundan sonra bu koda çevrilir; kayıtlı satırlar da güncellenir', on: { click: () => { if (!code.value.trim()) { code.focus(); return; } send(code.value.trim()); } } }, 'Map'),
+        h('button.tiny', { type: 'button', title: 'Ad olduğu gibi kalsın, bir daha sorulmasın', on: { click: () => send('') } }, 'Keep name'),
+        h('button.tiny.ghost', { type: 'button', on: { click: async () => { await post(`chartering/sources/review/${r.id}`, { action: 'dismiss' }); done(); } } }, 'Dismiss'));
 }
 
 /** Adapters one after another, waiting through the 5 s gap. */

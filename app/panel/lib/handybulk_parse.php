@@ -200,3 +200,150 @@ function hb_parse_bunker_page(string $html): array
     }
     return ['as_of' => $asOf, 'prices' => $prices];
 }
+
+/**
+ * Ship Charter Rates page → [
+ *   'as_of' => 'YYYY-MM-DD'|null,
+ *   'trips' => [['segment', 'open', 'via' => [..], 'to', 'rate', 'bb']],   "<Segment> Charter Rates" sections (segment from the heading)
+ *   'period' => [['segment', 'open', 'rate', 'months']],                    "Period Charter Rates"
+ *   'weeks' => [['week', 'segment', 'routes' => [[label, rate]]]],          "Bulk Carrier Charter Rates Week 44" tables
+ *   'year_tc' => [['label', 'segment', 'dwt', 'rate']],                    "1 Year Time Charter Rates" table
+ *   'skipped' => lines not understood, 'unknown_segments' => [headings]]
+ * Region names come back raw (the importer normalizes them with hb_region()). Reading stops at the first <h1> (the article).
+ */
+function hb_parse_rates_page(string $html): array
+{
+    $doc = hb_dom($html);
+    $out = ['as_of' => null, 'trips' => [], 'period' => [], 'weeks' => [], 'year_tc' => [], 'skipped' => 0, 'unknown_segments' => []];
+    $start = null;
+    foreach ($doc->getElementsByTagName('p') as $p) {
+        if (preg_match('/^(\d{1,2}-[A-Za-z]+-\d{4})\s+Daily Updated/i', hb_text($p), $m)) {
+            $out['as_of'] = hb_date($m[1]);
+            $start = $p;
+            break;
+        }
+    }
+    if (!$start) {
+        return $out;
+    }
+    // Sections: a heading → its text lines (split on <br>) and tables, until the next heading or the article's <h1>
+    $sections = [];
+    $cur = null;
+    $walk = function (DOMNode $n) use (&$walk, &$sections, &$cur): bool {
+        if ($n instanceof DOMText) {
+            if ($cur !== null) {
+                $sections[$cur]['text'] .= $n->textContent;
+            }
+            return true;
+        }
+        if (!$n instanceof DOMElement) {
+            return true;
+        }
+        $tag = strtolower($n->nodeName);
+        if ($tag === 'h1') {
+            return false;
+        }
+        if ($tag === 'h2' || $tag === 'h3') {
+            $sections[] = ['heading' => hb_text($n), 'text' => '', 'tables' => []];
+            $cur = array_key_last($sections);
+            return true;
+        }
+        if ($cur === null) {
+            return true;
+        }
+        if ($tag === 'br') {
+            $sections[$cur]['text'] .= "\n";
+            return true;
+        }
+        if ($tag === 'table') {
+            $rows = [];
+            foreach ($n->getElementsByTagName('tr') as $tr) {
+                $cells = [];
+                foreach ($tr->childNodes as $td) {
+                    if ($td instanceof DOMElement && in_array(strtolower($td->nodeName), ['td', 'th'], true)) {
+                        $cells[] = hb_text($td);
+                    }
+                }
+                $rows[] = $cells;
+            }
+            $sections[$cur]['tables'][] = $rows;
+            return true;
+        }
+        foreach (iterator_to_array($n->childNodes) as $c) {
+            if (!$walk($c)) {
+                return false;
+            }
+        }
+        $sections[$cur]['text'] .= "\n";
+        return true;
+    };
+    for ($n = $start->nextSibling; $n; $n = $n->nextSibling) {
+        if (!$walk($n)) {
+            break;
+        }
+    }
+
+    $lines = fn(string $t) => array_values(array_filter(array_map(
+        fn($l) => trim(preg_replace('/\s+/u', ' ', html_entity_decode($l, ENT_QUOTES | ENT_HTML5, 'UTF-8')), " \t•*-·"), explode("\n", $t)), fn($l) => $l !== ''));
+    $rate = '\$?\s?(\d[\d,]*(?:\.\d+)?)\s*(k\b)?';
+    foreach ($sections as $s) {
+        $head = $s['heading'];
+        if (preg_match('/\bweek\s+(\d{1,2})\b/i', $head, $wk)) {
+            foreach ($s['tables'] as $t) {
+                if (count($t) < 2 || count($t[0]) < 2) {
+                    continue;
+                }
+                $seg = hb_segment($t[0][0]);
+                $routes = [];
+                foreach (array_slice($t[0], 1, null, true) as $i => $label) {
+                    $v = hb_num($t[1][$i] ?? '');
+                    if ($label !== '' && $v !== null) {
+                        $routes[] = [$label, $v];
+                    }
+                }
+                if ($seg && $routes) {
+                    $out['weeks'][] = ['week' => (int) $wk[1], 'segment' => $seg, 'routes' => $routes];
+                } elseif ($routes) {
+                    $out['unknown_segments'][] = $t[0][0];
+                }
+            }
+            continue;
+        }
+        if (preg_match('/\b1\s*year\s+time\s+charter/i', $head)) {
+            foreach ($s['tables'] as $t) {
+                foreach (($t[0] ?? []) as $i => $label) {
+                    $v = hb_num($t[1][$i] ?? '');
+                    if ($v !== null && preg_match('/^([A-Za-z\-]+)\s+(\d+(?:\.\d+)?)\s*K\b/i', $label, $m) && ($seg = hb_segment($m[1]))) {
+                        $out['year_tc'][] = ['label' => "{$seg} {$m[2]}K", 'segment' => $seg, 'dwt' => (int) round((float) $m[2] * 1000), 'rate' => $v];
+                    }
+                }
+            }
+            continue;
+        }
+        $period = (bool) preg_match('/^period\b/i', $head);
+        $named = preg_match('/^(.+?)\s+charter rates$/i', $head, $hm);
+        $headSeg = $named && !$period ? hb_segment($hm[1]) : null;
+        if (!$period && !$headSeg) {
+            if ($named && trim($s['text']) !== '') {
+                $out['unknown_segments'][] = $head;
+            }
+            continue;
+        }
+        foreach ($lines($s['text']) as $l) {
+            if ($period && preg_match("/^(\\S+)\\s+open\\s+(.+?)\\s+chartered\\s+out\\s+(?:around|at|about|abt)\\s+{$rate}\\s*(?:\\/\\s*day)?\\s*(.*)$/i", $l, $m)
+                && ($seg = hb_segment($m[1]))) {
+                $out['period'][] = ['segment' => $seg, 'open' => trim($m[2]), 'rate' => hb_money($m[3], $m[4] ?: null), 'months' => hb_period_months($m[5])];
+                continue;
+            }
+            if (!$period && preg_match("/^(\\S+)\\s+open\\s+(.+?)(?:\\s+via\\s+(.+?))?\\s+to\\s+(.+?)\\s+(?:fixed\\s+)?(?:around|at|about|abt)\\s+{$rate}(.*)$/i", $l, $m)) {
+                $bb = preg_match('/\+\s*\$?\s?(\d[\d,]*(?:\.\d+)?)\s*(k|m|mio|million)?\s*(?:BB|ballast bonus|GBB)\b/i', $m[7], $b) ? hb_money($b[1], ($b[2] ?? '') ?: null) : null;
+                $out['trips'][] = ['segment' => hb_segment($m[1]) ?? $headSeg, 'open' => trim($m[2]),
+                    'via' => $m[3] !== '' ? array_values(array_filter(array_map('trim', preg_split('/\s+(?:via|and)\s+|\s*,\s*/i', $m[3])))) : [],
+                    'to' => trim($m[4]), 'rate' => hb_money($m[5], $m[6] ?: null), 'bb' => $bb];
+                continue;
+            }
+            $out['skipped']++;
+        }
+    }
+    return $out;
+}

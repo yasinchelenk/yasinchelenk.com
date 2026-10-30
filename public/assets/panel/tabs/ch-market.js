@@ -189,17 +189,24 @@ export async function mount(el, ctx) {
         const tabs = ['All', ...Object.keys(SEGMENT_TABS)];
         const rows = data.rates.filter((r) => (ui.rateTab === 'All' || SEGMENT_TABS[ui.rateTab].includes(r.segment)) && (!ui.localOnly || isLocalRoute(r)));
         const seg = h('div.segmented', tabs.map((t) => h('button', { type: 'button', class: ui.rateTab === t ? 'is-on' : '', on: { click: () => { ui.rateTab = t; saveUi(); draw(); } } }, t)));
+        // HandyBulk rows carry no notes; the column only shows when a manual row has one
+        const hasNote = rows.slice(0, 200).some((r) => r.note || (r.source && r.source !== 'handybulk'));
         const region = (txt) => h('span', { title: regionHint(txt) || null, class: regionHint(txt) ? 'ch-abbr' : '' }, txt ?? '');
-        return card('Charter rates — trips', 'green', [
+        return card('Charter rates — trips & period', 'green', [
             h('div.ch-dash__chartbar', seg,
                 h('label.check', h('input', { type: 'checkbox', checked: ui.localOnly, on: { change: (e) => { ui.localOnly = e.target.checked; saveUi(); draw(); } } }), 'Türkiye / Med / Black Sea only')),
             rows.length ? h('div.ch-scroll.ch-dash__tall', h('table.ch-table',
-                h('thead', h('tr', ['Date', 'Segment', 'Open', 'Via', 'To', 'Rate USD/day', 'BB', 'Note', ''].map((x, i) => h('th', { class: i === 5 || i === 6 ? 'r' : '' }, x)))),
+                h('thead', h('tr', ['Date', 'Segment', 'Open', 'Via', 'To', 'Rate USD/day', 'BB', hasNote ? 'Note' : null, ''].filter((x) => x !== null).map((x, i) => h('th', { class: i === 5 || i === 6 ? 'r' : '' }, x)))),
                 h('tbody', rows.slice(0, 200).map((r) => h('tr',
-                    h('td', fmtDate(r.date)), h('td', r.segment), h('td', region(r.open_region)), h('td', region(r.via)), h('td', region(r.to_region)),
-                    h('td.r', r.rate ? usd(r.rate) : ''), h('td.r', r.ballast_bonus ? usd(r.ballast_bonus) : ''), h('td.ch-ts-desc', r.note ?? '', r.source ? h('small.dim', ` · ${r.source}`) : ''),
+                    h('td', { style: { whiteSpace: 'nowrap' } }, fmtDate(r.date), ' ', sourceBadge(r, { short: true })), h('td', r.segment), h('td', region(r.open_region)), h('td', region(r.via)),
+                    h('td', r.kind === 'period' ? h('span.ch-badge.purple', { title: 'Period time charter' }, `period${r.period_months ? ` · ${fmt(r.period_months, 0)} mo` : ''}`) : region(r.to_region)),
+                    h('td.r', r.rate ? usd(r.rate) : ''), h('td.r', r.ballast_bonus ? usd(r.ballast_bonus) : ''),
+                    hasNote ? h('td.ch-ts-desc', r.note ?? '', r.source && r.source !== 'handybulk' ? h('small.dim', ` · ${r.source}`) : '') : null,
                     h('td', canEdit ? h('button.tiny.ghost', { type: 'button', title: 'Sil', on: { click: async () => { await del(`chartering/market/rates/${r.id}`); load(); } } }, '✕') : null)))))) : h('p.dim', 'Bu filtrede rate yok. “+ Add / paste” ile ekleyin.'),
-        ], { actions: canEdit ? h('button.tiny', { type: 'button', on: { click: ratesDialog } }, '+ Add / paste') : null });
+        ], { actions: canEdit ? [
+            h('button.tiny', { type: 'button', title: 'HandyBulk Ship Charter Rates sayfası sunucuda çekilir; bölgeler sözlükle kodlanır (ECSA, USG, Cont…), tanınmayanlar Review’de eşlenir', on: { click: (e) => handybulkMenu(e.currentTarget, 'rates', 'Ship Charter Rates page', () => ratesDialog()) } }, 'Update from HandyBulk ▾'),
+            h('button.tiny', { type: 'button', on: { click: ratesDialog } }, '+ Add / paste'),
+        ] : null });
     }
 
     function ratesDialog() {
@@ -257,13 +264,17 @@ export async function mount(el, ctx) {
                 h('tbody', PERIOD_SIZES.map((x) => {
                     const v = period.get(x);
                     return h('tr', h('td', h('span.ch-dot', { style: { background: SIZE_COLOR[x] } }), x), h('td.r', v ? usd(v.value) : '—'),
-                        h('td.r', { class: dirCls(v?.change) }, v?.prev !== null && v ? signed(v.change) : ''), h('td', v ? fmtDate(v.date) : ''));
+                        h('td.r', { class: dirCls(v?.change) }, v?.prev !== null && v ? signed(v.change) : ''), h('td', v ? fmtDate(v.date) : '', ' ', sourceBadge(v?.row, { short: true })));
                 }))),
             chips,
             chart({ series, format: (v) => usd(v), title: '1 year time charter rates' }),
             routeRows.length ? h('table.ch-table', h('thead', h('tr', ['Route TC', 'USD/day', 'Change', 'Date'].map((x, i) => h('th', { class: i === 1 || i === 2 ? 'r' : '' }, x)))),
-                h('tbody', routeRows.map(([label, v]) => h('tr', h('td', label), h('td.r', usd(v.value)), h('td.r', { class: dirCls(v.change) }, v.prev !== null ? signed(v.change) : ''), h('td', fmtDate(v.date)))))) : null,
-        ], { actions: canEdit ? h('button.tiny', { type: 'button', on: { click: tcDialog } }, '+ Assessment') : null });
+                h('tbody', routeRows.map(([label, v]) => h('tr', h('td', { title: regionHint(label) || null }, label), h('td.r', usd(v.value)), h('td.r', { class: dirCls(v.change) }, v.prev !== null ? signed(v.change) : ''),
+                    h('td', v.row.week ? `Week ${v.row.week} · ` : '', fmtDate(v.date), ' ', sourceBadge(v.row, { short: true })))))) : null,
+        ], { actions: canEdit ? [
+            h('button.tiny', { type: 'button', title: 'HandyBulk Ship Charter Rates sayfası: 1 yıllık TC, haftalık rota TC, trip ve period rate’leri (elle girilenler ezilmez)', on: { click: (e) => handybulkMenu(e.currentTarget, 'rates', 'Ship Charter Rates page', () => tcDialog()) } }, 'Update from HandyBulk ▾'),
+            h('button.tiny', { type: 'button', on: { click: tcDialog } }, '+ Assessment'),
+        ] : null });
     }
 
     function tcDialog() {
