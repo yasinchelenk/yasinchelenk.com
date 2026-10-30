@@ -8,6 +8,8 @@ import { sofToLaytimePort, mergeIntoCalc, cpTerms, firstNumber } from '../engine
 import { laytimeCalc } from '../engine/laytime.js';
 import { parseSofText, parseDelimited, guessColumns, rowsFromSheet, sheetValue, mergeImported } from '../engine/sof/parse.js';
 import { compareSofs, compareLaytime } from '../engine/sof/compare.js';
+import { printModel, emailText } from '../engine/sof/print.js';
+import { aisSuggestions } from '../engine/sof/ais.js';
 import { SOF_TEMPLATES, newSof, templateFromSof, templateKey, exportBundle, readBundle } from '../engine/sof/templates.js';
 
 const dict = dictionary();
@@ -178,4 +180,36 @@ test('SOF 10 — compare: NOR 08:30 vs 09:00, demurrage difference', () => {
     eq(parseSofText('01.11.2026 2215-0140 heavy rain, stopped', dict).rows[0].code, 'rain', 'a stop reason beats the generic “stopped”');
     const lt = compareLaytime(A, B, dict);
     eq([Math.round(lt.a.demurrage * 100) / 100, Math.round(lt.b.demurrage * 100) / 100, Math.round(lt.diff * 100) / 100], [3437.5, 3125, -312.5], 'demurrage 5.5 h vs 5 h × 15,000/day → USD 312.50 less in B');
+});
+
+test('SOF outputs — print model and e-mail text', () => {
+    const doc = sof([row('2026-11-01', '08:30', 'nor_tendered'), row('2026-11-01', '22:15', 'rain', { timeTo: '01:40', remarks: 'heavy' }),
+        row('2026-11-02', '06:00', 'commenced', { qty: 0 }), row('2026-11-03', '06:30', 'completed', { qty: 30000, hatch: '1-5' })], {
+        header: { vessel: 'SEA ONE', port: 'Iskenderun', bl_qty: '30,000', cp_date: '2026-10-28' }, remarks: [{ id: 'r', type: 'protest', text: 'Rain', lopDate: '2026-11-02' }],
+        signatures: [{ role: 'Master', name: 'Capt. X', qualifier: 'under_protest' }], sections: ['header', 'events', 'log', 'remarks', 'signatures'], hidden: [],
+    });
+    const m = printModel(doc, analyse(doc, dict), dict, { ref: 'SOF-2026-009', version: 4 });
+    eq([m.tzNote, m.events.rows.length, m.events.rows[1][0], m.events.rows[1][3], m.events.rows[1][4]],
+        ['Times are Local Time (UTC+3, Europe/Istanbul)', 4, '', '02.11 0140', '3h 25m'], 'events: date only when it changes, end on the next day, duration');
+    eq([m.header[0].items[0], m.header.find((g) => g.group === 'Charter party').items[0]], [['Vessel', 'SEA ONE'], ['CP date', '28.10.2026']], 'header values formatted');
+    eq([m.remarks[0].lop, m.signatures[0].qualifier, m.log.rows.length], ['Letter of protest 02.11.2026', 'Signed under protest', 2], 'remarks, signatures, daily log');
+    const text = emailText(m);
+    eq([text.includes('01.11.2026 0830       NOR tendered'), text.includes('01.11.2026 2215-0140  Rain — work stopped (3h 25m) — heavy')], [true, true], 'aligned DD.MM.YYYY HHMM  Event lines');
+});
+
+test('SOF — AIS suggestions from the track', () => {
+    const port = { lat: 36.59, lon: 36.17 };
+    const at = (h, m) => `2026-11-01 ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+    const track = [
+        { at: at(2, 0), lat: 36.40, lon: 35.95, sog: 11 },      // ~15 nm out
+        { at: at(3, 0), lat: 36.50, lon: 36.05, sog: 8 },       // inside 12 nm → arrived
+        { at: at(3, 40), lat: 36.52, lon: 36.08, sog: 0.2 },    // stopped ~5 nm off → anchored
+        { at: at(6, 0), lat: 36.52, lon: 36.08, sog: 0.1 },
+        { at: at(9, 0), lat: 36.55, lon: 36.12, sog: 5 },       // moving → anchor aweigh
+        { at: at(10, 0), lat: 36.590, lon: 36.171, sog: 0 },    // at the port → all fast
+        { at: at(14, 0), lat: 36.590, lon: 36.171, sog: 0 },
+    ];
+    const s = aisSuggestions(track, port);
+    eq(s.map((x) => [x.code, x.ms ? new Date(x.ms).toISOString().slice(11, 16) : null]), [['arrived', '03:00'], ['anchored', '03:40'], ['anchor_aweigh', '09:00'], ['all_fast', '10:00']], 'arrived, anchored, anchor aweigh, all fast (UTC)');
+    eq(aisSuggestions(track, null).length, 0, 'no port coordinates → no suggestions');
 });

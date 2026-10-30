@@ -59,7 +59,16 @@ function xlsx_col(int $i): string
 
 function xlsx_write(string $file, array $rows, array $opt = []): void
 {
+    xlsx_write_book($file, [['rows' => $rows, 'name' => $opt['sheet'] ?? 'Sheet1'] + $opt]);
+}
+
+/** Several sheets: [['name' => 'Events', 'rows' => […], 'cols' => […], 'merge' => […]], …] */
+function xlsx_write_book(string $file, array $sheets): void
+{
     $esc = fn($s) => htmlspecialchars((string) $s, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+    $xmls = [];
+    foreach (array_values($sheets) as $opt) {
+    $rows = $opt['rows'] ?? [];
     $sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
     if (!empty($opt['cols'])) {
@@ -93,6 +102,8 @@ function xlsx_write(string $file, array $rows, array $opt = []): void
         $sheet .= '<mergeCells count="' . count($opt['merge']) . '">' . implode('', array_map(fn($m) => '<mergeCell ref="' . $m . '"/>', $opt['merge'])) . '</mergeCells>';
     }
     $sheet .= '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="portrait" fitToWidth="1"/></worksheet>';
+    $xmls[] = $sheet;
+    }
 
     $styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
         . '<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00"/></numFmts>'
@@ -110,7 +121,15 @@ function xlsx_write(string $file, array $rows, array $opt = []): void
         . '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="right"/></xf>'
         . '</cellXfs></styleSheet>';
 
-    $name = $esc($opt['sheet'] ?? 'Sheet1');
+    // Sheet names: unique, max 31 characters, no []:*?/\
+    $names = [];
+    foreach (array_values($sheets) as $i => $opt) {
+        $n = trim(preg_replace('/[\[\]:*?\/\\\\]+/', ' ', mb_substr((string) ($opt['name'] ?? 'Sheet' . ($i + 1)), 0, 31))) ?: 'Sheet' . ($i + 1);
+        while (in_array($n, $names, true)) {
+            $n = mb_substr($n, 0, 28) . ' ' . ($i + 1);
+        }
+        $names[] = $n;
+    }
     $zip = class_exists('ZipArchive') ? new ZipArchive() : new MiniZip();
     if ($zip->open($file, ZipArchive_CREATE_OVERWRITE) !== true) {
         throw new RuntimeException('XLSX yazılamadı: ' . $file);
@@ -118,16 +137,18 @@ function xlsx_write(string $file, array $rows, array $opt = []): void
     $zip->addFromString('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
         . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>'
         . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-        . '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        . implode('', array_map(fn($i) => '<Override PartName="/xl/worksheets/sheet' . ($i + 1) . '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>', array_keys($xmls)))
         . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>');
     $zip->addFromString('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
     $zip->addFromString('xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        . '<sheets><sheet name="' . $name . '" sheetId="1" r:id="rId1"/></sheets></workbook>');
+        . '<sheets>' . implode('', array_map(fn($i) => '<sheet name="' . $esc($names[$i]) . '" sheetId="' . ($i + 1) . '" r:id="rId' . ($i + 1) . '"/>', array_keys($xmls))) . '</sheets></workbook>');
     $zip->addFromString('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-        . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
-    $zip->addFromString('xl/worksheets/sheet1.xml', $sheet);
+        . implode('', array_map(fn($i) => '<Relationship Id="rId' . ($i + 1) . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' . ($i + 1) . '.xml"/>', array_keys($xmls)))
+        . '<Relationship Id="rId' . (count($xmls) + 1) . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
+    foreach ($xmls as $i => $xml) {
+        $zip->addFromString('xl/worksheets/sheet' . ($i + 1) . '.xml', $xml);
+    }
     $zip->addFromString('xl/styles.xml', $styles);
     $zip->close();
 }

@@ -41,6 +41,21 @@ final class Pdf
         return count($this->pages) + ($this->cur !== '' ? 1 : 0);
     }
 
+    /** After all content: runs $fn($pdf, $pageNo, $total) on every page, e.g. for "Page 2 of 5" footers. */
+    public function eachPage(callable $fn): void
+    {
+        if ($this->cur !== '') {
+            $this->pages[] = $this->cur;
+        }
+        $total = count($this->pages);
+        foreach ($this->pages as $i => $content) {
+            $this->cur = $content;
+            $fn($this, $i + 1, $total);
+            $this->pages[$i] = $this->cur;
+        }
+        $this->cur = '';
+    }
+
     public function width(string $s, float $size, bool $bold = false): float
     {
         $t = $bold ? self::HELV_B : self::HELV;

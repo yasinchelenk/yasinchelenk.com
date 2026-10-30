@@ -1,7 +1,7 @@
 // SOF Templates tab (spec SOF §7): user templates (create, copy, edit, default), the event dictionary
 // (add / edit / deactivate, built-in overrides) and JSON export / import for backup and sharing.
 import { h, fill, toast, download, fmtDateTime } from '../core/dom.js';
-import { get, put, del, post } from '../core/api.js';
+import { api, get, put, del, post } from '../core/api.js';
 import { modal, confirmBox } from '../core/ui.js';
 import { DEFAULT_EVENTS, CATEGORIES, EFFECTS, eventLabel } from './engine/sof/dictionary.js';
 import { HEADER_FIELDS, HEADER_GROUPS, SOF_TEMPLATES, SECTIONS, PDF_OPTIONS, PDF_DEFAULTS, templateKey, exportBundle, readBundle } from './engine/sof/templates.js';
@@ -168,6 +168,7 @@ export async function templatesView(box, { dict, canEdit, refresh }) {
             canEdit ? h('button.primary', { type: 'button', on: { click: () => templateEditor({ name: '' }, dict, { isNew: true, onSaved: reload }) } }, '+ New template') : null,
             h('button', { type: 'button', on: { click: exportJson } }, 'Export JSON'),
             canEdit ? importButton(async () => templatesView(box, { dict: await refresh(), canEdit, refresh })) : null,
+            canEdit ? h('button', { type: 'button', title: 'SOF PDF’inin üst kısmındaki firma adı, adres satırları ve logo', on: { click: () => letterheadDialog().catch(() => {}) } }, 'PDF letterhead…') : null,
             h('span.count', `${list.length} templates`)),
         h('p.dim', 'Hazır şablonlar değiştirilemez; “Copy” ile kendi şablonunuzu oluşturun. Bir SOF’u da editördeki “Save as template…” ile şablona çevirebilirsiniz. Export JSON yalnızca sizin şablonlarınızı ve sözlük eklemelerinizi yedekler.'),
         h('div.ch-scroll', h('table.ch-table',
@@ -234,6 +235,38 @@ export async function dictionaryView(box, { dict, canEdit, refresh }) {
             h('span.count', `${dict.size} events · ${saved.length} custom / modified`)),
         h('p.dim', 'Pasif olaylar yeni satır önerilerinde ve metin içe aktarmada kullanılmaz; eski SOF’larda görünmeye devam eder. Aliases, agent’ın yazabileceği eş anlamlılardır (metinden içe aktarma bunlarla eşleştirir).'),
         table);
+}
+
+// ================================================================ PDF letterhead (Chartering's own — not the operations panel's company settings)
+
+async function letterheadDialog() {
+    const lh = await get('chartering/letterhead');
+    const name = h('input', { type: 'text', value: lh.name ?? '', placeholder: 'Company name' });
+    const lines = h('textarea', { rows: 4, placeholder: 'Address, phone, e-mail — up to 4 lines' }, lh.lines ?? '');
+    const logoBox = h('div.sof-lh__logo');
+    const drawLogo = (has) => fill(logoBox,
+        has ? h('img', { src: `/api/chartering/letterhead/logo?t=${Date.now()}`, alt: 'logo' }) : h('span.dim', 'Logo yok'),
+        h('span.ch-inline',
+            (() => {
+                const inp = h('input', { type: 'file', accept: 'image/png,image/jpeg', style: { display: 'none' }, on: { change: async () => {
+                    const f = inp.files[0];
+                    if (!f) return;
+                    const fd = new FormData();
+                    fd.append('file', f);
+                    await api('POST', 'chartering/letterhead/logo', null, { form: fd });
+                    drawLogo(true);
+                } } });
+                return h('span', inp, h('button.tiny', { type: 'button', on: { click: () => inp.click() } }, has ? 'Replace logo…' : 'Upload logo…'));
+            })(),
+            has ? h('button.tiny.ghost', { type: 'button', on: { click: async () => { await del('chartering/letterhead/logo'); drawLogo(false); } } }, 'Remove') : null));
+    drawLogo(lh.logo);
+    modal({ title: 'SOF PDF letterhead', width: 620,
+        body: h('div.ch-entry-wrap', fld('Company', name), fld('Lines (address, phone, e-mail)', lines), fld('Logo (PNG / JPG, max 1 MB)', logoBox),
+            h('p.dim', 'Yalnızca Chartering SOF PDF’inde kullanılır; operasyon panelinin firma ayarlarından bağımsızdır.')),
+        actions: [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: async () => {
+            await put('chartering/letterhead', { name: name.value, lines: lines.value });
+            toast('Antet kaydedildi.');
+        } }] });
 }
 
 // ================================================================ JSON export / import

@@ -80,6 +80,9 @@ entity_define('ch_sof', [
         if ($action === 'update' && $before && ($before['status'] ?? '') !== ($row['status'] ?? '')) {
             ch_sof_checklist($row);
         }
+        if ($action === 'update' && $before && ($before['data'] ?? null) !== ($row['data'] ?? null)) {
+            ch_sof_audit($before, $row);
+        }
         if ($action === 'insert' && empty($row['ref'])) {
             $year = date('Y');
             $seq = (int) scalar('SELECT COUNT(*) FROM ch_sofs WHERE ref LIKE ?', ["SOF-{$year}-%"]) + 1;
@@ -139,6 +142,7 @@ function module_routes_chartering_sof(): void
     route('POST', '/api/chartering/sof-sheet', 'ch_sof_sheet', 'ch-sof');
     route('GET', '/api/chartering/sofs/{id}/versions', 'ch_sof_versions', 'ch-sof');
     route('GET', '/api/chartering/sof-history/{id}', 'ch_sof_history_get', 'ch-sof');
+    route('GET', '/api/chartering/sofs/{id}/audit', 'ch_sof_audit_list', 'ch-sof');
     // For the Laytime tab: current version of the SOFs a calculation was made from ("SOF changed — recalculate")
     route('GET', '/api/chartering/sof-versions', function ($p, $in) {
         $ids = array_slice(array_values(array_filter(array_map('intval', explode(',', (string) ($in['ids'] ?? ''))))), 0, 20);
@@ -260,7 +264,7 @@ function ch_sof_file_upload(array $p, array $in): never
     $id = insert('ch_sof_files', ['sof_id' => $sof['id'], 'kind' => $kind, 'name' => $name, 'original' => $original, 'mime' => $mime, 'size' => (int) $file['size'],
         'note' => mb_substr(trim((string) ($in['note'] ?? '')), 0, 300) ?: null, 'created_at' => now(), 'created_by' => $a['name']]);
     $label = trim("{$sof['ref']} {$sof['vessel']}");
-    gecmis_log('ch_sof', $sof['id'], $label, 'file', 'update', null, "{$kind}: {$original}");
+    gecmis_log('ch_sof', $sof['id'], $label, 'file', 'islem', null, "{$kind}: {$original}");
     if ($kind === 'signed' && !in_array($sof['status'], ['signed', 'sent'], true)) {
         update('ch_sofs', $sof['id'], ['status' => 'signed', 'updated_at' => now(), 'updated_by' => $a['name']]);
         gecmis_log('ch_sof', $sof['id'], $label, 'status', 'update', $sof['status'], 'signed');
@@ -294,7 +298,7 @@ function ch_sof_file_delete(array $p): never
     }
     q('DELETE FROM ch_sof_files WHERE id = ?', [$f['id']]);
     @unlink(panel_storage('sof-files/' . basename((string) $f['name'])));
-    gecmis_log('ch_sof', $f['sof_id'], trim("{$f['ref']} {$f['vessel']}"), 'file', 'update', "{$f['kind']}: {$f['original']}", null);
+    gecmis_log('ch_sof', $f['sof_id'], trim("{$f['ref']} {$f['vessel']}"), 'file', 'islem', "{$f['kind']}: {$f['original']}", null);
     json_response(['ok' => true]);
 }
 
@@ -359,6 +363,69 @@ function ch_sof_history_get(array $p): never
     }
     is_array($data) || api_error('Bu sürümün içeriği okunamadı.', 404);
     json_response(['sof_id' => (int) $g['entity_id'], 'at' => $g['at'], 'by' => $g['actor_name'], 'data' => $data]);
+}
+
+/**
+ * Row-level audit (spec SOF §9): what changed in the document, row by row — events, header fields, remarks,
+ * signatures — as readable "old → new" entries. Logged as operations ('islem'), so History's undo leaves them alone
+ * (the whole document is restored through its 'data' entry).
+ */
+function ch_sof_audit(array $before, array $after): void
+{
+    $a = json_decode((string) ($before['data'] ?? ''), true) ?: [];
+    $b = json_decode((string) ($after['data'] ?? ''), true) ?: [];
+    $label = trim(($after['ref'] ?? 'SOF') . ' ' . ($after['vessel'] ?? ''));
+    $n = 0;
+    $log = function (string $field, ?string $old, ?string $new) use ($after, $label, &$n): void {
+        if ($old === $new || $n++ >= 150) {
+            return;
+        }
+        gecmis_log('ch_sof', $after['id'], $label, $field, 'islem', $old, $new);
+    };
+    $ev = function (array $r): ?string {
+        $name = !empty($r['code']) ? ucfirst(str_replace('_', ' ', (string) $r['code'])) : trim((string) ($r['text'] ?? ''));
+        $when = trim(($r['date'] ?? '') . ' ' . ($r['time'] ?? '') . (!empty($r['timeTo']) ? '–' . (!empty($r['dateTo']) ? $r['dateTo'] . ' ' : '') . $r['timeTo'] : '') . (($r['zone'] ?? 'LT') === 'UTC' ? ' UTC' : ''));
+        $extra = array_filter(['effect' => $r['effect'] ?? null, 'qty' => $r['qty'] ?? null, 'hold' => $r['hatch'] ?? null, 'source' => $r['source'] ?? null, 'remarks' => $r['remarks'] ?? null], fn($v) => $v !== null && $v !== '');
+        $s = trim("{$when} {$name}" . ($extra ? ' (' . implode(', ', array_map(fn($k, $v) => "{$k}: {$v}", array_keys($extra), $extra)) . ')' : ''));
+        return $s === '' ? null : $s;
+    };
+    $byId = fn(array $list) => array_column(array_filter($list, fn($r) => is_array($r) && isset($r['id'])), null, 'id');
+    $old = $byId((array) ($a['events'] ?? []));
+    $new = $byId((array) ($b['events'] ?? []));
+    foreach (array_unique([...array_keys($old), ...array_keys($new)]) as $id) {
+        $log('event', isset($old[$id]) ? $ev($old[$id]) : null, isset($new[$id]) ? $ev($new[$id]) : null);
+    }
+    $ha = (array) ($a['header'] ?? []);
+    $hb = (array) ($b['header'] ?? []);
+    foreach (array_unique([...array_keys($ha), ...array_keys($hb)]) as $k) {
+        $str = fn($v) => $v === null || $v === '' ? null : (is_scalar($v) ? (string) $v : json_encode($v, JSON_UNESCAPED_UNICODE));
+        $log("header.{$k}", $str($ha[$k] ?? null), $str($hb[$k] ?? null));
+    }
+    if (($a['tz'] ?? null) !== ($b['tz'] ?? null)) {
+        $log('header.tz', $a['tz'] ?? null, $b['tz'] ?? null);
+    }
+    $rem = fn($r) => trim('[' . ($r['type'] ?? 'general') . '] ' . ($r['text'] ?? '') . (!empty($r['lopDate']) ? " (LOP {$r['lopDate']})" : ''));
+    $ra = $byId((array) ($a['remarks'] ?? []));
+    $rb = $byId((array) ($b['remarks'] ?? []));
+    foreach (array_unique([...array_keys($ra), ...array_keys($rb)]) as $id) {
+        $log('remark', isset($ra[$id]) ? $rem($ra[$id]) : null, isset($rb[$id]) ? $rem($rb[$id]) : null);
+    }
+    $sig = fn($s) => is_array($s) ? trim(($s['role'] ?? '') . ': ' . ($s['name'] ?? '') . ' ' . ($s['title'] ?? '') . ' ' . ($s['date'] ?? '') . ' [' . ($s['qualifier'] ?? 'signed') . ']') : null;
+    $sa = array_values((array) ($a['signatures'] ?? []));
+    $sb = array_values((array) ($b['signatures'] ?? []));
+    for ($i = 0; $i < max(count($sa), count($sb)); $i++) {
+        $log('signature', isset($sa[$i]) ? $sig($sa[$i]) : null, isset($sb[$i]) ? $sig($sb[$i]) : null);
+    }
+}
+
+/** Audit trail of one SOF (row changes, status, files, exports, unlocks), newest first. */
+function ch_sof_audit_list(array $p): never
+{
+    $id = (string) (int) $p['id'];
+    $from = (int) scalar("SELECT MAX(id) FROM gecmis WHERE entity = 'ch_sof' AND entity_id = ? AND action = 'insert'", [$id]);
+    json_response(rows("SELECT id, at, actor_name, field, action, old_value, new_value FROM gecmis
+        WHERE entity = 'ch_sof' AND entity_id = ? AND id >= ? AND COALESCE(field, '') NOT IN ('data', 'version', 'first_at', 'last_at', 'events_n', 'issues', 'laytime_version')
+        ORDER BY id DESC LIMIT 1000", [$id, $from]));
 }
 
 /** Locked SOFs open only with a reason, which goes to the audit log. */

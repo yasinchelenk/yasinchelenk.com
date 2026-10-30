@@ -1303,3 +1303,8 @@ section.sof-dict-cat h4 { display: flex; align-items: center; gap: 8px; margin: 
 }
 .sof-imp { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .sof-imp textarea { width: 100%; box-sizing: border-box; }
+ul.sof-ais { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 5px; font-size: 12.5px; }
+ul.sof-ais li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+table.sof-audit td.sof-audit__old { color: var(--dim); text-decoration: line-through; text-decoration-color: rgba(0,0,0,.25); }
+.sof-lh__logo { display: flex; align-items: center; gap: 12px; }
+.sof-lh__logo img { max-height: 48px; max-width: 200px; border: 1px solid var(--line); border-radius: 4px; padding: 2px; background: #fff; }

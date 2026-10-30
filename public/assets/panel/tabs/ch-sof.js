@@ -1,7 +1,7 @@
 // CHARTERING · SOF (Statement of Facts): register of SOFs and the editor — header, chronological events with
 // start/end pairing, live summary and checks. Times: rows keep what was typed (LT or UTC); the engine works in UTC
 // with the port's time zone (engine/sof). Templates / parser / laytime link come in the next phases.
-import { h, fill, toast, store, debounce, fmtDateTime } from '../core/dom.js';
+import { h, fill, toast, store, debounce, fmtDateTime, download, copyText } from '../core/dom.js';
 import { api, get, post, put, del } from '../core/api.js';
 import { modal, confirmBox, popover, segmented } from '../core/ui.js';
 import { Grid, resetLayoutButton } from '../core/grid.js';
@@ -16,12 +16,14 @@ import { HEADER_FIELDS, HEADER_GROUPS, SOF_TEMPLATES, SOF_STATUS, REMARK_TYPES, 
 import { templatesView, dictionaryView, loadTemplates, eventEditor } from '../chartering/sof-admin.js';
 import { importDialog, compareView } from '../chartering/sof-io.js';
 import { mergeImported } from '../chartering/engine/sof/parse.js';
+import { printModel, emailText } from '../chartering/engine/sof/print.js';
+import { aisSuggestions } from '../chartering/engine/sof/ais.js';
 import { section, fmt } from '../chartering/ui.js';
 
 const STATUS_CAT = { draft: 'cat-gray', in_progress: 'cat-blue', ready: 'cat-yellow', signed: 'cat-green', sent: 'cat-purple', locked: 'cat-brown' };
 const STATUS_BADGE = { draft: '', in_progress: 'amber', ready: 'amber', signed: 'green', sent: 'green', locked: '' };
 const CALLS = { load: 'Load port', disch: 'Discharge port', other: 'Other call' };
-const SOURCES = ['', 'Master', 'Agent', 'Terminal', 'Surveyor'];
+const SOURCES = ['', 'Master', 'Agent', 'Terminal', 'Surveyor', 'AIS'];
 const ZONES = (() => { try { return ['UTC', ...Intl.supportedValuesOf('timeZone')]; } catch { return ['UTC', 'Europe/Istanbul']; } })();
 const ddmm = (d) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}` : '');
 
@@ -234,7 +236,7 @@ export async function mount(el, ctx, param) {
         fill(body,
             h('div.toolbar.ch-toolbar',
                 h('button', { type: 'button', on: { click: () => showList().catch(() => {}) } }, '← SOFs'),
-                h('strong', `${cur.ref ?? 'SOF'} — ${doc.header.vessel || 'vessel?'} · ${doc.header.port || 'port?'}`),
+                h('strong.sof-title', `${cur.ref ?? 'SOF'} — ${doc.header.vessel || 'vessel?'} · ${doc.header.port || 'port?'}`),
                 h('span.ch-badge.' + (cur.doc.call === 'disch' ? 'amber' : 'green'), CALLS[doc.call] ?? doc.call),
                 cur.fixture_ref ? h('button.ch-link', { type: 'button', on: { click: () => ctx.open('ch-fixtures', { openId: cur.fixture_id }) } }, cur.fixture_ref) : null,
                 statusSel,
@@ -244,6 +246,7 @@ export async function mount(el, ctx, param) {
                 h('button', { type: 'button', title: 'Bölümlerin sırası, gizleme ve özel bölüm', on: { click: (e) => sectionsMenu(e.currentTarget) } }, 'Sections ▾'),
                 canEdit ? h('button', { type: 'button', title: 'Bu SOF’un yapısını (olay sırası, bölümler, alanlar, remark ve imzalar) şablon olarak kaydet', on: { click: saveAsTemplate } }, 'Save as template…') : null,
                 h('button', { type: 'button', title: 'Eski bir sürümle, başka bir SOF’la veya agent’ın metniyle karşılaştır', on: { click: async () => { if (dirty) await save(); compareA = cur.id; listView = 'compare'; store.set('ch_sof_view', 'compare'); showList(); } } }, 'Compare…'),
+                h('button', { type: 'button', on: { click: (e) => exportMenu(e.currentTarget) } }, 'Export ▾'),
                 cur.laytime_id ? h('span.ch-cell-gap',
                     cur.laytime_version === cur.version ? h('span.ch-badge.green', { title: `Laytime v${cur.laytime_version}` }, 'in Laytime') : h('span.ch-badge.amber', { title: `Laytime hesabı v${cur.laytime_version} ile yapıldı, SOF şimdi v${cur.version}` }, 'SOF changed — resend'),
                     ctx.allowed('ch-laytime') ? h('button.ch-link', { type: 'button', on: { click: () => ctx.open('ch-laytime', { openId: cur.laytime_id }) } }, 'Open ↗') : null) : null,
@@ -257,6 +260,7 @@ export async function mount(el, ctx, param) {
                 h('div.ch-results', summaryBox)));
         drawStatus();
         drawEvents();
+        loadAis().catch(() => {});
     }
 
     function buildSection(key) {
@@ -573,6 +577,76 @@ export async function mount(el, ctx, param) {
             actions: [{ label: 'Close' }, { label: 'Open in Laytime', primary: true, onClick: () => ctx.open('ch-laytime', { openId: saved.id }) }] });
     }
 
+    // ---------------------------------------------------------------- Outputs (spec SOF §9)
+
+    const model = () => printModel(cur.doc, analyse(cur.doc, dict), dict, { ref: cur.ref, version: cur.version, status: SOF_STATUS[cur.status], fixtureRef: cur.fixture_ref });
+
+    function exportMenu(anchor) {
+        let pop;
+        const item = (label, hint, fn) => h('button.ctx-menu__item', { type: 'button', on: { click: () => { pop.close(); fn().catch(() => {}); } } }, h('span.ctx-menu__label', label), hint ? h('small.ctx-menu__hint', hint) : null);
+        const file = async (format) => {
+            if (dirty) await save();
+            const res = await api('POST', `chartering/sofs/${cur.id}/export/${format}`, { model: model() }, { raw: true });
+            download(await res.blob(), `${cur.ref} ${cur.doc.header.vessel ?? ''} SOF.${format}`.replace(/\s+/g, ' '));
+        };
+        pop = popover(anchor, h('div',
+            item('PDF', 'A4, letterhead, page numbers', () => file('pdf')),
+            item('Excel', 'one sheet per section', () => file('xlsx')),
+            item('Copy e-mail text', 'DD.MM.YYYY HHMM  Event', async () => { await copyText(emailText(model())); toast('SOF metni panoya kopyalandı.'); }),
+            h('div.ctx-menu__sep'),
+            item('Audit log', 'row changes, who, when', () => auditLog())), { align: 'right' });
+    }
+
+    async function auditLog() {
+        const list = await get(`chartering/sofs/${cur.id}/audit`);
+        const FIELD = { event: 'Event', remark: 'Remark', signature: 'Signature', status: 'Status', file: 'File', export: 'Export', laytime_id: 'Laytime link' };
+        modal({ title: `Audit log — ${cur.ref}`, width: 1100,
+            body: list.length ? h('div.ch-scroll', { style: { maxHeight: '64vh' } }, h('table.ch-table.ch-wrap.sof-audit',
+                h('thead', h('tr', ['When', 'Who', 'What', 'Before', 'After'].map((x) => h('th', x)))),
+                h('tbody', list.map((r) => h('tr',
+                    h('td', fmtDateTime(r.at, true)), h('td', r.actor_name ?? ''),
+                    h('td', FIELD[r.field] ?? (r.field?.startsWith('header.') ? `Header · ${r.field.slice(7)}` : r.field ?? r.action)),
+                    h('td.sof-audit__old', r.old_value ?? (r.action === 'insert' ? 'created' : '')),
+                    h('td', r.new_value ?? (r.old_value ? h('span.ch-badge.red', 'removed') : ''))))))) : h('p.dim', 'Kayıt yok.'),
+            actions: [{ label: 'Close', primary: true }] });
+    }
+
+    // ---------------------------------------------------------------- AIS suggestions (never added automatically)
+
+    let ais = { list: [], loadedFor: null };
+    async function loadAis() {
+        const H = cur.doc.header;
+        const key = `${cur.id}|${H.vessel ?? ''}|${H.imo ?? ''}|${H.port ?? ''}`;
+        if (ais.loadedFor === key || !(H.vessel || H.imo) || !H.port) return;
+        ais.loadedFor = key;
+        const a = analyse(cur.doc, dict);
+        const day = (ms, d) => (ms === null ? null : new Date(ms + d * 86400000).toISOString().slice(0, 10));
+        const r = await get('chartering/sof-ais', { vessel: H.vessel ?? '', imo: H.imo ?? '', port: H.port, from: day(a.first, -5) ?? '', to: day(a.last, 5) ?? '' }).catch(() => null);
+        ais.list = r?.port ? aisSuggestions(r.track, r.port, { watch: r.watch }) : [];
+        ais.watch = r?.watch ?? null;
+        recompute();
+    }
+
+    function aisCard() {
+        const doc = cur.doc;
+        const have = new Set(analysis.timed.map((r) => r.code));
+        const list = ais.list.filter((s) => !have.has(s.code) && !(s.code === 'arrived' && (have.has('eosp') || have.has('anchored'))));
+        if (!list.length) return null;
+        return h('div.ch-sof__card',
+            h('h4', 'AIS suggestions ', h('small.dim', ais.watch ? `${ais.watch.name} · Position Monitor` : '')),
+            h('ul.sof-ais', list.map((s) => {
+                const l = local(s.ms, doc.tz);
+                return h('li', h('b', eventLabel(dict.get(s.code), doc.call)), ` ${ddmm(l.date)} ${l.time} LT`, h('small.dim', ` — ${s.note}`),
+                    !ro() ? h('button.tiny', { type: 'button', title: 'SOF’a ekle (şablonda bekleyen satır varsa onu doldurur)', on: { click: () => {
+                        const m = mergeImported(doc.events, [{ date: l.date, time: l.time, zone: 'LT', code: s.code, remarks: s.note, source: 'AIS' }], rowId);
+                        doc.events = m.events;
+                        changed({ redraw: true });
+                        toast('AIS olayı eklendi — saati agent / master SOF’uyla kontrol edin.');
+                    } } }, 'Add') : null);
+            })),
+            h('p.dim', 'AIS saatleri yaklaşıktır ve örneklemelidir; SOF’a eklemeden önce master / agent kayıtlarıyla kontrol edin.'));
+    }
+
     function saveAsTemplate() {
         const doc = cur.doc;
         const name = h('input', { type: 'text', value: `${doc.header.cargo ? doc.header.cargo + ' – ' : ''}${doc.header.port ?? ''} ${doc.call === 'disch' ? 'discharge' : 'load'}`.trim() });
@@ -638,7 +712,7 @@ export async function mount(el, ctx, param) {
                     type: type === 'date' ? 'date' : 'text', value: H[k] ?? '', disabled: ro(), inputmode: type === 'num' ? 'decimal' : null,
                     list: k === 'port' ? 'sof-ports' : ['agents', 'stevedores', 'surveyors', 'owners', 'charterers', 'shippers_receivers'].includes(k) ? 'sof-contacts' : null,
                     on: {
-                        input: (e) => { H[k] = e.target.value || null; changed(); },
+                        input: (e) => { H[k] = e.target.value || null; changed(); if (k === 'vessel' || k === 'port') { const t = body.querySelector('.sof-title'); if (t) t.textContent = `${cur.ref ?? 'SOF'} — ${H.vessel || 'vessel?'} · ${H.port || 'port?'}`; } },
                         change: (e) => {
                             if (k !== 'port') { refreshBadge(); return; }
                             const p = ports.find((x) => x.name.toLowerCase() === e.target.value.trim().toLowerCase());
@@ -870,8 +944,8 @@ export async function mount(el, ctx, param) {
                     h('dt', 'Total port time'), h('dd.is-strong', s.portTime !== null ? fmtMin(s.portTime) : '—'),
                     h('dt', 'Commenced → completed'), h('dd', s.opsTime !== null ? fmtMin(s.opsTime) : '—'),
                     h('dt', 'Working time'), h('dd.is-strong', s.working !== null ? fmtMin(s.working) : '—'),
-                    h('dt', 'Stopped (merged)'), h('dd', fmtMin(s.stopped) || '0h 00m'),
-                    ...reasons.flatMap(([code, m]) => [h('dt.sof-sub', `· ${dict.get(code)?.label_en ?? code}`), h('dd', fmtMin(m))]),
+                    h('dt', s.working !== null ? 'Stopped during cargo ops' : 'Stopped (merged)'), h('dd', fmtMin(s.stopped) || '0h 00m'),
+                    ...reasons.flatMap(([code, m]) => [h('dt.sof-sub', { title: 'Tüm liman kalışı boyunca' }, `· ${dict.get(code)?.label_en ?? code} (whole stay)`), h('dd', fmtMin(m))]),
                     analysis.overlaps.length ? [h('dt.sof-sub', '· overlap (counted once)'), h('dd', fmtMin(analysis.overlaps.reduce((a, o) => a + o.minutes, 0)))] : null),
                 h('h4', 'Quantity'),
                 h('dl.ch-kv',
@@ -881,7 +955,8 @@ export async function mount(el, ctx, param) {
             h('div.ch-sof__card',
                 h('h4', 'Checks ', issues.length ? h('span.ch-badge.' + (issues.some((x) => x.level === 'error') ? 'red' : 'amber'), String(issues.length)) : h('span.ch-badge.green', 'ok')),
                 issues.length ? h('ul.sof-issues', issues.map((x) => h('li.' + x.level, { title: x.rowId ? 'Satıra git' : '', on: { click: () => jump(x.rowId) } }, x.level === 'error' ? '⛔ ' : '⚠ ', x.msg)))
-                    : h('p.dim', 'Kronoloji, eşleşme ve key event kontrollerinde sorun yok.')));
+                    : h('p.dim', 'Kronoloji, eşleşme ve key event kontrollerinde sorun yok.')),
+            aisCard());
     }
 
     function jump(id) {
