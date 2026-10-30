@@ -7,6 +7,7 @@ storage/messages/*.jsonl
 storage/outbox/*
 storage/da-files/*
 storage/sof-files/*
+storage/cache/*
 storage/sp1/*
 storage/mail-photos/*
 storage/uploads/*

@@ -1,5 +1,4 @@
-// Market data: parsers for pasted Baltic reports, fixture/rate lines and bunker price lists,
-// plus small helpers (changes, spreads). Data is typed or pasted by the user — never scraped.
+// Market data: parsers for pasted Baltic reports, fixture/rate lines and bunker price lists, plus small helpers.
 
 export const INDICES = {
     BDI: { label: 'Baltic Dry Index', short: 'BDI' },
@@ -50,8 +49,8 @@ export function parseBaltic(text) {
     const marks = [...s.matchAll(/\((BDI|BCI|BPI|BSI|BHSI)\)/g)];
     const idx = new RegExp(`(${UP}|${DOWN})\\s+(?:by\\s+)?([\\d,.]+)\\s*points?(?:\\s*,)?\\s+(?:to(?:\\s+reach)?|at|reaching)\\s+([\\d,.]+)`, 'i');
     const idxSame = new RegExp(`(?:${SAME})\\s+at\\s+([\\d,.]+)`, 'i');
-    const tc = new RegExp(`average daily earnings[^.$]*?(${UP}|${DOWN})\\s+(?:by\\s+)?\\$\\s?([\\d,.]+)\\s+(?:to(?:\\s+reach)?|at)\\s+\\$\\s?([\\d,.]+)`, 'i');
-    const tcSame = new RegExp(`average daily earnings[^.$]*?(?:${SAME})\\s+at\\s+\\$\\s?([\\d,.]+)`, 'i');
+    const tc = new RegExp(`average daily (?:earnings|income)[^.$]*?(${UP}|${DOWN})\\s+(?:by\\s+)?\\$\\s?([\\d,.]+)\\s+(?:to(?:\\s+reach)?|at)\\s+\\$\\s?([\\d,.]+)`, 'i');
+    const tcSame = new RegExp(`average daily (?:earnings|income)[^.$]*?(?:${SAME})\\s+at\\s+\\$\\s?([\\d,.]+)`, 'i');
     const segOf = (clause, code) => {
         const c = clause.toLowerCase();
         if (/capesize/.test(c)) return 'CAPE';

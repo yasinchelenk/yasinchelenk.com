@@ -50,6 +50,10 @@ return [
     'ais' => [
         'aisstream_key' => $env('AISSTREAM_API_KEY'),
     ],
+    // Chartering Desk · Market: "Update from HandyBulk" kendini tanıtan User-Agent ile gider; iletişim adresi .env'de (CHARTDESK_CONTACT), repoda değil.
+    'handybulk' => [
+        'contact' => $env('CHARTDESK_CONTACT'),
+    ],
     // Operasyon panelinin (/panel) çıktılarda ve e-postalarda kullandığı acente bilgileri.
     'agency' => [
         'name'       => 'Çelenk Shipping Agency',

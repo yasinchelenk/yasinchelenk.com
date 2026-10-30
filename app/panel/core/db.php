@@ -105,6 +105,8 @@ function panel_migrations(): array
         113 => 'chartering_migrate_113',
         // SOF ekleri (protesto mektupları, imzalı SOF taraması) — web kökünün dışında, storage/sof-files
         114 => 'chartering_migrate_114',
+        // Market: endeks değerinin kaynaktan alındığı zaman (HandyBulk güncellemesi)
+        115 => 'chartering_migrate_115',
     ];
 }
 
