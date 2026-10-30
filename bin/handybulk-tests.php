@@ -126,6 +126,24 @@ eq([$wk['Supramax']['week'] ?? null, $wk['Supramax']['routes'] ?? null], [44, [[
 eq($wk['Panamax']['routes'] ?? null, [['Atlantic RV', 15845.0], ['Continent/China', 24538.0], ['China/Continent', 13469.0], ['Pacific RV', 20232.0]], 'Panamax: Atlantic RV 15,845; Cont/China 24,538; China/Cont 13,469; Pacific RV 20,232');
 eq(hb_parse_rates_page('<p>nothing here</p>')['as_of'], null, 'no “Daily Updated” date → nothing (format changed)');
 
+// ---------------------------------------------------------------- News, lessons, SF (phase 6)
+section('News, lessons, stowage factor (phase 6)');
+$np = hb_parse_news_page((string) file_get_contents($root . '/tests/handybulk/news.html'));
+eq([$np['days'], $np['archive']], [[['date' => '2026-10-30', 'items' => 2], ['date' => '2026-10-29', 'items' => 1]], ['/dry-bulk-shipping-news/2026/september/', '/dry-bulk-shipping-news/2026/october/']],
+    'news: date + item count only (short lines and empty days skipped), month archive links');
+check(!str_contains(json_encode($np), 'Placeholder'), 'news: no item text comes out of the parser');
+$lp = hb_parse_lessons_page((string) file_get_contents($root . '/tests/handybulk/lessons.html'));
+eq([count($lp['lessons']), $lp['lessons'][9]['url'] ?? null, $lp['lessons'][3]['title'] ?? null, $lp['next']], [12, 'https://www.handybulk.com/iron-ore-shipping/', 'Letter of Indemnity (LOI)', null],
+    'lessons: 12 unique handybulk links with titles (duplicate and foreign links skipped)');
+$cats = array_map(fn($l) => hb_lesson_category($l['title']), $lp['lessons']);
+eq($cats, ['Laytime & Demurrage', 'Voyage Estimation', 'Stowage Factor', 'B/L & LOI', 'Bunkers', 'Insurance & GA', 'Law & Arbitration', 'Time Charter', 'Ship Types & Sizes', 'Cargoes', 'Other', 'Laytime & Demurrage'],
+    'lesson categories from title keywords (“More … Before” is not “ore”)');
+$sf = hb_parse_sf_values('<p>Wheat usually stows at 1.25 - 1.33 cbm/mt, i.e. about 45-48 cuft/lt in bulk; bagged 1.39 m3/t. A 25 cbm/mt or 9 tons figure is not an SF.</p>');
+eq(array_map(fn($v) => [$v['low'], $v['high'], $v['unit'], $v['cbm_low']], $sf), [[1.25, 1.33, 'cbm/mt', 1.25], [45.0, 48.0, 'cuft/lt', 1.254], [1.39, 1.39, 'cbm/mt', 1.39]],
+    'SF values: ranges and units (cuft/lt converted), implausible values dropped');
+eq(array_map('hb_sf_cargo', ['Wheat Stowage Factor', 'Coal Stowage Factor in Bulk Shipping', 'Log Cargo Stowage Factors: Timber Shipping', 'Corn (Maize) Stowage Factor', 'Stowage Factor (SF)', 'Handysize Cargo Orders: Stowage Factor, Cargo Intake']),
+    ['Wheat', 'Coal', 'Log', 'Corn (Maize)', null, null], 'SF cargo from the lesson title (general lessons → none)');
+
 // ---------------------------------------------------------------- 9 · Bunker
 section('9 · Bunker');
 $bk = hb_parse_bunker_page((string) file_get_contents($root . '/tests/handybulk/bunker.html'));
@@ -282,6 +300,34 @@ if ($tmp) {
     $kmxC = ch_market_comparables('Kamsarmax', ['Argentina'], ['China'], 3650);
     eq([$kmxC['stats']['median'], $kmxC['stats']['n']], [22500.0, 1], 'comparables with a destination: Kamsarmax Argentina → China median 22,500');
     eq(ch_market_regions_for('Turkiye'), ['Turkiye', 'Marmara', 'Black Sea', 'EMED', 'Med'], 'a country name expands to its regions (Turkiye → … Black Sea, EMED, Med)');
+
+    section('News, lessons, SF import (temporary copy of the database)');
+    q('DELETE FROM ch_hb_news');
+    q('DELETE FROM ch_hb_lessons');
+    q('DELETE FROM ch_kb_sf_suggestions');
+    $nctx = ['run_id' => 0, 'url' => 'https://www.handybulk.com/dry-bulk-shipping-news/', 'fetched_at' => '2026-10-30 09:00:00', 'adapter' => 'news'];
+    [$n1] = hb_import_news((string) file_get_contents($root . '/tests/handybulk/news.html'), $nctx);
+    [$n2] = hb_import_news((string) file_get_contents($root . '/tests/handybulk/news.html'), $nctx);
+    $nd = row("SELECT * FROM ch_hb_news WHERE date = '2026-10-30'");
+    eq([$n1['added'], $n2['added'], $n2['updated'], (int) $nd['items'], $nd['url']], [2, 0, 0, 2, 'https://www.handybulk.com/dry-bulk-shipping-news/2026/october/'], 'news days: added once, item count + month link; same page again → 0 new');
+    $lhtml = (string) file_get_contents($root . '/tests/handybulk/lessons.html');
+    $lctx = ['run_id' => 0, 'url' => 'https://www.handybulk.com/chartering-lessons/', 'fetched_at' => '2026-10-30 09:00:00', 'adapter' => 'lessons'];
+    [$l1] = hb_import_lessons($lhtml, $lctx);
+    q("UPDATE ch_hb_lessons SET category = 'Time Charter', category_manual = 1 WHERE slug = 'voyage-estimation'");
+    q("UPDATE ch_hb_lessons SET title = 'Old title' WHERE slug = 'voyage-estimation'");
+    q("DELETE FROM ch_hb_lessons WHERE slug = 'general-average'");
+    [$l2] = hb_import_lessons($lhtml, $lctx);
+    $ve = row("SELECT title, category FROM ch_hb_lessons WHERE slug = 'voyage-estimation'");
+    $ga = row("SELECT initial FROM ch_hb_lessons WHERE slug = 'general-average'");
+    eq([$l1['added'], scalar('SELECT COUNT(*) FROM ch_hb_lessons WHERE initial = 1'), $l2['added'], $l2['updated'], (int) $ga['initial']], [12, 11, 1, 1, 0],
+        'lessons: first import 12 (not “new”); later a re-appearing lesson is added as new, a changed title is updated');
+    eq([$ve['title'], $ve['category']], ['Voyage Estimation', 'Time Charter'], 'a category set by hand is kept when the title changes');
+    $les = row("SELECT * FROM ch_hb_lessons WHERE slug = 'wheat-stowage-factor'");
+    $sctx = ['run_id' => 0, 'url' => $les['url'], 'fetched_at' => '2026-10-30 09:00:00', 'adapter' => 'sf', 'lesson' => $les];
+    [$s1] = hb_import_sf('<p>Wheat: 1.25 - 1.33 cbm/mt (45-48 cuft/lt).</p>', $sctx);
+    [$s2] = hb_import_sf('<p>Wheat: 1.25 - 1.33 cbm/mt (45-48 cuft/lt).</p>', $sctx);
+    $sg = row("SELECT cargo, status FROM ch_kb_sf_suggestions WHERE unit = 'cbm/mt'");
+    eq([$s1['added'], $s2['added'], $sg['cargo'], $sg['status']], [2, 0, 'Wheat', 'open'], 'SF: suggestions (cargo from the title “Wheat Stowage Factor”), open until accepted; not duplicated');
 }
 
 // ---------------------------------------------------------------- Snapshots (structure only, when present)
@@ -299,6 +345,17 @@ if (is_file("{$snap}/baltic-dry-index.html")) {
 if (is_file("{$snap}/ship-bunker.html")) {
     $p = hb_parse_bunker_page((string) file_get_contents("{$snap}/ship-bunker.html"));
     check($p['as_of'] !== null && count($p['prices']) >= 5 && ($p['prices'][0]['is_average'] ?? false), 'Bunker snapshot: as of ' . $p['as_of'] . ', ports ' . count($p['prices']) . ', average row first');
+}
+if (is_file("{$snap}/dry-bulk-shipping-news.html")) {
+    $p = hb_parse_news_page((string) file_get_contents("{$snap}/dry-bulk-shipping-news.html"));
+    check(count($p['days']) > 0 && count($p['archive']) > 0 && !array_filter($p['days'], fn($d) => !is_int($d['items']) || $d['items'] < 1),
+        'News snapshot: days ' . count($p['days']) . ', items ' . array_sum(array_column($p['days'], 'items')) . ', archive months ' . count($p['archive']));
+}
+if (is_file("{$snap}/chartering-lessons.html")) {
+    $p = hb_parse_lessons_page((string) file_get_contents("{$snap}/chartering-lessons.html"));
+    $other = count(array_filter($p['lessons'], fn($l) => hb_lesson_category($l['title']) === 'Other'));
+    check(count($p['lessons']) > 100 && !array_filter($p['lessons'], fn($l) => !str_starts_with($l['url'], 'https://www.handybulk.com/') || $l['title'] === '') && $other < count($p['lessons']) / 4,
+        'Lessons snapshot: ' . count($p['lessons']) . " lessons, {$other} in “Other”");
 }
 if (is_file("{$snap}/ship-charter-rates.html")) {
     $p = hb_parse_rates_page((string) file_get_contents("{$snap}/ship-charter-rates.html"));

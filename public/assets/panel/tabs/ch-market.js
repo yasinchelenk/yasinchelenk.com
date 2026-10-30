@@ -463,18 +463,24 @@ export async function mount(el, ctx) {
         const news = data.notes.filter((n) => n.kind === 'news');
         const title = h('input', { type: 'text', placeholder: 'Headline' });
         const url = h('input', { type: 'url', placeholder: 'https://…' });
+        // HandyBulk news days: the page has no headlines, so only the date, the number of items and the page link are kept
+        const hb = (data.hb_news ?? []).slice(0, 10);
+        const fresh = (n) => +n.is_new;
         return card('News & notes', 'gray', [
+            hb.length ? h('ul.ch-news', hb.map((n) => h('li',
+                h('span.dim', fmtDate(n.date)), ' ', h('a', { href: n.url, target: '_blank', rel: 'noopener noreferrer', title: 'handybulk.com’da açılır' }, `Dry bulk shipping news — ${n.items} item${n.items === 1 ? '' : 's'} ↗`),
+                ' ', fresh(n) ? h('span.ch-badge.green', 'new') : sourceBadge(n, { short: true })))) : null,
             news.length ? h('ul.ch-news', news.slice(0, 30).map((n) => h('li',
                 h('span.dim', fmtDate(n.date)), ' ', n.url ? h('a', { href: n.url, target: '_blank', rel: 'noopener noreferrer' }, n.title || n.url) : h('span', n.title),
                 canEdit ? h('button.tiny.ghost', { type: 'button', on: { click: async () => { await del(`chartering/market/notes/${n.id}`); load(); } } }, '✕') : null)))
-                : h('p.dim', 'Başlık + link ekleyin.'),
+                : hb.length ? null : h('p.dim', 'Başlık + link ekleyin.'),
             canEdit ? h('div.ch-inline.ch-news__add', title, url, h('button.tiny', { type: 'button', on: { click: async () => {
                 if (!title.value.trim() && !url.value.trim()) return;
                 await post('chartering/market/notes', { date: today(), kind: 'news', title: title.value.trim() || null, url: url.value.trim() || null });
                 load();
             } } }, 'Add')) : null,
             h('p.ch-disclaimer', 'Source idea: ', h('a', { href: 'https://www.handybulk.com/', target: '_blank', rel: 'noopener' }, 'handybulk — Dry Bulk Shipping News'), ' (link only, nothing is copied).'),
-        ]);
+        ], { actions: canEdit ? h('button.tiny', { type: 'button', title: 'HandyBulk haber sayfası: yalnızca tarih, haber sayısı ve sayfa linki (metin saklanmaz)', on: { click: (e) => handybulkMenu(e.currentTarget, 'news', 'Dry Bulk Shipping News page', null) } }, 'Update from HandyBulk ▾') : null });
     }
 
     function upcomingCard() {

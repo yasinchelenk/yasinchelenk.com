@@ -99,6 +99,31 @@ function chartering_migrate_119(PDO $pdo): void
         SQL);
 }
 
+/** Migration 120: news days (date + item count + link), lessons (title + link + category), term–lesson links, SF suggestions. */
+function chartering_migrate_120(PDO $pdo): void
+{
+    $pdo->exec(<<<'SQL'
+        CREATE TABLE ch_hb_news (
+            id INTEGER PRIMARY KEY, date TEXT NOT NULL UNIQUE, items INTEGER NOT NULL, url TEXT NOT NULL,
+            first_seen_at TEXT, last_seen_at TEXT, source TEXT, source_url TEXT, as_of_date TEXT, fetched_at TEXT, import_run_id INTEGER
+        );
+        CREATE TABLE ch_hb_lessons (
+            id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE, slug TEXT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL, category_manual INTEGER NOT NULL DEFAULT 0,
+            initial INTEGER NOT NULL DEFAULT 0, first_seen_at TEXT, last_seen_at TEXT, source TEXT, source_url TEXT, fetched_at TEXT, import_run_id INTEGER,
+            updated_at TEXT, updated_by TEXT
+        );
+        CREATE INDEX idx_ch_hb_lessons_cat ON ch_hb_lessons(category);
+        CREATE TABLE ch_kb_term_links (
+            id INTEGER PRIMARY KEY, term TEXT NOT NULL, url TEXT NOT NULL, title TEXT, status TEXT NOT NULL, created_at TEXT, created_by TEXT, UNIQUE (term, url)
+        );
+        CREATE TABLE ch_kb_sf_suggestions (
+            id INTEGER PRIMARY KEY, lesson_url TEXT NOT NULL, lesson_title TEXT, cargo TEXT, low REAL NOT NULL, high REAL NOT NULL, unit TEXT NOT NULL,
+            cbm_low REAL NOT NULL, cbm_high REAL NOT NULL, status TEXT NOT NULL DEFAULT 'open', import_run_id INTEGER, created_at TEXT, resolved_at TEXT, resolved_by TEXT,
+            UNIQUE (lesson_url, low, high, unit)
+        );
+        SQL);
+}
+
 /** Plausibility ranges (spec §3): outside → not written, goes to review. */
 const HB_RANGES = [
     'index' => [0, 20000], 'tc' => [1000, 250000], 'bb' => [0, 5000000], 'bunker' => [100, 3000], 'route_t' => [1, 100],
@@ -113,8 +138,10 @@ function hb_adapters(): array
         'bunker' => ['label' => 'Ship Bunker', 'path' => '/ship-bunker/', 'implemented' => true, 'targets' => 'Bunker prices (VLSFO, MGO, …)'],
         'rates' => ['label' => 'Ship Charter Rates', 'path' => '/ship-charter-rates/', 'implemented' => true, 'targets' => 'Trip & period rates, week route TC, 1-year TC'],
         'weekly' => ['label' => 'BDI weekly reports', 'path' => '/baltic-dry-index/', 'implemented' => true, 'targets' => 'Reported fixtures, route values (C3, C5, 5TC …)'],
-        'news' => ['label' => 'Dry Bulk Shipping News', 'path' => '/dry-bulk-shipping-news/', 'implemented' => false, 'phase' => 6, 'targets' => 'Dates + links (no text)'],
-        'lessons' => ['label' => 'Chartering Lessons', 'path' => '/chartering-lessons/', 'implemented' => false, 'phase' => 6, 'targets' => 'Lesson titles + links, categories'],
+        'news' => ['label' => 'Dry Bulk Shipping News', 'path' => '/dry-bulk-shipping-news/', 'implemented' => true, 'targets' => 'Date + number of items + link (the page has no headlines; no text is kept)'],
+        'lessons' => ['label' => 'Chartering Lessons', 'path' => '/chartering-lessons/', 'implemented' => true, 'targets' => 'Lesson titles + links, categories (Knowledge Base)'],
+        // On demand only (Knowledge Base → lessons → "Suggest SF"): one lesson page at a time, never in "Update all" / schedule
+        'sf' => ['label' => 'Stowage factor suggestions', 'path' => '/chartering-lessons/', 'implemented' => true, 'on_demand' => true, 'targets' => 'SF values + units of one lesson (suggestions, written only when accepted)'],
     ];
 }
 
@@ -126,7 +153,51 @@ function hb_fetcher(): HbFetcher
 function module_routes_chartering_sources(): void
 {
     route('GET', '/api/chartering/sources', 'ch_sources_overview', 'ch-market');
-    route('POST', '/api/chartering/sources/{key}/run', fn($p) => json_response(hb_run((string) $p['key'], 'manual')), 'ch-market');
+    route('POST', '/api/chartering/sources/{key}/run', function ($p) {
+        !empty(hb_adapters()[$p['key']]['on_demand']) && api_error('Bu kaynak yalnızca Knowledge Base’den, ders başına çalışır.', 409);
+        json_response(hb_run((string) $p['key'], 'manual'));
+    }, 'ch-market');
+    // Knowledge Base: lessons (titles + links + categories), term–lesson links, stowage factor suggestions
+    route('GET', '/api/chartering/lessons', fn() => json_response(rows("SELECT id, url, slug, title, category, category_manual, first_seen_at,
+        CASE WHEN initial = 0 AND first_seen_at >= ? THEN 1 ELSE 0 END AS is_new FROM ch_hb_lessons ORDER BY title COLLATE NOCASE", [date('Y-m-d H:i:s', strtotime('-30 days'))])), '*');
+    route('PUT', '/api/chartering/lessons/{id}', function ($p, $in) {
+        $cat = (string) ($in['category'] ?? '');
+        (isset(HB_LESSON_CATEGORIES[$cat]) || $cat === 'Other') || api_error('Bilinmeyen kategori.');
+        $l = row('SELECT * FROM ch_hb_lessons WHERE id = ?', [$p['id']]) ?? api_error('Ders bulunamadı.', 404);
+        update('ch_hb_lessons', $l['id'], ['category' => $cat, 'category_manual' => 1, 'updated_at' => now(), 'updated_by' => actor()['name']]);
+        gecmis_log('ch_kb', "lesson:{$l['id']}", "Lesson {$l['title']}", 'category', 'islem', $l['category'], $cat);
+        json_response(['ok' => true]);
+    }, 'ch-kb');
+    route('POST', '/api/chartering/lessons/{id}/sf', function ($p) {
+        $l = row('SELECT * FROM ch_hb_lessons WHERE id = ?', [$p['id']]) ?? api_error('Ders bulunamadı.', 404);
+        json_response(hb_run('sf', 'manual', ['path' => "/{$l['slug']}/", 'lesson' => $l]));
+    }, 'ch-kb');
+    route('GET', '/api/chartering/sf-suggestions', fn() => json_response(rows("SELECT * FROM ch_kb_sf_suggestions WHERE status = 'open' ORDER BY id DESC")), 'ch-kb');
+    route('POST', '/api/chartering/sf-suggestions/{id}', function ($p, $in) {
+        $s = row('SELECT * FROM ch_kb_sf_suggestions WHERE id = ?', [$p['id']]) ?? api_error('Öneri bulunamadı.', 404);
+        $status = ($in['action'] ?? '') === 'accept' ? 'accepted' : 'dismissed';
+        update('ch_kb_sf_suggestions', $s['id'], ['status' => $status, 'resolved_at' => now(), 'resolved_by' => actor()['name']]);
+        gecmis_log('ch_kb', "sf:{$s['id']}", "SF suggestion {$s['cargo']}", 'status', 'islem', 'open', $status . (isset($in['cargo']) ? ' → ' . mb_substr((string) $in['cargo'], 0, 80) : ''));
+        json_response(['ok' => true]);
+    }, 'ch-kb');
+    route('GET', '/api/chartering/kb/term-links', fn() => json_response(rows('SELECT * FROM ch_kb_term_links ORDER BY term, title')), '*');
+    route('POST', '/api/chartering/kb/term-links', function ($p, $in) {
+        $term = trim(mb_substr((string) ($in['term'] ?? ''), 0, 60));
+        $url = (string) ($in['url'] ?? '');
+        ($term !== '' && str_starts_with($url, HbFetcher::ORIGIN . '/')) || api_error('Terim ve handybulk ders linki gerekli.');
+        $status = ($in['status'] ?? '') === 'rejected' ? 'rejected' : 'linked';
+        q('INSERT INTO ch_kb_term_links (term, url, title, status, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (term, url) DO UPDATE SET status = excluded.status, title = excluded.title, created_at = excluded.created_at, created_by = excluded.created_by',
+            [$term, $url, mb_substr((string) ($in['title'] ?? ''), 0, 200), $status, now(), actor()['name']]);
+        gecmis_log('ch_kb', "term:{$term}", "Term {$term}", 'lesson', 'islem', null, "{$status}: {$url}");
+        json_response(['ok' => true]);
+    }, 'ch-kb');
+    route('DELETE', '/api/chartering/kb/term-links/{id}', function ($p) {
+        $l = row('SELECT * FROM ch_kb_term_links WHERE id = ?', [$p['id']]) ?? api_error('Bağlantı bulunamadı.', 404);
+        q('DELETE FROM ch_kb_term_links WHERE id = ?', [$l['id']]);
+        gecmis_log('ch_kb', "term:{$l['term']}", "Term {$l['term']}", 'lesson', 'islem', $l['url'], 'removed');
+        json_response(['ok' => true]);
+    }, 'ch-kb');
     route('POST', '/api/chartering/sources/bdi/history', function ($p, $in) {
         $months = implode('|', HB_MONTHS);
         $path = (string) ($in['path'] ?? '');
@@ -213,7 +284,13 @@ function hb_run(string $key, string $trigger, array $opt = []): array
     };
 
     $res = hb_fetcher()->get($path, ['wait' => $trigger === 'scheduled']);
-    if (in_array($res['status'], ['blocked', 'error', 'limit', 'throttled'], true)) {
+    if ($res['status'] === 'throttled') {
+        // Nothing was requested; the browser retries after retry_after — not an import, so it is not kept in the log
+        $run = row('SELECT * FROM ch_hb_runs WHERE id = ?', [$runId]);
+        q('DELETE FROM ch_hb_runs WHERE id = ?', [$runId]);
+        return ['status' => 'throttled', 'message' => $res['error'] ?? null, 'retry_after' => $res['retry_after'] ?? 5, 'added' => 0, 'updated' => 0, 'skipped' => 0, 'review' => 0] + $run;
+    }
+    if (in_array($res['status'], ['blocked', 'error', 'limit'], true)) {
         $run = $finish($res['status'] === 'limit' ? 'error' : $res['status'], [], $res['error'] ?? null);
         return $run + ['retry_after' => $res['retry_after'] ?? null, 'manual' => $res['status'] === 'blocked'];
     }
@@ -222,6 +299,9 @@ function hb_run(string $key, string $trigger, array $opt = []): array
         [$counts, $asOf, $msg] = match ($key) {
             'bdi' => $trigger === 'history' ? hb_import_bdi_history($res['html'], $ctx) : hb_import_bdi($res['html'], $ctx),
             'weekly' => hb_import_weekly($res['html'], $ctx),
+            'news' => hb_import_news($res['html'], $ctx),
+            'lessons' => hb_import_lessons($res['html'], $ctx + ['fetch' => fn(string $p) => hb_fetcher()->get($p, ['wait' => true])]),
+            'sf' => hb_import_sf($res['html'], $ctx + ['lesson' => $opt['lesson'] ?? null]),
             'bunker' => hb_import_bunker($res['html'], $ctx),
             'rates' => hb_import_rates($res['html'], $ctx),
         };
@@ -568,6 +648,116 @@ function hb_route_write(?array $cur, array $d, ?int $runId, string $fetchedAt, s
         return;
     }
     insert('ch_route_rates', ['date' => $d['date'], 'code' => $d['code'], 'point' => $d['point'], 'created_at' => now(), 'created_by' => $by] + $set);
+}
+
+// ---------------------------------------------------------------- News, Lessons, SF suggestions
+
+/** News days: date + number of items + the month page link (the page has no headlines; no text is kept). Key: date. */
+function hb_import_news(string $html, array $ctx): array
+{
+    $page = hb_parse_news_page($html);
+    if (!$page['days']) {
+        throw new HbFormatChanged('Format changed: dated news paragraphs (“30-October-2026” + news items) not found. Nothing was written.');
+    }
+    $c = ['added' => 0, 'updated' => 0, 'skipped' => 0, 'review' => 0];
+    $months = array_flip($page['archive']);
+    db()->beginTransaction();
+    try {
+        foreach ($page['days'] as $d) {
+            $month = '/dry-bulk-shipping-news/' . substr($d['date'], 0, 4) . '/' . HB_MONTHS[(int) substr($d['date'], 5, 2) - 1] . '/';
+            $url = isset($months[$month]) ? HbFetcher::ORIGIN . $month : $ctx['url'];
+            $cur = row('SELECT * FROM ch_hb_news WHERE date = ?', [$d['date']]);
+            $set = ['items' => $d['items'], 'url' => $url, 'last_seen_at' => now(), 'source' => 'handybulk', 'source_url' => $ctx['url'], 'as_of_date' => $d['date'],
+                'fetched_at' => $ctx['fetched_at'], 'import_run_id' => $ctx['run_id']];
+            if (!$cur) {
+                insert('ch_hb_news', ['date' => $d['date'], 'first_seen_at' => now()] + $set);
+                $c['added']++;
+            } elseif ((int) $cur['items'] !== $d['items'] || $cur['url'] !== $url) {
+                update('ch_hb_news', $cur['id'], $set);
+                $c['updated']++;
+            } else {
+                $c['skipped']++;
+            }
+        }
+        db()->commit();
+    } catch (Throwable $e) {
+        db()->rollBack();
+        throw $e;
+    }
+    $dates = array_column($page['days'], 'date');
+    return [$c, max($dates), count($dates) . ' days, ' . array_sum(array_column($page['days'], 'items')) . ' items (counted, not stored)'];
+}
+
+/** Lessons: title + link, keyword category (a category set by hand is kept). Key: url. Lessons of a first import are not "new". */
+function hb_import_lessons(string $html, array $ctx): array
+{
+    $page = hb_parse_lessons_page($html);
+    $all = $page['lessons'];
+    // Pagination (the list is one page today): follow "next" links with the same fetch rules, at most 20 pages
+    for ($i = 0, $next = $page['next']; $next && $i < 20 && isset($ctx['fetch']); $i++) {
+        $res = ($ctx['fetch'])($next);
+        if (!in_array($res['status'], ['ok', 'cached'], true)) {
+            break;
+        }
+        $more = hb_parse_lessons_page($res['html']);
+        $all = [...$all, ...$more['lessons']];
+        $next = $more['next'];
+    }
+    if (count($all) < 10) {
+        throw new HbFormatChanged('Format changed: lesson links (a.chartering-lessons-row) not found. Nothing was written.');
+    }
+    $c = ['added' => 0, 'updated' => 0, 'skipped' => 0, 'review' => 0];
+    $initial = !scalar('SELECT 1 FROM ch_hb_lessons LIMIT 1');
+    db()->beginTransaction();
+    try {
+        foreach ($all as $l) {
+            $cur = row('SELECT * FROM ch_hb_lessons WHERE url = ?', [$l['url']]);
+            $meta = ['last_seen_at' => now(), 'source' => 'handybulk', 'source_url' => $ctx['url'], 'fetched_at' => $ctx['fetched_at'], 'import_run_id' => $ctx['run_id']];
+            if (!$cur) {
+                insert('ch_hb_lessons', ['url' => $l['url'], 'slug' => $l['slug'], 'title' => $l['title'], 'category' => hb_lesson_category($l['title']),
+                    'initial' => $initial ? 1 : 0, 'first_seen_at' => now()] + $meta);
+                $c['added']++;
+            } elseif ($cur['title'] !== $l['title']) {
+                update('ch_hb_lessons', $cur['id'], ['title' => $l['title']] + ($cur['category_manual'] ? [] : ['category' => hb_lesson_category($l['title'])]) + $meta);
+                $c['updated']++;
+            } else {
+                update('ch_hb_lessons', $cur['id'], $meta);
+                $c['skipped']++;
+            }
+        }
+        db()->commit();
+    } catch (Throwable $e) {
+        db()->rollBack();
+        throw $e;
+    }
+    return [$c, date('Y-m-d'), count($all) . ' lessons' . ($initial ? ' (first import — none marked new)' : '')];
+}
+
+/** SF values of one lesson page → open suggestions (numbers + unit + link); the KB table changes only when one is accepted. */
+function hb_import_sf(string $html, array $ctx): array
+{
+    $l = $ctx['lesson'] ?? null;
+    if (!$l) {
+        throw new HbFormatChanged('Lesson not found.');
+    }
+    $vals = hb_parse_sf_values($html);
+    if (!$vals) {
+        // Many SF lessons explain the concept without figures: a normal result, not a format change
+        return [['added' => 0, 'updated' => 0, 'skipped' => 0, 'review' => 0], null, 'No stowage factor figures (cbm/mt, cuft/lt) on this lesson page.'];
+    }
+    $cargo = hb_sf_cargo($l['title']);
+    $c = ['added' => 0, 'updated' => 0, 'skipped' => 0, 'review' => 0];
+    foreach ($vals as $v) {
+        $dup = scalar('SELECT 1 FROM ch_kb_sf_suggestions WHERE lesson_url = ? AND low = ? AND high = ? AND unit = ?', [$l['url'], $v['low'], $v['high'], $v['unit']]);
+        if ($dup) {
+            $c['skipped']++;
+            continue;
+        }
+        insert('ch_kb_sf_suggestions', ['lesson_url' => $l['url'], 'lesson_title' => $l['title'], 'cargo' => $cargo, 'low' => $v['low'], 'high' => $v['high'], 'unit' => $v['unit'],
+            'cbm_low' => $v['cbm_low'], 'cbm_high' => $v['cbm_high'], 'import_run_id' => $ctx['run_id'], 'created_at' => now()]);
+        $c['added']++;
+    }
+    return [$c, null, count($vals) . " SF values from “{$l['title']}”"];
 }
 
 // ---------------------------------------------------------------- Charter Rates adapter

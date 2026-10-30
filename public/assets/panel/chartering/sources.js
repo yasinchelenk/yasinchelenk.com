@@ -59,9 +59,9 @@ export async function sourcesView(box, { canEdit, onManual, onChanged }) {
             h('td', h('b', a.label), h('div.dim', a.targets)),
             h('td', h('a', { href: a.url, target: '_blank', rel: 'noopener noreferrer' }, a.url.replace('https://www.', ''))),
             h('td', a.last_ok ? fmtDateTime(a.last_ok.finished_at, true) : h('span.dim', '—'), a.last_ok?.as_of ? h('div.dim', `as of ${a.last_ok.as_of.split('-').reverse().join('.')}`) : null),
-            h('td', a.implemented ? (last ? badge(last.status) : h('span.dim', 'never')) : h('span.ch-badge', `phase ${a.phase}`)),
+            h('td', a.implemented ? (last ? badge(last.status) : h('span.dim', a.on_demand ? 'on demand' : 'never')) : h('span.ch-badge', `phase ${a.phase}`)),
             h('td.r', last && a.implemented ? `${last.added} / ${last.updated}` : ''),
-            h('td', canEdit && a.implemented ? h('button.tiny', { type: 'button', on: { click: async (e) => { e.target.disabled = true; await runAdapter(a.key, { onManual }); done(); } } }, 'Fetch now') : null,
+            h('td', a.on_demand ? h('small.dim', 'Knowledge Base → lessons → “Suggest SF”') : canEdit && a.implemented ? h('button.tiny', { type: 'button', on: { click: async (e) => { e.target.disabled = true; await runAdapter(a.key, { onManual }); done(); } } }, 'Fetch now') : null,
                 last?.message && !['ok', 'cached'].includes(last.status) ? h('div.sof-src-err', last.message) : null));
     });
 
@@ -74,7 +74,7 @@ export async function sourcesView(box, { canEdit, onManual, onChanged }) {
     fill(box,
         h('div.notice.warn', 'Yalnızca iç kullanım: bu veriler giriş yapmış kullanıcılara gösterilir; büyük kısmı Baltic Exchange kaynaklı lisanslı veridir, dışarıya paylaşmayın. Yalnızca sayılar ve yapılandırılmış alanlar saklanır.'),
         h('div.toolbar',
-            canEdit ? h('button.primary', { type: 'button', on: { click: () => updateAll(ov.adapters.filter((a) => a.implemented), { onManual }).then(done) } }, 'Update all') : null,
+            canEdit ? h('button.primary', { type: 'button', on: { click: () => updateAll(ov.adapters.filter((a) => a.implemented && !a.on_demand), { onManual }).then(done) } }, 'Update all') : null,
             canEdit ? h('button', { type: 'button', disabled: !!ov.history_done, title: ov.history_done ? `Done ${ov.history_done}` : '', on: { click: () => importHistory().then(done) } }, ov.history_done ? 'BDI history imported' : 'Import BDI history…') : null,
             h('span.spacer'), schedule),
         h('p.dim', `Requests identify as “${ov.user_agent}”. robots.txt is checked first; at least 5 s between requests; pages are cached 12 h. Cron (only if the daily update is on): `,

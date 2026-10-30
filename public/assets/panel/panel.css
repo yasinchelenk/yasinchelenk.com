@@ -1314,5 +1314,9 @@ table.sof-audit td.sof-audit__old { color: var(--dim); text-decoration: line-thr
 .ch-comp__stats { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 4px 0 8px; font-size: 13px; }
 .ch-mkt-level { white-space: nowrap; }
 .ch-mkt-level small { display: block; color: var(--dim); font-size: 11px; }
+.ch-term-lessons { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; font-size: 12.5px; }
+.ch-term-lessons .ch-chip { gap: 4px; }
+.ch-term-lessons.is-sugg .ch-chip { border-style: dashed; }
+.ch-sf-sugg { margin-bottom: 10px; }
 details.hb-aliases { margin: 10px 0 4px; }
 details.hb-aliases summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }

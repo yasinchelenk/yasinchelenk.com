@@ -483,3 +483,137 @@ function hb_parse_route_sentence(string $s): array
     }
     return $out;
 }
+
+/**
+ * Dry Bulk Shipping News page → ['days' => [['date', 'items' => n]], 'archive' => [month paths, oldest first]].
+ * The page has no headlines or per-item links: only the date and the number of items are kept — never the text.
+ */
+function hb_parse_news_page(string $html): array
+{
+    $doc = hb_dom($html);
+    $days = [];
+    $cur = null;
+    foreach (iterator_to_array($doc->getElementsByTagName('p')) as $p) {
+        $t = hb_text($p);
+        if (preg_match('/^\d{1,2}-[A-Za-z]+-\d{4}$/', $t)) {
+            $cur = hb_date($t);
+            if ($cur) {
+                $days[$cur] ??= ['date' => $cur, 'items' => 0];
+            }
+            continue;
+        }
+        if ($cur && mb_strlen($t) >= 80) {
+            $days[$cur]['items']++;
+        }
+    }
+    preg_match_all('#href="(?:https://www\.handybulk\.com)?(/dry-bulk-shipping-news/(\d{4})/([a-z]+)/)"#', $html, $m, PREG_SET_ORDER);
+    $archive = [];
+    foreach ($m as $x) {
+        if (in_array($x[3], HB_MONTHS, true)) {
+            $archive[(int) $x[2] * 100 + array_search($x[3], HB_MONTHS, true)] = $x[1];
+        }
+    }
+    ksort($archive);
+    return ['days' => array_values(array_filter($days, fn($d) => $d['items'] > 0)), 'archive' => array_values($archive)];
+}
+
+/** Chartering Lessons page → [['url', 'slug', 'title']] (unique, in page order) and the next page, if the list is paginated. */
+function hb_parse_lessons_page(string $html): array
+{
+    $doc = hb_dom($html);
+    $out = [];
+    $next = null;
+    foreach ($doc->getElementsByTagName('a') as $a) {
+        $cls = ' ' . $a->getAttribute('class') . ' ';
+        $href = trim($a->getAttribute('href'));
+        if (str_contains($cls, ' chartering-lessons-row ') && preg_match('#^(?:https://www\.handybulk\.com)?/([a-z0-9][a-z0-9\-]*)/?$#', $href, $m)) {
+            $title = hb_text($a->getElementsByTagName('span')->item(0) ?? $a);
+            if ($title !== '' && !isset($out[$m[1]])) {
+                $out[$m[1]] = ['url' => HbFetcher::ORIGIN . "/{$m[1]}/", 'slug' => $m[1], 'title' => mb_substr($title, 0, 200)];
+            }
+        }
+        if (strtolower($a->getAttribute('rel')) === 'next' && preg_match('#^(?:https://www\.handybulk\.com)?(/chartering-lessons/page/\d+/)$#', $href, $m)) {
+            $next = $m[1];
+        }
+    }
+    return ['lessons' => array_values($out), 'next' => $next];
+}
+
+/**
+ * Keyword categories for lesson titles (spec §1.5), first match wins; users can change a lesson's category.
+ * Each keyword is a regex fragment matched from a word start ("liabilit" → liability / liabilities; "ore\b" only the word).
+ */
+const HB_LESSON_CATEGORIES = [
+    'Laytime & Demurrage' => ['laytime', 'demurrage', 'despatch', 'dispatch\b', 'notice of readiness', 'nor\b', 'laydays', 'time ?sheet', 'statement of facts', 'wibon', 'wipon', 'shinc', 'shex', 'reversible', 'arrived ship'],
+    'Voyage Estimation' => ['voyage estimat', 'voyage calculation', 'tce\b', 'time charter equivalent', 'break-?even', 'intake calculation', 'voyage result'],
+    'Stowage Factor' => ['stowage factor'],
+    'B/L & LOI' => ['bills? of lading', 'b\/l\b', 'letter of indemnity', 'loi\b', "mate'?s receipt", 'switch bill'],
+    'Bunkers' => ['bunker', 'fuel', 'vlsfo', 'mgo\b', 'hsfo', 'scrubber', 'consumption'],
+    'Insurance & GA' => ['insurance', 'p ?& ?i\b', 'general average', 'hull and machinery', 'h&m\b', 'war risk', 'salvage', 'underwrit', 'piracy'],
+    'Law & Arbitration' => ['arbitration', 'lmaa', 'law\b', 'laws\b', 'legal', 'court', 'dispute', 'liabilit', 'hague', 'hamburg rules', 'rotterdam rules', 'liens?\b', 'claims?\b', 'damages', 'frustration', 'jurisdiction', 'carriage of goods', 'attachment', 'arrest'],
+    'S&P & Finance' => ['sale and purchase', 's&p\b', 'ship finance', 'financ', 'mortgage', 'valuation', 'newbuild', 'shipbuilding', 'demolition', 'recycling', 'second-?hand', 'memorandum of agreement', 'investment'],
+    'Time Charter' => ['time charter', 'hire\b', 'off-?hire', 'nype', 'baltime', 'delivery', 'redelivery', 'ballast bonus', 'trip charter', 'period charter'],
+    'Voyage Charter' => ['voyage charter', 'freight', 'dead ?freight', 'coa\b', 'contract of affreightment'],
+    'CP Clauses & Forms' => ['clauses?\b', 'charter ?part(?:y|ies)', 'charter-party', 'bimco', 'gencon', 'riders?\b', 'recap', 'cp forms?'],
+    'Ship Types & Sizes' => ['handysize', 'handymax', 'supramax', 'ultramax', 'panamax', 'kamsarmax', 'capesize', 'newcastlemax', 'ship sizes?', 'ship types?', 'vessel types?', 'bulk carrier types', 'geared', 'gearless', 'deadweight', 'dwt\b', 'tonnage\b', 'tpc\b', 'grain capacity', 'bale capacity'],
+    'Market & Economics' => ['markets?\b', 'index', 'bdi\b', 'freight rates?', 'economics', 'cycles?\b', 'demand', 'supply', 'ffa\b', 'forward freight', 'baltic exchange'],
+    'Cargoes' => ['cargo', 'ores?\b', 'iron ore', 'coal', 'grains?\b', 'wheat', 'corn\b', 'maize', 'soybean', 'cement', 'clinker', 'fertili', 'steel', 'logs\b', 'timber', 'scrap', 'bauxite', 'alumina', 'sugar', 'salt\b', 'petcoke', 'sulphur', 'urea', 'concentrates?\b', 'bulk [a-z]+ shipping'],
+];
+
+function hb_lesson_category(string $title): string
+{
+    $t = mb_strtolower($title);
+    foreach (HB_LESSON_CATEGORIES as $cat => $words) {
+        foreach ($words as $w) {
+            if (preg_match('/(?<![a-z0-9])' . $w . '/u', $t)) {
+                return $cat;
+            }
+        }
+    }
+    return 'Other';
+}
+
+/**
+ * Cargo named in a stowage factor lesson title: "Wheat Stowage Factor" → Wheat, "Coal Stowage Factor in Bulk Shipping" → Coal,
+ * "Log Cargo Stowage Factors: …" → Log Cargo; a general lesson ("Stowage Factor (SF)", "… Cargo Orders: Stowage Factor …") → null.
+ */
+function hb_sf_cargo(string $title): ?string
+{
+    $t = trim(preg_replace('/\s*:.*$/', '', $title));
+    if (!preg_match('/^(.*?)\s*stowage\s+factors?\b/i', $t, $m)) {
+        return null;
+    }
+    $c = trim(preg_replace('/\s+(?:cargo|cargoes)$/i', '', trim($m[1])));
+    return $c === '' || mb_strlen($c) > 40 ? null : $c;
+}
+
+/**
+ * Stowage factor values in a lesson page → [['low', 'high', 'unit', 'cbm_low', 'cbm_high']] (numbers and units only).
+ * Units: cbm/mt (m3/t, cubic metres per tonne) and cuft/lt (ft3/lt, cubic feet per long ton; 1 cbm/mt = 35.8813 cuft/lt).
+ */
+function hb_parse_sf_values(string $html): array
+{
+    $doc = hb_dom($html);
+    $text = '';
+    foreach ($doc->getElementsByTagName('p') as $p) {
+        $text .= ' ' . hb_text($p);
+    }
+    foreach ($doc->getElementsByTagName('td') as $td) {
+        $text .= ' ' . hb_text($td);
+    }
+    $unit = '(cbm\s*\/\s*(?:mt|t|ton|tonne)|m3\s*\/\s*(?:mt|t)|m³\s*\/\s*(?:mt|t)|cubic met(?:re|er)s?\s+per\s+(?:metric\s+)?(?:tonne|ton)|cu\.?\s?ft\.?\s*\/\s*(?:lt|ton)|cuft\s*\/\s*lt|cbft\s*\/\s*lt|ft3\s*\/\s*lt|ft³\s*\/\s*lt|cubic\s+feet\s+per\s+(?:long\s+)?ton)';
+    preg_match_all('/(\d{1,3}(?:\.\d{1,3})?)\s*(?:(?:-|–|to)\s*(\d{1,3}(?:\.\d{1,3})?))?\s*' . $unit . '/iu', $text, $ms, PREG_SET_ORDER);
+    $out = [];
+    foreach ($ms as $m) {
+        $lo = (float) $m[1];
+        $hi = ($m[2] ?? '') !== '' ? (float) $m[2] : $lo;
+        $feet = (bool) preg_match('/ft|feet/i', $m[3]);
+        [$cl, $ch] = $feet ? [$lo / 35.8813, $hi / 35.8813] : [$lo, $hi];
+        if ($cl < 0.3 || $ch > 6 || $ch < $cl) {
+            continue;   // not a plausible bulk stowage factor
+        }
+        $key = sprintf('%.3f-%.3f', $cl, $ch);
+        $out[$key] ??= ['low' => $lo, 'high' => $hi, 'unit' => $feet ? 'cuft/lt' : 'cbm/mt', 'cbm_low' => round($cl, 3), 'cbm_high' => round($ch, 3)];
+    }
+    return array_slice(array_values($out), 0, 8);
+}

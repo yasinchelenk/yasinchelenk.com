@@ -25,7 +25,7 @@ if (!$force && scalar("SELECT 1 FROM ch_hb_runs WHERE trigger = 'scheduled' AND 
     exit(0);   // already ran today
 }
 foreach (hb_adapters() as $key => $a) {
-    if (empty($a['implemented'])) {
+    if (empty($a['implemented']) || !empty($a['on_demand'])) {
         continue;
     }
     $run = hb_run($key, 'scheduled');

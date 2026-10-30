@@ -122,6 +122,10 @@ function ch_market_bundle(array $p, array $in): never
         'tc'      => rows('SELECT id, date, kind, segment, label, rate, source, as_of_date, fetched_at, week, week_year FROM ch_tc_rates WHERE date >= ? ORDER BY date', [$since]),
         'bunkers' => rows('SELECT id, date, port, vlsfo, mgo, hsfo, extra, is_average, source, as_of_date, fetched_at FROM ch_bunker_prices WHERE date >= ? ORDER BY date', [$since]),
         'rates'   => rows('SELECT * FROM ch_charter_rates WHERE date >= ? ORDER BY date DESC, id DESC', [date('Y-m-d', strtotime('-120 days'))]),
+        // "new": first seen in the last 36 h, but not in the very first import (that one only fills the list)
+        'hb_news' => rows('SELECT date, items, url, first_seen_at, source, as_of_date, fetched_at,
+            CASE WHEN first_seen_at >= ? AND first_seen_at > (SELECT datetime(MIN(first_seen_at), ?) FROM ch_hb_news) THEN 1 ELSE 0 END AS is_new
+            FROM ch_hb_news WHERE date >= ? ORDER BY date DESC', [date('Y-m-d H:i:s', strtotime('-36 hours')), '+5 minutes', date('Y-m-d', strtotime('-45 days'))]),
         'fixtures' => rows('SELECT * FROM ch_market_fixtures WHERE report_date >= ? ORDER BY report_date DESC, id', [date('Y-m-d', strtotime('-120 days'))]),
         'routes'  => rows('SELECT id, date, code, point, value, unit, source, as_of_date, fetched_at FROM ch_route_rates WHERE date >= ? ORDER BY date', [$since]),
         'notes'   => rows("SELECT * FROM ch_market_notes WHERE (kind = 'news' AND date >= ?) OR (kind = 'weekly' AND date >= ?) ORDER BY date DESC, id DESC",

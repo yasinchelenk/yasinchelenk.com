@@ -117,6 +117,8 @@ function panel_migrations(): array
         118 => 'chartering_migrate_118',
         // Data Sources (HandyBulk): haftalık yorumlardaki fixture'lar ve Baltic rota değerleri (yalnızca sayılar)
         119 => 'chartering_migrate_119',
+        // Data Sources (HandyBulk): haber günleri (tarih + sayı + link), dersler (başlık + link + kategori), terim–ders bağları, SF önerileri
+        120 => 'chartering_migrate_120',
     ];
 }
 
