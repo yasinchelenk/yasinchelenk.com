@@ -30,7 +30,9 @@ export function cpTerms(...texts) {
     const terms = TERM_ORDER.find((t) => new RegExp(`\\b${t}\\b`).test(s)) ?? null;
     const wwd = /\bP?WWD\b|WEATHER\s+WORKING/.test(s);
     const turn = s.match(/TURN\s*TIME\s*(?:OF\s*)?(\d{1,2})|(\d{1,2})\s*(?:HRS?|HOURS)\s*TURN/);
-    const rate = s.match(/(\d[\d.,]*)\s*(?:MT|MTS|T|TONS|TONNES)?\s*(?:PWWD|PWD|PDPR|PD\b|\/DAY|PER\s+(?:WEATHER\s+WORKING\s+)?DAY)/);
+    // "20,000 MT PWWD", "8000 t/day", or a quantity followed straight by the terms ("10,000 MT SHINC")
+    const rate = s.match(/(\d[\d.,]*)\s*(?:MT|MTS|T|TONS|TONNES)?\s*(?:PWWD|PWD|PDPR|PD\b|\/\s*DAY|PER\s+(?:WEATHER\s+WORKING\s+)?DAY)/)
+        ?? s.match(/(\d[\d.,]*)\s*(?:MT|MTS|T|TONS|TONNES)\s+(?:SHINC|SHEX|SSHEX|SATPM|FHEX|WWD)\b/);
     return {
         terms: terms ?? (wwd ? 'WWD' : null), wwd,
         wibon: /\bWIBON\b/.test(s), wipon: /\bWIPON\b/.test(s), wifpon: /\bWIFPON\b/.test(s), wccon: /\bWCCON\b/.test(s),

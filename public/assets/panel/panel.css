@@ -1268,6 +1268,23 @@ ol.sof-tpl-events li { display: flex; align-items: center; gap: 6px; padding: 1p
 .sof-tpl-fields h5 { margin: 6px 0 2px; color: var(--navy); }
 .sof-tpl-fields .check { display: flex; }
 section.sof-dict-cat { border-left: 4px solid var(--cat); padding-left: 10px; margin-bottom: 12px; }
+.ch-badge.purple { background: #ece6f7; color: #5b3d99; }
+table.sof-import tr.is-check td { background: #fff8e1 !important; }
+table.sof-import td.sof-srcline { white-space: normal; font-size: 11.5px; min-width: 220px; }
+table.sof-import input[type=date] { width: 128px; padding: 2px 4px; }
+table.sof-map td { font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.sof-cmp__ctl { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.4fr) 200px; gap: 14px; align-items: start; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.sof-cmp__ctl > div { display: grid; gap: 6px; align-content: start; }
+.sof-cmp__ctl h5 { margin: 0; color: var(--navy); }
+.sof-cmp__ctl textarea { width: 100%; }
+.sof-cmp__lt { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.sof-cmp__lt > div { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; display: grid; gap: 2px; }
+.sof-cmp__lt b.is-diff { color: #a3291c; }
+table.sof-cmp tr.is-time td { background: #fff3d6 !important; }
+table.sof-cmp tr.is-missing td { background: #fdecea !important; }
+table.sof-cmp tr.is-effect td { background: #f1ecfa !important; }
+table.ch-table tr.is-time td { background: #fff3d6; }
+@media (max-width: 900px) { .sof-cmp__ctl, .sof-cmp__lt { grid-template-columns: minmax(0, 1fr); } }
 section.sof-dict-cat h4 { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
 @media (max-width: 1250px) { .ch-split--sof { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) {
@@ -1284,3 +1301,5 @@ section.sof-dict-cat h4 { display: flex; align-items: center; gap: 8px; margin: 
     .ch-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .ch-toolbar .ch-name { flex-basis: 100%; max-width: none; order: 10; }
 }
+.sof-imp { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.sof-imp textarea { width: 100%; box-sizing: border-box; }

@@ -329,7 +329,8 @@ export async function mount(el, ctx, param) {
         if (!linked.length) { sofNote.replaceChildren(); return; }
         const now = await get('chartering/sof-versions', { ids: linked.map((p) => p.sof.id).join(',') }).catch(() => null);
         if (!now) { sofNote.replaceChildren(); return; }
-        const items = linked.map((p) => ({ p, s: now.find((x) => x.id === p.sof.id) }));
+        // same id and ref (a deleted SOF's id can be reused by a new one)
+        const items = linked.map((p) => ({ p, s: now.find((x) => x.id === p.sof.id && (!p.sof.ref || x.ref === p.sof.ref)) }));
         const stale = items.filter(({ p, s }) => !s || s.version !== p.sof.version);
         fill(sofNote, h(stale.length ? 'div.notice.warn' : 'p.dim', items.map(({ p, s }) => h('div',
             `${p.name || (p.kind === 'load' ? 'Load port' : 'Discharge port')}: from ${p.sof.ref ?? 'SOF'} v${p.sof.version}`,

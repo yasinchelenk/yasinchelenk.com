@@ -6,6 +6,8 @@ import { analyse, dailyLog, applyLogOverrides, parseHm } from '../engine/sof/eve
 import { validate } from '../engine/sof/validate.js';
 import { sofToLaytimePort, mergeIntoCalc, cpTerms, firstNumber } from '../engine/sof/to-laytime.js';
 import { laytimeCalc } from '../engine/laytime.js';
+import { parseSofText, parseDelimited, guessColumns, rowsFromSheet, sheetValue, mergeImported } from '../engine/sof/parse.js';
+import { compareSofs, compareLaytime } from '../engine/sof/compare.js';
 import { SOF_TEMPLATES, newSof, templateFromSof, templateKey, exportBundle, readBundle } from '../engine/sof/templates.js';
 
 const dict = dictionary();
@@ -132,4 +134,48 @@ test('SOF 9 — send to Laytime: ship crane breakdown excluded, rain by the CP',
     const again = mergeIntoCalc(calc, { ...r.port, rate: 12000 }, { doc: ww });
     eq([again.ports.length, again.ports[0].rate], [1, 12000], 'sending the same SOF again replaces its port');
     eq(cpTerms('5000 mt pwwd SSHEX UU').terms, 'SSHEX', 'terms parsing picks the longest match');
+});
+
+test('SOF 8 — text import', () => {
+    const r = parseSofText('01.11.2026\n0830 NOR tendered\n1015-1130 rain stopped work\n1400 hrs all fast', dict);
+    eq(r.rows.length, 3, 'a date line + 3 event lines → 3 rows');
+    eq(r.rows.map((x) => [x.date, x.time, x.code]), [['2026-11-01', '08:30', 'nor_tendered'], ['2026-11-01', '10:15', 'rain'], ['2026-11-01', '14:00', 'all_fast']], 'NOR 08:30, rain, all fast 14:00 (date carried over)');
+    const a = analyse(sof(r.rows.map((x, i) => ({ id: `p${i}`, ...x }))), dict);
+    eq(a.intervals[0].minutes, 75, 'rain 10:15–11:30 = 1 h 15 min');
+    const f = parseSofText(['01/11 08:30 hrs NOR tendered', 'Nov 2nd 0830 LT - Commenced loading', '0830 hrs/LT holds passed', '2215-0140 rain', 'Sat 03.11.26 06:00 UTC completed loading', 'agent remark without time', 'MV SEA ONE'].join('\n'), dict, { today: '2026-10-30' });
+    eq(f.rows.map((x) => [x.date, x.time, x.code, x.zone]), [['2026-11-01', '08:30', 'nor_tendered', 'LT'], ['2026-11-02', '08:30', 'commenced', 'LT'], ['2026-11-02', '08:30', 'hold_passed', 'LT'],
+        ['2026-11-02', '22:15', 'rain', 'LT'], ['2026-11-03', '06:00', 'completed', 'UTC']], 'dd/mm, month names, hrs/LT, UTC, weekday prefix');
+    eq([f.rows[3].dateTo, f.rows[3].timeTo], ['2026-11-03', '01:40'], '2215–0140 rolls into the next day');
+    eq([f.rows[4].remarks, f.skipped.length], ['agent remark without time MV SEA ONE', 0], 'lines without a time are kept as remarks of the row above');
+    const u = parseSofText('01.11.2026 0900 launch boat delayed by fog\n0930 waiting for the customs launch', dict);
+    eq([u.rows[0].code, u.rows[0].match, u.rows[0].text], [null, 'none', 'launch boat delayed by fog'], 'unknown event → custom row');
+    eq([u.rows[1].code, u.rows[1].match], ['clearance_in', 'guess'], 'one generic word (customs) is only a guess, flagged for checking');
+});
+
+test('SOF — Excel / CSV import and merging into the template rows', () => {
+    const t = parseDelimited('Date;Time;To;Event;Remarks;Qty\n01.11.2026;08:30;;NOR tendered;by e-mail;\n;10:15;11:30;Rain stopped work;;\n02.11.2026;0600;;"Completed loading, docs";"final";45 120,5');
+    const roles = guessColumns(t[0]);
+    eq(roles, ['date', 'time', 'timeTo', 'event', 'remarks', 'qty'], 'column roles from the header');
+    eq(guessColumns(['Tarih', 'Saat', 'Bitiş saati', 'Olay', 'Açıklama', 'Miktar']), ['date', 'time', 'timeTo', 'event', 'remarks', 'qty'], 'Turkish headers');
+    eq(parseSofText('01.11.2026 1600 Bunkering commenced', dict).rows[0].code, 'bunkering', 'the first word decides between single-word guesses');
+    const r = rowsFromSheet(t, roles, dict);
+    eq(r.rows.map((x) => [x.date, x.time, x.timeTo ?? null, x.code]), [['2026-11-01', '08:30', null, 'nor_tendered'], ['2026-11-01', '10:15', '11:30', 'rain'], ['2026-11-02', '06:00', null, 'completed']], 'rows, date carried over');
+    eq([r.rows[0].remarks, r.rows[2].qty], ['by e-mail', 45120.5], 'remarks and quantity');
+    eq([sheetValue('46327.354166666664').date, sheetValue('46327.354166666664').time, sheetValue('0.75').time], ['2026-11-01', '08:30', '18:00'], 'Excel serial date-time and time fraction');
+    const m = mergeImported([{ id: 'a', code: 'nor_tendered', date: '', time: '' }, { id: 'b', code: 'sailed', date: '', time: '' }], r.rows, () => 'n' + Math.random());
+    eq([m.filled, m.added, m.events[0].time, m.events.length], [1, 2, '08:30', 4], 'NOR fills the waiting template row, the rest are added');
+});
+
+test('SOF 10 — compare: NOR 08:30 vs 09:00, demurrage difference', () => {
+    const header = { laytime_terms: '10,000 MT SHINC, turn time 6 hrs', bl_qty: '10000', dem_rate: 'USD 15,000' };
+    const mk = (nor) => sof([row('2026-11-01', nor, 'nor_tendered'), row('2026-11-01', '10:00', 'all_fast'), row('2026-11-01', '15:00', 'commenced'), row('2026-11-02', '20:00', 'completed')], { header });
+    const A = mk('08:30');
+    const B = mk('09:00');
+    const c = compareSofs(A, B, dict, { tolMin: 15 });
+    const nor = c.rows.find((r) => r.a?.code === 'nor_tendered');
+    eq([nor.diff, nor.flags.time, c.counts.time, c.counts.missingA + c.counts.missingB], [30, true, 1, 0], 'NOR 30 min later in B → flagged, nothing missing');
+    eq(compareSofs(A, B, dict, { tolMin: 30 }).counts.time, 0, 'within a 30 min tolerance → not flagged');
+    eq(parseSofText('01.11.2026 2215-0140 heavy rain, stopped', dict).rows[0].code, 'rain', 'a stop reason beats the generic “stopped”');
+    const lt = compareLaytime(A, B, dict);
+    eq([Math.round(lt.a.demurrage * 100) / 100, Math.round(lt.b.demurrage * 100) / 100, Math.round(lt.diff * 100) / 100], [3437.5, 3125, -312.5], 'demurrage 5.5 h vs 5 h × 15,000/day → USD 312.50 less in B');
 });

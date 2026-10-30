@@ -131,3 +131,95 @@ function xlsx_write(string $file, array $rows, array $opt = []): void
     $zip->addFromString('xl/styles.xml', $styles);
     $zip->close();
 }
+
+// ---------------------------------------------------------------- Reading (SOF import)
+
+/** Files of a zip as name → contents, with ZipArchive or (without the extension) a small central-directory reader. */
+function zip_entries(string $file, array $wanted, bool $noExtension = false): array
+{
+    $out = [];
+    if (class_exists('ZipArchive') && !$noExtension) {
+        $zip = new ZipArchive();
+        if ($zip->open($file) !== true) {
+            return [];
+        }
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = (string) $zip->getNameIndex($i);
+            foreach ($wanted as $re) {
+                if (preg_match($re, $name)) {
+                    $out[$name] = (string) $zip->getFromIndex($i);
+                }
+            }
+        }
+        $zip->close();
+        return $out;
+    }
+    $data = (string) file_get_contents($file);
+    $eocd = strrpos($data, "PK\x05\x06");
+    if ($eocd === false) {
+        return [];
+    }
+    $e = unpack('vdisk/vcd_disk/ventries_disk/ventries/Vsize/Voffset', substr($data, $eocd + 4, 16));
+    $p = $e['offset'];
+    for ($i = 0; $i < $e['entries'] && substr($data, $p, 4) === "PK\x01\x02"; $i++) {
+        $h = unpack('vmade/vneed/vflags/vmethod/vtime/vdate/Vcrc/Vcsize/Vusize/vnlen/velen/vclen/vdisk/viattr/Veattr/Vlocal', substr($data, $p + 4, 42));
+        $name = substr($data, $p + 46, $h['nlen']);
+        $p += 46 + $h['nlen'] + $h['elen'] + $h['clen'];
+        if (!array_filter($wanted, fn($re) => preg_match($re, $name))) {
+            continue;
+        }
+        $l = unpack('vnlen/velen', substr($data, $h['local'] + 26, 4));
+        $raw = substr($data, $h['local'] + 30 + $l['nlen'] + $l['elen'], $h['csize']);
+        $out[$name] = $h['method'] === 8 ? (string) @gzinflate($raw) : $raw;
+    }
+    return $out;
+}
+
+/** First worksheet of an .xlsx as rows of strings (shared strings, inline strings, numbers as stored). */
+function xlsx_read(string $file, int $maxRows = 3000, int $maxCols = 30, bool $noExtension = false): array
+{
+    $files = zip_entries($file, ['#^xl/sharedStrings\.xml$#', '#^xl/worksheets/sheet\d+\.xml$#'], $noExtension);
+    $sheets = array_filter(array_keys($files), fn($n) => str_starts_with($n, 'xl/worksheets/'));
+    natsort($sheets);
+    $sheet = reset($sheets);
+    if (!$sheet) {
+        return [];
+    }
+    $shared = [];
+    if (!empty($files['xl/sharedStrings.xml'])) {
+        $sx = @simplexml_load_string($files['xl/sharedStrings.xml']);
+        foreach ($sx?->si ?? [] as $si) {
+            $shared[] = isset($si->t) ? (string) $si->t : implode('', array_map(fn($r) => (string) $r->t, iterator_to_array($si->r, false)));
+        }
+    }
+    $xml = @simplexml_load_string($files[$sheet]);
+    $rows = [];
+    foreach ($xml?->sheetData->row ?? [] as $row) {
+        $cells = [];
+        foreach ($row->c as $c) {
+            $ref = (string) $c['r'];
+            $col = 0;
+            foreach (str_split(preg_replace('/\d+/', '', $ref)) as $ch) {
+                $col = $col * 26 + (ord($ch) - 64);
+            }
+            $col = max(1, $col) - 1;
+            if ($col >= $maxCols) {
+                continue;
+            }
+            $t = (string) $c['t'];
+            $v = $t === 's' ? ($shared[(int) $c->v] ?? '') : ($t === 'inlineStr' ? (string) $c->is->t : (string) $c->v);
+            $cells[$col] = $v;
+        }
+        if ($cells) {
+            $line = array_fill(0, max(array_keys($cells)) + 1, '');
+            foreach ($cells as $i => $v) {
+                $line[$i] = $v;
+            }
+            $rows[] = $line;
+        }
+        if (count($rows) >= $maxRows) {
+            break;
+        }
+    }
+    return $rows;
+}

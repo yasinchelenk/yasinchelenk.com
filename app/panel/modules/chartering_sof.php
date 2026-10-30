@@ -136,6 +136,9 @@ function module_routes_chartering_sof(): void
         json_response(['ok' => true]);
     }, 'ch-sof');
     route('POST', '/api/chartering/sof-import', 'ch_sof_import', 'ch-sof');
+    route('POST', '/api/chartering/sof-sheet', 'ch_sof_sheet', 'ch-sof');
+    route('GET', '/api/chartering/sofs/{id}/versions', 'ch_sof_versions', 'ch-sof');
+    route('GET', '/api/chartering/sof-history/{id}', 'ch_sof_history_get', 'ch-sof');
     // For the Laytime tab: current version of the SOFs a calculation was made from ("SOF changed — recalculate")
     route('GET', '/api/chartering/sof-versions', function ($p, $in) {
         $ids = array_slice(array_values(array_filter(array_map('intval', explode(',', (string) ($in['ids'] ?? ''))))), 0, 20);
@@ -309,6 +312,53 @@ function ch_sof_checklist(array $sof): void
     foreach ($tasks as $t) {
         ent_update('ch_task', (int) $t['id'], ['status' => 'done', 'note' => 'auto: ' . trim(($sof['ref'] ?? 'SOF') . ' signed ' . date('d.m.Y'))]);
     }
+}
+
+/** Excel import: the first sheet of an .xlsx as rows (CSV is read in the browser). Nothing is stored. */
+function ch_sof_sheet(): never
+{
+    $file = $_FILES['file'] ?? null;
+    if (!is_array($file) || $file['error'] !== UPLOAD_ERR_OK || $file['size'] > 5 * 1024 * 1024) {
+        api_error('Dosya okunamadı (en fazla 5 MB).');
+    }
+    if (strtolower(pathinfo((string) $file['name'], PATHINFO_EXTENSION)) !== 'xlsx' || file_get_contents($file['tmp_name'], false, null, 0, 2) !== 'PK') {
+        api_error('Excel için .xlsx dosyası seçin (eski .xls desteklenmez; Excel’de “Farklı kaydet → .xlsx” veya CSV).');
+    }
+    require_once dirname(__DIR__) . '/lib/xlsx.php';
+    $rows = xlsx_read($file['tmp_name']);
+    $rows || api_error('Sayfada veri bulunamadı.');
+    json_response(['rows' => $rows]);
+}
+
+/**
+ * Saved versions of a SOF, rebuilt from the audit log: v1 = the inserted document, then one version per change
+ * of the document (the same counter as ch_sofs.version). Returns [{ version, gid, at, by }], newest first.
+ */
+function ch_sof_versions(array $p): never
+{
+    $id = (string) (int) $p['id'];
+    // SQLite may reuse the id of a deleted SOF: only history from this SOF's own (latest) creation counts
+    $from = (int) scalar("SELECT MAX(id) FROM gecmis WHERE entity = 'ch_sof' AND entity_id = ? AND action = 'insert'", [$id]);
+    $list = rows("SELECT id, at, actor_name, action FROM gecmis WHERE entity = 'ch_sof' AND entity_id = ? AND is_undo = 0 AND id >= ?
+        AND ((action = 'insert' AND snapshot IS NOT NULL) OR (action = 'update' AND field = 'data')) ORDER BY id", [$id, $from]);
+    $out = [];
+    foreach ($list as $i => $r) {
+        $out[] = ['version' => $i + 1, 'gid' => (int) $r['id'], 'at' => $r['at'], 'by' => $r['actor_name']];
+    }
+    json_response(array_reverse($out));
+}
+
+function ch_sof_history_get(array $p): never
+{
+    $g = row("SELECT * FROM gecmis WHERE id = ? AND entity = 'ch_sof'", [$p['id']]) ?? api_error('Sürüm bulunamadı.', 404);
+    if ($g['action'] === 'insert') {
+        $snap = json_decode((string) $g['snapshot'], true);
+        $data = is_string($snap['data'] ?? null) ? json_decode($snap['data'], true) : ($snap['data'] ?? null);
+    } else {
+        $data = json_decode((string) $g['new_value'], true);
+    }
+    is_array($data) || api_error('Bu sürümün içeriği okunamadı.', 404);
+    json_response(['sof_id' => (int) $g['entity_id'], 'at' => $g['at'], 'by' => $g['actor_name'], 'data' => $data]);
 }
 
 /** Locked SOFs open only with a reason, which goes to the audit log. */

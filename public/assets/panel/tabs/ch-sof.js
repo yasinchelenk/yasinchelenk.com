@@ -14,6 +14,8 @@ import { sofToLaytimePort, mergeIntoCalc } from '../chartering/engine/sof/to-lay
 import { laytimeCalc, timeBar } from '../chartering/engine/laytime.js';
 import { HEADER_FIELDS, HEADER_GROUPS, SOF_TEMPLATES, SOF_STATUS, REMARK_TYPES, QUALIFIERS, SECTIONS, STANDARD_REMARKS, newSof, rowId, templateFromSof, templateKey } from '../chartering/engine/sof/templates.js';
 import { templatesView, dictionaryView, loadTemplates, eventEditor } from '../chartering/sof-admin.js';
+import { importDialog, compareView } from '../chartering/sof-io.js';
+import { mergeImported } from '../chartering/engine/sof/parse.js';
 import { section, fmt } from '../chartering/ui.js';
 
 const STATUS_CAT = { draft: 'cat-gray', in_progress: 'cat-blue', ready: 'cat-yellow', signed: 'cat-green', sent: 'cat-purple', locked: 'cat-brown' };
@@ -56,7 +58,8 @@ export async function mount(el, ctx, param) {
     // ================================================================ List / Templates / Dictionary
 
     let listView = store.get('ch_sof_view', 'sofs');
-    const viewSwitch = () => segmented([{ value: 'sofs', label: 'SOFs' }, { value: 'templates', label: 'Templates' }, { value: 'dictionary', label: 'Event dictionary' }],
+    let compareA = null;
+    const viewSwitch = () => segmented([{ value: 'sofs', label: 'SOFs' }, { value: 'compare', label: 'Compare' }, { value: 'templates', label: 'Templates' }, { value: 'dictionary', label: 'Event dictionary' }],
         listView, (v) => { listView = v; store.set('ch_sof_view', v); showList(); });
 
     async function showList() {
@@ -66,6 +69,11 @@ export async function mount(el, ctx, param) {
         if (listView !== 'sofs') {
             const box = h('div.ch-board');
             fill(body, h('div.toolbar', h('strong', 'SOF'), viewSwitch()), box);
+            if (listView === 'compare') {
+                await compareView(box, { list: await get('chartering/sofs'), dict, ports, canLaytime: ctx.allowed('ch-laytime'), initialA: compareA });
+                compareA = null;
+                return;
+            }
             await (listView === 'templates' ? templatesView : dictionaryView)(box, { dict, canEdit, refresh: loadRefs });
             return;
         }
@@ -235,6 +243,7 @@ export async function mount(el, ctx, param) {
                 h('span.spacer'),
                 h('button', { type: 'button', title: 'Bölümlerin sırası, gizleme ve özel bölüm', on: { click: (e) => sectionsMenu(e.currentTarget) } }, 'Sections ▾'),
                 canEdit ? h('button', { type: 'button', title: 'Bu SOF’un yapısını (olay sırası, bölümler, alanlar, remark ve imzalar) şablon olarak kaydet', on: { click: saveAsTemplate } }, 'Save as template…') : null,
+                h('button', { type: 'button', title: 'Eski bir sürümle, başka bir SOF’la veya agent’ın metniyle karşılaştır', on: { click: async () => { if (dirty) await save(); compareA = cur.id; listView = 'compare'; store.set('ch_sof_view', 'compare'); showList(); } } }, 'Compare…'),
                 cur.laytime_id ? h('span.ch-cell-gap',
                     cur.laytime_version === cur.version ? h('span.ch-badge.green', { title: `Laytime v${cur.laytime_version}` }, 'in Laytime') : h('span.ch-badge.amber', { title: `Laytime hesabı v${cur.laytime_version} ile yapıldı, SOF şimdi v${cur.version}` }, 'SOF changed — resend'),
                     ctx.allowed('ch-laytime') ? h('button.ch-link', { type: 'button', on: { click: () => ctx.open('ch-laytime', { openId: cur.laytime_id }) } }, 'Open ↗') : null) : null,
@@ -810,6 +819,15 @@ export async function mount(el, ctx, param) {
         fill(eventsBox,
             !ro() ? h('div.toolbar',
                 h('button.tiny', { type: 'button', on: { click: () => addRow(analysis.timed.at(-1)?.id ?? null) } }, '+ Event'),
+                h('button.tiny', { type: 'button', title: 'Agent’ın e-posta metnini veya Excel / CSV dosyasını satırlara ayır', on: { click: () => importDialog({
+                    dict, call: doc.call, lastDate: analysis.timed.length ? local(analysis.timed.at(-1).ms, tz).date : null,
+                    onApply: (rows) => {
+                        const m = mergeImported(doc.events, rows, rowId);
+                        doc.events = m.events;
+                        changed({ redraw: true });
+                        toast(`${m.filled} şablon satırı dolduruldu, ${m.added} satır eklendi.`);
+                    },
+                }) } }, 'Import text / Excel…'),
                 h('button.tiny', { type: 'button', title: `Liman yerel saati (${tz})`, on: { click: () => { const n = nowLocal(tz); addRow(analysis.timed.at(-1)?.id ?? null, { date: n.date, time: n.time }); } } }, 'Now'),
                 h('span.dim', `Times in port local time — ${tz} (${offset}). Enter = new row · “Rain” + later “Work resumed” makes one stoppage · 2215 → 0140 rolls to the next day.`)) : null,
             h('div.ch-scroll', h('table.ch-table.ch-edit.ch-sof-events', head,

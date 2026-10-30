@@ -134,13 +134,16 @@ export function matchEvent(text, dict) {
         for (const a of names) {
             let score = 0;
             if (s === a) score = 100;
-            else if ((' ' + s + ' ').includes(' ' + a + ' ')) score = 50 + a.length;
+            // contained: confident for a phrase ("rain stopped work") or when it is most of the text, only a guess for one word
+            // (between single-word guesses the word that comes first in the text wins: "bunkering commenced")
+            else if ((' ' + s + ' ').includes(' ' + a + ' ')) score = a.includes(' ') || a.length >= s.length * 0.6 ? 50 + a.length : 30 + Math.min(a.length, 19) - Math.min(9, Math.floor((' ' + s + ' ').indexOf(' ' + a + ' ') / 8));
             else {
                 const at = a.split(' ');
                 const hit = at.filter((w) => w.length > 2 && s.split(' ').includes(w)).length;
                 if (hit && hit === at.filter((w) => w.length > 2).length) score = 20 + hit * 5;
             }
-            if (score && (!best || score > best.score)) best = { code: d.code, score };
+            if (score && score < 50 && d.code === 'stopped') score -= 15;   // "heavy rain, stopped": the reason beats the generic stop
+            if (score > 0 && (!best || score > best.score)) best = { code: d.code, score };
         }
     }
     return best;
