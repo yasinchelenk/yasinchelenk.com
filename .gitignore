@@ -32,3 +32,4 @@ proforma-v78-netship.md
 
 # Makineye / sunucuya özel ayarlar
 app/config.local.php
+tests/__fixtures__/

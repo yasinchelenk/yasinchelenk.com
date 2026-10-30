@@ -12,7 +12,9 @@ const PANEL_SCHEMA_BASE = 100;
 
 function panel_storage(string $file = ''): string
 {
-    return dirname(__DIR__, 3) . '/storage' . ($file === '' ? '' : '/' . ltrim($file, '/'));
+    // Command-line tools (tests) may work on a copy: PANEL_STORAGE=/tmp/x php bin/… — never honoured on the web
+    $base = PHP_SAPI === 'cli' && getenv('PANEL_STORAGE') ? rtrim((string) getenv('PANEL_STORAGE'), '/\\') : dirname(__DIR__, 3) . '/storage';
+    return $base . ($file === '' ? '' : '/' . ltrim($file, '/'));
 }
 
 function db(): PDO
@@ -107,6 +109,8 @@ function panel_migrations(): array
         114 => 'chartering_migrate_114',
         // Market: endeks değerinin kaynaktan alındığı zaman (HandyBulk güncellemesi)
         115 => 'chartering_migrate_115',
+        // Data Sources (HandyBulk): import log, review list, endeks değerlerinin kaynağı
+        116 => 'chartering_migrate_116',
     ];
 }
 

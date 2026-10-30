@@ -1,16 +1,16 @@
 // CHARTERING · Market Dashboard (spec §3): Baltic indices & TC earnings, charter rates, period/route TC,
 // bunker prices, weekly comments, news links and upcoming deadlines. Data is typed or pasted; Baltic indices can also be
 // read on demand from HandyBulk's BDI page through the server (robots.txt checked, cached, numbers only).
-import { h, fill, toast, store, fmtDate, fmtDateTime, debounce } from '../core/dom.js';
-import { api, get, post, put, del } from '../core/api.js';
-import { modal, confirmBox, popover } from '../core/ui.js';
+import { h, fill, toast, store, fmtDate, debounce } from '../core/dom.js';
+import { get, post, put, del } from '../core/api.js';
+import { modal, confirmBox, popover, segmented } from '../core/ui.js';
 import { live } from '../core/live.js';
 import { INDICES, TC_CODES, SEGMENT_TABS, SEGMENTS, PERIOD_SIZES, ROUTES, BUNKER_PORTS, parseBaltic, parseRates, parseBunkers, latestWithChange, isLocalRoute } from '../chartering/engine/market.js';
 import { lineChart, SERIES_COLORS } from '../chartering/chart.js';
 import { regionHint } from '../chartering/regions.js';
 import { parseNum, fmt, usd, dueBadge } from '../chartering/ui.js';
 import { LESSONS } from '../chartering/links.js';
-import { readDays, archiveLinks } from '../chartering/engine/handybulk.js';
+import { runAdapter, sourcesView } from '../chartering/sources.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const WEEKLY = ['Capesize', 'Panamax', 'Supramax / Ultramax', 'Handysize'];
@@ -120,89 +120,22 @@ export async function mount(el, ctx) {
             chart({ series, format: (v) => (ui.index === 'TC' ? usd(v) : fmt(v, 0)), title: ui.index === 'TC' ? 'TC earnings' : INDICES[ui.index].label }),
         ], {
             actions: canEdit ? [
-                h('button.tiny', { type: 'button', title: 'HandyBulk BDI sayfasındaki günlük raporları sunucu üzerinden okur (robots.txt kontrollü, 12 saat önbellek); yalnızca eksik günler eklenir', on: { click: (e) => handybulkMenu(e.currentTarget) } }, 'Update from HandyBulk ▾'),
+                h('button.tiny', { type: 'button', title: 'HandyBulk BDI sayfası sunucuda çekilir ve okunur (robots.txt, 12 saat önbellek); elle girilenler ezilmez, farklar Review’e düşer', on: { click: (e) => handybulkMenu(e.currentTarget) } }, 'Update from HandyBulk ▾'),
                 h('button.tiny', { type: 'button', on: { click: () => balticDialog() } }, '+ Daily / paste report'),
             ] : null,
             links: [LESSONS.bdi],
         });
     }
 
-    // ------------------------------------------------------------ HandyBulk (server fetch on demand, numbers only)
+    // ------------------------------------------------------------ HandyBulk (Data Sources; fetched and parsed on the server)
 
-    async function handybulkMenu(anchor) {
-        const st = await get('chartering/market/handybulk/status');
+    function handybulkMenu(anchor) {
         let pop;
-        const item = (label, hint, fn, disabled = false) => h('button.ctx-menu__item', { type: 'button', disabled, on: { click: () => { pop.close(); fn().catch(() => {}); } } },
-            h('span.ctx-menu__label', label), hint ? h('small.ctx-menu__hint', hint) : null);
+        const item = (label, hint, fn) => h('button.ctx-menu__item', { type: 'button', on: { click: () => { pop.close(); fn(); } } }, h('span.ctx-menu__label', label), hint ? h('small.ctx-menu__hint', hint) : null);
         pop = popover(anchor, h('div',
-            item('Update now', st.cached_at ? `cached ${fmtDateTime(st.cached_at, true)}` : `${st.fetches_left_today} fetches left today`, updateFromHandybulk, !st.cached_at && !st.fetches_left_today),
-            item('Import history (monthly archive)…', st.history_done ? `done ${fmtDateTime(st.history_done, true)}` : 'one time, 5 s between pages', importHandybulkHistory, !!st.history_done),
-            h('div.ctx-menu__sep'),
-            h('div.dim', { style: { padding: '4px 10px', fontSize: '11.5px', maxWidth: '300px' } }, `Sunucu “${st.user_agent}” olarak istek yapar; robots.txt’e uyar, sayfayı 12 saat önbellekte tutar. Yalnızca sayısal değerler kaydedilir.`)), { align: 'right' });
+            item('Update now', 'Baltic Dry Index page', async () => { const r = await runAdapter('bdi', { onManual: () => balticDialog() }); if (r && (r.added || r.updated)) load(); }),
+            item('Data sources…', 'all adapters, log, review', () => setView('sources'))), { align: 'right' });
     }
-
-    /** Server fetch → dated daily paragraphs → parseBaltic → insert-only (existing days are kept). */
-    async function updateFromHandybulk() {
-        let r;
-        try {
-            r = await get('chartering/market/handybulk');
-        } catch (e) {
-            if (e.data?.manual) balticDialog();
-            return;
-        }
-        const days = readDays(r.html);
-        if (!days.length) {
-            toast('HandyBulk sayfasında günlük rapor bulunamadı (site biçimi değişmiş olabilir). Raporu elle yapıştırın.', 'error', 8000);
-            balticDialog();
-            return;
-        }
-        const res = await post('chartering/market/indices-import', { source: 'handybulk', fetched_at: r.fetched_at, days });
-        toast(`HandyBulk${r.cached ? ' (önbellek)' : ''}: ${res.added_days} gün eklendi, ${res.skipped_days} gün zaten vardı — ${days[days.length - 1].date.split('-').reverse().join('.')} – ${days[0].date.split('-').reverse().join('.')}.`, 'ok', 7000);
-        if (res.added_days) load();
-    }
-
-    /** One-time history import: the monthly archive pages one by one, at least 5 s apart. */
-    async function importHandybulkHistory() {
-        const main = await get('chartering/market/handybulk').catch(() => null);
-        if (!main) return;
-        const links = archiveLinks(main.html);
-        if (!links.length) { toast('Arşiv bağlantısı bulunamadı (site biçimi değişmiş olabilir).', 'error'); return; }
-        let stop = false;
-        let total = { added: 0, skipped: 0, pages: 0, empty: 0, failed: 0 };
-        const bar = h('progress', { max: links.length, value: 0, style: { width: '100%' } });
-        const status = h('p.dim', `${links.length} aylık sayfa, en az 5 sn arayla ≈ ${Math.ceil(links.length * 5.5 / 60)} dk.`);
-        const m = modal({ title: 'Import HandyBulk history', width: 560, body: h('div.ch-entry-wrap', h('p', 'Arşivdeki her ay sırayla okunur; veritabanında olan günler atlanır. Pencereyi kapatırsanız durur.'), bar, status),
-            onClose: () => { stop = true; },
-            actions: [{ label: 'Stop', onClick: () => { stop = true; } }] });
-        const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
-        for (const [i, path] of links.entries()) {
-            if (stop) break;
-            status.textContent = `${i + 1} / ${links.length}: ${path}`;
-            await sleep(5500);
-            if (stop) break;
-            let r = null;
-            for (let attempt = 0; attempt < 3 && !r && !stop; attempt++) {
-                try {
-                    r = await api('GET', 'chartering/market/handybulk', { path }, { quiet: true });
-                } catch (e) {
-                    if (e.status === 429 && e.data?.retry_after) await sleep((e.data.retry_after + 1) * 1000);
-                    else { status.textContent = `${path}: ${e.message}`; break; }
-                }
-            }
-            bar.value = i + 1;
-            if (!r) { total.failed++; continue; }
-            const days = readDays(r.html);
-            if (!days.length) { total.empty++; continue; }   // e.g. an old month with only a news item
-            const res = await post('chartering/market/indices-import', { source: 'handybulk', fetched_at: r.fetched_at, days });
-            total = { ...total, added: total.added + res.added_days, skipped: total.skipped + res.skipped_days, pages: total.pages + 1 };
-        }
-        const summary = `${total.pages} sayfa, ${total.added} gün eklendi, ${total.skipped} gün zaten vardı${total.empty ? `, ${total.empty} sayfada günlük endeks yok` : ''}${total.failed ? `, ${total.failed} sayfa alınamadı` : ''}`;
-        if (!stop) await post('chartering/market/handybulk/history-done', { summary });
-        m.close();
-        toast(`HandyBulk geçmişi: ${summary}${stop ? ' (durduruldu — tekrar başlatılabilir)' : ''}.`, 'ok', 9000);
-        load();
-    }
-
     function balticDialog() {
         const date = h('input', { type: 'date', value: today() });
         const source = h('input', { type: 'text', placeholder: 'Source (e.g. Baltic Exchange daily report)' });
@@ -520,9 +453,24 @@ export async function mount(el, ctx) {
         rangeSel.querySelectorAll('button').forEach((b) => b.classList.toggle('is-on', b === e.currentTarget));
         draw();
     } } }, label)));
-    el.append(h('div.toolbar', h('strong', 'Market Dashboard'), h('span.dim', 'Range'), rangeSel, h('span.count', 'Veriler elle girilir, yapıştırılır veya HandyBulk’tan istenince alınır.')), body);
+    // Dashboard | Data sources (HandyBulk adapters, import log, review list)
+    let view = store.get('ch_mkt_view', 'dashboard');
+    const sourcesBox = h('div.ch-board');
+    const viewSeg = h('span');
+    const rangeWrap = h('span.ch-inline', h('span.dim', 'Range'), rangeSel);
+    function setView(v) {
+        view = v;
+        store.set('ch_mkt_view', v);
+        viewSeg.replaceChildren(segmented([{ value: 'dashboard', label: 'Dashboard' }, { value: 'sources', label: 'Data sources' }], view, setView));
+        body.hidden = view !== 'dashboard';
+        rangeWrap.hidden = view !== 'dashboard';
+        sourcesBox.hidden = view !== 'sources';
+        if (view === 'sources') sourcesView(sourcesBox, { canEdit, onManual: () => { setView('dashboard'); balticDialog(); }, onChanged: load }).catch(() => {});
+    }
+    el.append(h('div.toolbar', h('strong', 'Market Dashboard'), viewSeg, rangeWrap, h('span.count', 'Veriler elle girilir, yapıştırılır veya HandyBulk’tan alınır (Data sources).')), body, sourcesBox);
     body.append(h('div.empty-state', 'Yükleniyor…'));
     await load();
+    setView(view);
 
     const reload = debounce(load, 500);
     const offs = ['ch_market', 'ch_rate', 'ch_note'].map((e) => live.on(e, (c) => { if (!c.mine) reload(); }));
