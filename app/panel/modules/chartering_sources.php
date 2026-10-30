@@ -80,6 +80,25 @@ function chartering_migrate_118(PDO $pdo): void
         SQL);
 }
 
+/** Migration 119: fixtures reported in the weekly commentary, Baltic route values (numbers only — no sentences). */
+function chartering_migrate_119(PDO $pdo): void
+{
+    $pdo->exec(<<<'SQL'
+        CREATE TABLE ch_market_fixtures (
+            id INTEGER PRIMARY KEY, report_date TEXT NOT NULL, segment TEXT NOT NULL, dwt INTEGER, open_region TEXT, via TEXT, to_region TEXT,
+            type TEXT NOT NULL DEFAULT 'trip', rate REAL NOT NULL, ballast_bonus REAL,
+            source TEXT, source_url TEXT, as_of_date TEXT, fetched_at TEXT, import_run_id INTEGER,
+            created_at TEXT, created_by TEXT, updated_at TEXT, updated_by TEXT
+        );
+        CREATE INDEX idx_ch_mfix_date ON ch_market_fixtures(report_date, segment);
+        CREATE TABLE ch_route_rates (
+            id INTEGER PRIMARY KEY, date TEXT NOT NULL, code TEXT NOT NULL, point TEXT NOT NULL, value REAL NOT NULL, unit TEXT NOT NULL,
+            source TEXT, source_url TEXT, as_of_date TEXT, fetched_at TEXT, import_run_id INTEGER,
+            created_at TEXT, created_by TEXT, updated_at TEXT, updated_by TEXT, UNIQUE (date, code, point)
+        );
+        SQL);
+}
+
 /** Plausibility ranges (spec §3): outside → not written, goes to review. */
 const HB_RANGES = [
     'index' => [0, 20000], 'tc' => [1000, 250000], 'bb' => [0, 5000000], 'bunker' => [100, 3000], 'route_t' => [1, 100],
@@ -93,7 +112,7 @@ function hb_adapters(): array
         'bdi' => ['label' => 'Baltic Dry Index', 'path' => '/baltic-dry-index/', 'implemented' => true, 'targets' => 'Baltic indices, TC earnings'],
         'bunker' => ['label' => 'Ship Bunker', 'path' => '/ship-bunker/', 'implemented' => true, 'targets' => 'Bunker prices (VLSFO, MGO, …)'],
         'rates' => ['label' => 'Ship Charter Rates', 'path' => '/ship-charter-rates/', 'implemented' => true, 'targets' => 'Trip & period rates, week route TC, 1-year TC'],
-        'weekly' => ['label' => 'BDI weekly reports', 'path' => '/baltic-dry-index/', 'implemented' => false, 'phase' => 5, 'targets' => 'Reported fixtures, route values'],
+        'weekly' => ['label' => 'BDI weekly reports', 'path' => '/baltic-dry-index/', 'implemented' => true, 'targets' => 'Reported fixtures, route values (C3, C5, 5TC …)'],
         'news' => ['label' => 'Dry Bulk Shipping News', 'path' => '/dry-bulk-shipping-news/', 'implemented' => false, 'phase' => 6, 'targets' => 'Dates + links (no text)'],
         'lessons' => ['label' => 'Chartering Lessons', 'path' => '/chartering-lessons/', 'implemented' => false, 'phase' => 6, 'targets' => 'Lesson titles + links, categories'],
     ];
@@ -201,7 +220,8 @@ function hb_run(string $key, string $trigger, array $opt = []): array
     $ctx = ['run_id' => $runId, 'url' => $res['url'], 'fetched_at' => $res['fetched_at'] ?? now(), 'adapter' => $key];
     try {
         [$counts, $asOf, $msg] = match ($key) {
-            'bdi' => hb_import_bdi($res['html'], $ctx),
+            'bdi' => $trigger === 'history' ? hb_import_bdi_history($res['html'], $ctx) : hb_import_bdi($res['html'], $ctx),
+            'weekly' => hb_import_weekly($res['html'], $ctx),
             'bunker' => hb_import_bunker($res['html'], $ctx),
             'rates' => hb_import_rates($res['html'], $ctx),
         };
@@ -414,6 +434,142 @@ function hb_bunker_write(?array $cur, array $base, array $grades, ?int $runId, s
     }
 }
 
+/** History import of one archive month: daily index paragraphs and the weekly commentary values of the same page. */
+function hb_import_bdi_history(string $html, array $ctx): array
+{
+    $c = ['added' => 0, 'updated' => 0, 'skipped' => 0, 'review' => 0];
+    $asOf = null;
+    $msgs = [];
+    foreach (['hb_import_weekly', 'hb_import_bdi'] as $fn) {
+        try {
+            [$x, $a, $m] = $fn($html, $ctx);
+        } catch (HbFormatChanged) {
+            continue;
+        }
+        foreach ($c as $k => $v) {
+            $c[$k] = $v + $x[$k];
+        }
+        $asOf = max($asOf ?? '', $a ?? '') ?: null;
+        $msgs[] = $m;
+    }
+    if (!$msgs) {
+        throw new HbFormatChanged('No daily index paragraphs or weekly reports on this archive page.');
+    }
+    return [$c, $asOf, implode(' · ', $msgs)];
+}
+
+// ---------------------------------------------------------------- BDI weekly reports adapter
+
+/** @return array{0: array, 1: ?string, 2: ?string} counts, as-of date, message */
+function hb_import_weekly(string $html, array $ctx): array
+{
+    $weeks = array_filter(hb_parse_weekly($html)['weeks'], fn($w) => $w['fixtures'] || $w['routes']);
+    if (!$weeks) {
+        throw new HbFormatChanged('Format changed: weekly reports (“19-October-2026” + bold segment heading + fixtures such as “A 64,000 DWT ultramax bulk carrier … at approximately $36,000”) not found. Nothing was written.');
+    }
+    $c = ['added' => 0, 'updated' => 0, 'skipped' => 0, 'review' => 0];
+    db()->beginTransaction();
+    try {
+        foreach ($weeks as $w) {
+            foreach ($w['fixtures'] as $f) {
+                hb_upsert_fixture($w['date'], $f, $ctx, $c);
+            }
+            foreach ($w['routes'] as $r) {
+                hb_upsert_route($w['date'], $r, $ctx, $c);
+            }
+        }
+        db()->commit();
+    } catch (Throwable $e) {
+        db()->rollBack();
+        throw $e;
+    }
+    $dates = array_column($weeks, 'date');
+    return [$c, max($dates), count($weeks) . ' weekly reports ' . min($dates) . ' … ' . max($dates) . ': ' . array_sum(array_map(fn($w) => count($w['fixtures']), $weeks)) . ' fixtures, '
+        . array_sum(array_map(fn($w) => count($w['routes']), $weeks)) . ' route values'];
+}
+
+/** Reported fixture, key (report_date, segment, dwt, open, to, rate); via / type / BB are updated on the same key. */
+function hb_upsert_fixture(string $date, array $f, array &$ctx, array &$c): void
+{
+    $row = ['report_date' => $date, 'segment' => $f['segment'], 'dwt' => $f['dwt'] ?: null, 'open_region' => hb_region_ctx($f['open'], $ctx, $c),
+        'via' => hb_region_ctx($f['via'], $ctx, $c), 'to_region' => hb_region_ctx($f['to'], $ctx, $c), 'type' => $f['type'], 'rate' => $f['rate'], 'ballast_bonus' => $f['bb']];
+    $key = implode('|', [$date, $row['segment'], $row['dwt'], $row['open_region'], $row['to_region'], $row['rate']]);
+    $what = "{$row['dwt']} dwt {$row['segment']} {$row['open_region']}" . ($row['to_region'] ? " → {$row['to_region']}" : '') . " ({$row['type']})";
+    [$lo, $hi] = HB_RANGES['tc'];
+    [$blo, $bhi] = HB_RANGES['bb'];
+    if ($row['rate'] === null || $row['rate'] < $lo || $row['rate'] > $hi || ($row['ballast_bonus'] !== null && ($row['ballast_bonus'] < $blo || $row['ballast_bonus'] > $bhi))) {
+        hb_review($ctx, 'range', 'ch_market_fixtures', $key, $row + ['url' => $ctx['url']], "Fixture {$what} {$date}: {$row['rate']}" . ($row['ballast_bonus'] !== null ? " + BB {$row['ballast_bonus']}" : '') . ' outside the plausible range');
+        $c['review']++;
+        $c['skipped']++;
+        return;
+    }
+    $cur = row('SELECT * FROM ch_market_fixtures WHERE report_date = ? AND segment = ? AND dwt IS ? AND open_region IS ? AND to_region IS ? AND rate = ?',
+        [$date, $row['segment'], $row['dwt'], $row['open_region'], $row['to_region'], $row['rate']]);
+    if ($cur && $cur['via'] === $row['via'] && $cur['type'] === $row['type'] && (float) ($cur['ballast_bonus'] ?? -1) === (float) ($row['ballast_bonus'] ?? -1)) {
+        $c['skipped']++;
+        return;
+    }
+    if ($cur && ($cur['source'] ?? '') !== 'handybulk') {
+        $c['skipped']++;   // a manual / edited row: left alone
+        return;
+    }
+    $set = ['via' => $row['via'], 'type' => $row['type'], 'ballast_bonus' => $row['ballast_bonus'], 'source' => 'handybulk', 'source_url' => $ctx['url'], 'as_of_date' => $date,
+        'fetched_at' => $ctx['fetched_at'], 'import_run_id' => $ctx['run_id'], 'updated_at' => now(), 'updated_by' => 'HandyBulk'];
+    if ($cur) {
+        update('ch_market_fixtures', $cur['id'], $set);
+        gecmis_log('ch_market', "fixture:{$key}", "Reported fixture {$what} {$date}", 'fixture', 'islem', "{$cur['type']} via {$cur['via']} BB {$cur['ballast_bonus']}", "{$row['type']} via {$row['via']} BB {$row['ballast_bonus']}");
+        $c['updated']++;
+    } else {
+        insert('ch_market_fixtures', array_intersect_key($row, array_flip(['report_date', 'segment', 'dwt', 'open_region', 'to_region', 'rate'])) + $set + ['created_at' => now(), 'created_by' => 'HandyBulk']);
+        $c['added']++;
+    }
+}
+
+/** Baltic route value, key (date, code, point); USD/t routes 1–100, TC averages in the TC range. */
+function hb_upsert_route(string $date, array $r, array $ctx, array &$c): void
+{
+    [$lo, $hi] = $r['unit'] === 'USD/t' ? HB_RANGES['route_t'] : HB_RANGES['tc'];
+    $key = "{$date}|{$r['code']}|{$r['point']}";
+    $data = ['date' => $date] + $r + ['url' => $ctx['url']];
+    if ($r['value'] < $lo || $r['value'] > $hi) {
+        hb_review($ctx, 'range', 'ch_route_rates', $key, $data, "Route {$r['code']} ({$r['point']}) week of {$date}: {$r['value']} {$r['unit']} outside {$lo}–{$hi}");
+        $c['review']++;
+        $c['skipped']++;
+        return;
+    }
+    $cur = row('SELECT * FROM ch_route_rates WHERE date = ? AND code = ? AND point = ?', [$date, $r['code'], $r['point']]);
+    if ($cur && abs((float) $cur['value'] - $r['value']) < 0.0005) {
+        $c['skipped']++;
+        return;
+    }
+    if ($cur && ($cur['source'] ?? '') !== 'handybulk') {
+        hb_review($ctx, 'conflict', 'ch_route_rates', $key, $data + ['manual' => (float) $cur['value']], "Route {$r['code']} ({$r['point']}) week of {$date}: manual {$cur['value']} vs HandyBulk {$r['value']} — manual value kept");
+        $c['review']++;
+        $c['skipped']++;
+        return;
+    }
+    hb_route_write($cur, $data, $ctx['run_id'], $ctx['fetched_at'], 'HandyBulk');
+    if ($cur) {
+        gecmis_log('ch_market', "route:{$key}", "Route {$r['code']} {$r['point']} {$date}", 'value', 'islem', $cur['value'], "{$r['value']} · HandyBulk run {$ctx['run_id']}");
+        $c['updated']++;
+    } else {
+        $c['added']++;
+    }
+}
+
+function hb_route_write(?array $cur, array $d, ?int $runId, string $fetchedAt, string $by): void
+{
+    $set = ['value' => (float) $d['value'], 'unit' => $d['unit'], 'updated_at' => now(), 'updated_by' => $by];
+    if (!$cur || ($cur['source'] ?? '') === 'handybulk') {
+        $set += ['source' => 'handybulk', 'source_url' => $d['url'] ?? null, 'as_of_date' => $d['date'], 'fetched_at' => $fetchedAt, 'import_run_id' => $runId];
+    }
+    if ($cur) {
+        update('ch_route_rates', $cur['id'], $set);
+        return;
+    }
+    insert('ch_route_rates', ['date' => $d['date'], 'code' => $d['code'], 'point' => $d['point'], 'created_at' => now(), 'created_by' => $by] + $set);
+}
+
 // ---------------------------------------------------------------- Charter Rates adapter
 
 /** Saved region mappings (Review → "Map"): lower-case name → code. */
@@ -609,6 +765,9 @@ function hb_region_map(string $name, string $code): int
     }
     $n = q('UPDATE ch_charter_rates SET open_region = ? WHERE open_region = ?', [$code, $name])->rowCount();
     $n += q('UPDATE ch_charter_rates SET to_region = ? WHERE to_region = ?', [$code, $name])->rowCount();
+    foreach (['open_region', 'via', 'to_region'] as $col) {
+        $n += q("UPDATE ch_market_fixtures SET {$col} = ? WHERE {$col} = ?", [$code, $name])->rowCount();
+    }
     foreach (rows("SELECT id, via FROM ch_charter_rates WHERE via LIKE ? ESCAPE '\\'", ['%' . addcslashes($name, '%_\\') . '%']) as $r) {
         $parts = array_map(fn($v) => $v === $name ? $code : $v, explode(', ', $r['via']));
         if (implode(', ', $parts) !== $r['via']) {
@@ -653,6 +812,18 @@ function ch_sources_review_resolve(array $p, array $in): never
     if ($action === 'accept' && $r['target'] === 'ch_tc_rates' && in_array($r['kind'], ['conflict', 'range'], true)) {
         hb_tc_write(row('SELECT * FROM ch_tc_rates WHERE date = ? AND kind = ? AND label = ?', [$d['date'], $d['kind'], $d['label']]), $d, $r['run_id'] === null ? null : (int) $r['run_id'], now(), actor()['name']);
         gecmis_log('ch_market', $r['record_key'], "TC {$d['label']} {$d['date']}", 'rate', 'islem', $d['manual'] ?? null, "{$d['value']} (review accepted)");
+        feed('ch_market', 'update', null, 'handybulk');
+    }
+    if ($action === 'accept' && $r['target'] === 'ch_route_rates' && in_array($r['kind'], ['conflict', 'range'], true)) {
+        hb_route_write(row('SELECT * FROM ch_route_rates WHERE date = ? AND code = ? AND point = ?', [$d['date'], $d['code'], $d['point']]), $d, $r['run_id'] === null ? null : (int) $r['run_id'], now(), actor()['name']);
+        gecmis_log('ch_market', 'route:' . $r['record_key'], "Route {$d['code']} {$d['point']} {$d['date']}", 'value', 'islem', $d['manual'] ?? null, "{$d['value']} (review accepted)");
+        feed('ch_market', 'update', null, 'handybulk');
+    }
+    if ($action === 'accept' && $r['target'] === 'ch_market_fixtures' && $r['kind'] === 'range') {
+        insert('ch_market_fixtures', array_intersect_key($d, array_flip(['report_date', 'segment', 'dwt', 'open_region', 'via', 'to_region', 'type', 'rate', 'ballast_bonus']))
+            + ['source' => 'handybulk', 'source_url' => $d['url'] ?? null, 'as_of_date' => $d['report_date'], 'fetched_at' => now(), 'import_run_id' => $r['run_id'],
+                'created_at' => now(), 'created_by' => actor()['name'], 'updated_at' => now(), 'updated_by' => actor()['name']]);
+        gecmis_log('ch_market', 'fixture:' . $r['record_key'], "Reported fixture {$d['segment']} {$d['report_date']}", 'fixture', 'islem', null, "{$d['rate']} (review accepted)");
         feed('ch_market', 'update', null, 'handybulk');
     }
     if ($action === 'accept' && $r['target'] === 'ch_region_aliases') {

@@ -115,6 +115,8 @@ function panel_migrations(): array
         117 => 'chartering_migrate_117',
         // Data Sources (HandyBulk): charter / period / TC rate kaynakları, trip/period ayrımı, rota tablolarının haftası, bölge eşlemeleri
         118 => 'chartering_migrate_118',
+        // Data Sources (HandyBulk): haftalık yorumlardaki fixture'lar ve Baltic rota değerleri (yalnızca sayılar)
+        119 => 'chartering_migrate_119',
     ];
 }
 

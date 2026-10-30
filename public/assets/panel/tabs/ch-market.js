@@ -58,7 +58,7 @@ export async function mount(el, ctx) {
         fill(body,
             summaryStrip(idx, bunk, bunkMgo),
             h('div.ch-dash__grid',
-                h('div.ch-dash__col', balticCard(idx), ratesCard(), weeklyCard()),
+                h('div.ch-dash__col', balticCard(idx), ratesCard(), fixturesCard(), weeklyCard()),
                 h('div.ch-dash__col', upcomingCard(), bunkerCard(bunk), tcCard(), newsCard())),
         );
     }
@@ -196,7 +196,7 @@ export async function mount(el, ctx) {
             h('div.ch-dash__chartbar', seg,
                 h('label.check', h('input', { type: 'checkbox', checked: ui.localOnly, on: { change: (e) => { ui.localOnly = e.target.checked; saveUi(); draw(); } } }), 'Türkiye / Med / Black Sea only')),
             rows.length ? h('div.ch-scroll.ch-dash__tall', h('table.ch-table',
-                h('thead', h('tr', ['Date', 'Segment', 'Open', 'Via', 'To', 'Rate USD/day', 'BB', hasNote ? 'Note' : null, ''].filter((x) => x !== null).map((x, i) => h('th', { class: i === 5 || i === 6 ? 'r' : '' }, x)))),
+                h('thead', h('tr', ['Date', 'Segment', 'Open', 'Via', 'To', 'USD/day', 'BB', hasNote ? 'Note' : null, ''].filter((x) => x !== null).map((x, i) => h('th', { class: i === 5 || i === 6 ? 'r' : '' }, x)))),
                 h('tbody', rows.slice(0, 200).map((r) => h('tr',
                     h('td', { style: { whiteSpace: 'nowrap' } }, fmtDate(r.date), ' ', sourceBadge(r, { short: true })), h('td', r.segment), h('td', region(r.open_region)), h('td', region(r.via)),
                     h('td', r.kind === 'period' ? h('span.ch-badge.purple', { title: 'Period time charter' }, `period${r.period_months ? ` · ${fmt(r.period_months, 0)} mo` : ''}`) : region(r.to_region)),
@@ -389,6 +389,39 @@ export async function mount(el, ctx) {
     }
 
     // ------------------------------------------------------------ Weekly comments, news, upcoming
+
+    // ------------------------------------------------------------ Reported fixtures & route values (HandyBulk weekly reports)
+
+    function fixturesCard() {
+        const fx = (data.fixtures ?? []).filter((r) => (ui.rateTab === 'All' || SEGMENT_TABS[ui.rateTab]?.includes(r.segment)) && (!ui.localOnly || isLocalRoute(r)));
+        const region = (txt) => h('span', { title: regionHint(txt) || null, class: regionHint(txt) ? 'ch-abbr' : '' }, txt ?? '');
+        // Latest week per route code: open / close / single side by side
+        const byCode = new Map();
+        for (const r of data.routes ?? []) {
+            const cur = byCode.get(r.code);
+            if (!cur || r.date > cur.date) byCode.set(r.code, { date: r.date, unit: r.unit, row: r, points: {} });
+            const x = byCode.get(r.code);
+            if (x.date === r.date) x.points[r.point] = r.value;
+        }
+        const routeFmt = (v, unit) => (v === undefined ? '' : unit === 'USD/t' ? `$${fmt(v, 2)}` : usd(v));
+        const routes = [...byCode.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+        if (!fx.length && !routes.length) return null;
+        return card('Reported fixtures & Baltic routes', 'teal', [
+            h('p.dim', `Haftalık piyasa raporlarındaki fixture’lar (yalnızca sayılar; filtre: ${ui.rateTab}${ui.localOnly ? ', Türkiye / Med / Black Sea' : ''}).`),
+            fx.length ? h('div.ch-scroll.ch-dash__tall', h('table.ch-table',
+                h('thead', h('tr', ['Week of', 'Vessel', 'Open', 'Via → To', 'USD/day', 'BB', ''].map((x, i) => h('th', { class: [4, 5].includes(i) ? 'r' : '' }, x)))),
+                h('tbody', fx.slice(0, 150).map((r) => h('tr',
+                    h('td', { style: { whiteSpace: 'nowrap' } }, fmtDate(r.report_date), ' ', sourceBadge({ ...r, date: r.report_date }, { short: true })),
+                    h('td', { style: { whiteSpace: 'nowrap' } }, r.segment, r.dwt ? h('small.dim', ` ${fmt(r.dwt / 1000, 0)}k`) : null), h('td', region(r.open_region)),
+                    h('td', r.via ? h('span.dim', 'via ', region(r.via), ' ') : null, r.type !== 'trip' ? h('span.ch-badge.purple', r.type) : null, r.to_region ? [r.type !== 'trip' ? ' ' : '', '→ ', region(r.to_region)] : null),
+                    h('td.r', usd(r.rate)), h('td.r', r.ballast_bonus ? usd(r.ballast_bonus) : ''),
+                    h('td', canEdit ? h('button.tiny.ghost', { type: 'button', title: 'Sil', on: { click: async () => { await del(`chartering/market/fixtures/${r.id}`); load(); } } }, '✕') : null)))))) : h('p.dim', 'Bu filtrede raporlanan fixture yok.'),
+            routes.length ? h('table.ch-table',
+                h('thead', h('tr', ['Route', 'Week of', 'Open', 'Close', 'Level', 'Unit'].map((x, i) => h('th', { class: i >= 2 && i <= 4 ? 'r' : '' }, x)))),
+                h('tbody', routes.map(([code, x]) => h('tr', h('td', h('b', code)), h('td', fmtDate(x.date), ' ', sourceBadge(x.row, { short: true })),
+                    h('td.r', routeFmt(x.points.open, x.unit)), h('td.r', routeFmt(x.points.close, x.unit)), h('td.r', routeFmt(x.points.single, x.unit)), h('td.dim', x.unit))))) : null,
+        ], { actions: canEdit ? h('button.tiny', { type: 'button', title: 'HandyBulk BDI sayfasındaki haftalık raporlar: fixture’lar ve rota değerleri (cümle metni saklanmaz)', on: { click: (e) => handybulkMenu(e.currentTarget, 'weekly', 'BDI weekly reports', null) } }, 'Update from HandyBulk ▾') : null });
+    }
 
     function weeklyCard() {
         const weekly = data.notes.filter((n) => n.kind === 'weekly');

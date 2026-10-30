@@ -347,3 +347,139 @@ function hb_parse_rates_page(string $html): array
     }
     return $out;
 }
+
+/**
+ * BDI page weekly commentary → ['weeks' => [['date', 'fixtures' => [...], 'routes' => [...]]]].
+ * A weekly block is a "<p>DD-Month-YYYY</p>" followed by a bold segment heading; its body paragraphs are read sentence
+ * by sentence and only the structured values come out — the sentences themselves are never returned.
+ */
+function hb_parse_weekly(string $html): array
+{
+    $doc = hb_dom($html);
+    $weeks = [];
+    $cur = null;
+    foreach (iterator_to_array($doc->getElementsByTagName('p')) as $p) {
+        $t = hb_text($p);
+        if (preg_match('/^\d{1,2}-[A-Za-z]+-\d{4}$/', $t)) {
+            $next = hb_next_element($p);
+            $weekly = $next && $next->nodeName === 'p' && ($next->getElementsByTagName('strong')->length || $next->getElementsByTagName('b')->length);
+            $cur = $weekly && ($d = hb_date($t)) ? $d : null;
+            if ($cur && !isset($weeks[$cur])) {
+                $weeks[$cur] = ['date' => $cur, 'fixtures' => [], 'routes' => []];
+            }
+            continue;
+        }
+        if ($cur === null || $p->getElementsByTagName('strong')->length || str_contains($t, '(BDI) ')) {
+            continue;   // outside a weekly block, a segment heading, or a daily index paragraph
+        }
+        foreach (preg_split('/(?<=[.!?])\s+(?=[A-Z])/u', $t) as $s) {
+            array_push($weeks[$cur]['fixtures'], ...hb_parse_fixture_sentence($s));
+            array_push($weeks[$cur]['routes'], ...hb_parse_route_sentence($s));
+        }
+    }
+    return ['weeks' => array_values($weeks)];
+}
+
+/**
+ * One sentence → reported fixtures [{segment, dwt, open, via, to, type, rate, bb}] (raw region names).
+ * "A 64,000 DWT ultramax bulk carrier opening in Brazil was fixed to Egypt at approximately $36,000, while another …"
+ * Each vessel mention starts a clause; a clause needs a fixing verb and a dollar rate, otherwise it is dropped.
+ */
+function hb_parse_fixture_sentence(string $s): array
+{
+    $s = str_replace(['’s ', "'s "], ' ', preg_replace('/\s+/u', ' ', $s));
+    if (!preg_match_all('/\b(?:an?|another)\s+(\d[\d,.]*)\s*(K)?\s*DWT\s+([A-Za-z\-]+)(?:\s+bulk\s+carriers?)?/i', $s, $ms, PREG_OFFSET_CAPTURE | PREG_SET_ORDER)) {
+        return [];
+    }
+    $out = [];
+    $stop = '(?=\s+(?:was|were|is|has|secured|securing|obtained|obtaining|fixed|fixing|reportedly|also|for|achieved|achieving|and|at|with)\b|\s*[,;.]|$)';
+    $region = fn(?string $x) => $x === null ? null : (trim(preg_replace('/^the\s+/i', '', trim($x)), " ,.;") ?: null);
+    foreach ($ms as $i => $m) {
+        $from = $m[0][1];
+        $clause = substr($s, $from, (($ms[$i + 1][0][1] ?? strlen($s)) - $from));
+        $seg = hb_segment($m[3][0]);
+        if (!$seg || !preg_match('/\b(?:fixed|fixing|secured|securing|obtained|obtaining|achieved|achieving|chartered)\b/i', $clause)) {
+            continue;
+        }
+        $bb = null;
+        if (preg_match('/(?:plus\s+(?:a\s+)?|\+\s*)\$\s?(\d[\d,.]*)\s*(million|mln|m|k)?\s*(?:ballast\s+bonus|BB|GBB)\b(?:\s*\((?:ballast bonus)\))?/i', $clause, $b)) {
+            $bb = hb_money($b[1], $b[2] ?? null);
+            $clause = str_replace($b[0], '', $clause);
+        }
+        if (!preg_match('/(?:approximately|around|about|at|of)\s+\$\s?(\d[\d,.]*)\s*(k\b)?/i', $clause, $r) && !preg_match('/\$\s?(\d[\d,.]*)\s*(k\b)?/i', $clause, $r)) {
+            continue;
+        }
+        $open = preg_match("/\\bopen(?:ing)?\\s+(?:in\\s+|at\\s+|off\\s+)?(.+?){$stop}/i", $clause, $o) ? $region($o[1])
+            : (preg_match('/\bfrom\s+(.+?)\s+to\s+/i', $clause, $o) ? $region($o[1]) : null);
+        $via = null;
+        if (preg_match('/\bvia\s+(.+?)(?=\s+(?:back\s+to|to|returning|at|for)\b|\s*[,;.]|$)/i', $clause, $v)) {
+            $via = $region($v[1]);
+        } elseif (preg_match('/\bfor\s+an?\s+(.+?)\s+round\s+voyage/i', $clause, $v) && !preg_match('/^(?:short|long|quick)$/i', $v[1])) {
+            $via = $region($v[1]);
+        }
+        $to = preg_match('/\b(?:back\s+to|returning\s+to|to)\s+(?!approximately|around|about|reach|recover)(.+?)(?=\s+(?:at|for|in|on|with|plus|while|by)\b|\s*[,;.]|$)/i', $clause, $d) ? $region($d[1]) : null;
+        if ($to !== null && preg_match('/^\$|^\d/', $to)) {
+            $to = null;
+        }
+        $type = match (true) {
+            (bool) preg_match('/short[\s-]+period/i', $clause) => 'short period',
+            (bool) preg_match('/\bperiod\b|\b\d+\s*(?:-\s*\d+\s*)?(?:months?|years?)\b/i', $clause) => 'period',
+            (bool) preg_match('/round\s+voyage|\bback\s+to\b|\breturning\s+to\b/i', $clause) => 'round voyage',
+            default => 'trip',
+        };
+        $out[] = ['segment' => $seg, 'dwt' => (int) round(hb_num($m[1][0]) * (strtoupper($m[2][0] ?? '') === 'K' ? 1000 : 1)), 'open' => $open, 'via' => $via,
+            'to' => in_array($type, ['short period', 'period'], true) ? null : $to, 'type' => $type, 'rate' => hb_money($r[1], ($r[2] ?? '') ?: null), 'bb' => $bb];
+    }
+    return $out;
+}
+
+/**
+ * One sentence → Baltic route values [{code, point: open|close|single, value, unit}].
+ * Codes: "(C5)", "C3 index", "(C5TC182)", "Capesize 5TC", "182 5TC", "(P5TC)" … → C5, C3, C5TC, P5TC.
+ * "from $A … to $B" → open + close; "began the week at $A" → open; "to $B by Friday / by the close", "closing level of $B" → close;
+ * otherwise the first "to / at / towards $X" → single. Changes ("by $2,796") are not values.
+ */
+function hb_parse_route_sentence(string $s): array
+{
+    $re = '/\b(?:(Capesize|Panamax|Supramax|Ultramax|Handysize|182|82|63|58|38)\s+(\d{1,2})TC|(C|P|S|HS)(\d{1,2})TC\d*|(C|P|S|HS)(\d{1,2}[A-Z]?))\b(?!\s*(?:DWT|K\b|,\d))/';
+    if (!preg_match_all($re, $s, $ms, PREG_OFFSET_CAPTURE | PREG_SET_ORDER)) {
+        return [];
+    }
+    $prefix = ['capesize' => 'C', '182' => 'C', 'panamax' => 'P', '82' => 'P', 'supramax' => 'S', 'ultramax' => 'S', '63' => 'S', '58' => 'S', 'handysize' => 'HS', '38' => 'HS'];
+    $mentions = [];
+    foreach ($ms as $m) {
+        $code = ($m[1][0] ?? '') !== '' ? $prefix[strtolower($m[1][0])] . $m[2][0] . 'TC' : ((($m[3][0] ?? '') !== '') ? $m[3][0] . $m[4][0] . 'TC' : $m[5][0] . $m[6][0]);
+        $end = $m[0][1] + strlen($m[0][0]);
+        if ($mentions && end($mentions)['code'] === $code) {
+            continue;   // "Baltic Capesize 5TC … (C5TC182)": one window
+        }
+        $mentions[] = ['code' => $code, 'at' => $end];
+    }
+    $out = [];
+    $money = '\$\s?(\d[\d,]*(?:\.\d+)?)';
+    foreach ($mentions as $i => $mn) {
+        $w = substr($s, $mn['at'], ($mentions[$i + 1]['at'] ?? strlen($s) + 1) - $mn['at']);
+        $vals = [];
+        if (preg_match("/\\bfrom\\s+(?:approximately\\s+)?{$money}.*?\\bto\\s+(?:approximately\\s+|around\\s+|about\\s+)?{$money}/i", $w, $x)) {
+            $vals = [['open', $x[1]], ['close', $x[2]]];
+        } else {
+            if (preg_match("/\\b(?:began|opened|started)\\s+the\\s+week\\s+at\\s+{$money}/i", $w, $x)) {
+                $vals[] = ['open', $x[1]];
+            }
+            if (preg_match("/\\b(?:to|at)\\s+(?:approximately\\s+|around\\s+|about\\s+)?{$money}\\s+by\\s+(?:Friday|the\\s+close|the\\s+end\\s+of\\s+the\\s+week|week'?s\\s+end)/i", $w, $x)
+                || preg_match("/\\bclos(?:ing\\s+level\\s+of|ed\\s+(?:the\\s+week\\s+)?at)\\s+{$money}/i", $w, $x)) {
+                $vals[] = ['close', $x[1]];
+            }
+            if (!$vals && preg_match("/\\b(?:to|at|towards|around)\\s+(?:approximately\\s+|around\\s+|about\\s+)?{$money}/i", $w, $x)) {
+                $vals[] = ['single', $x[1]];
+            }
+        }
+        foreach ($vals as [$point, $v]) {
+            $n = hb_num($v);
+            if ($n !== null) {
+                $out[] = ['code' => $mn['code'], 'point' => $point, 'value' => $n, 'unit' => str_ends_with($mn['code'], 'TC') || $n >= 300 ? 'USD/day' : 'USD/t'];
+            }
+        }
+    }
+    return $out;
+}

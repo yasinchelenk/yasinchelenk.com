@@ -61,6 +61,15 @@ export async function mount(el, ctx) {
     async function load() {
         data = await get('chartering/board');
         draw();
+        loadLevels().catch(() => {});
+    }
+
+    // Market level per open position (Matching): median trip rate of the last 30 days for its segment and open area (Market data)
+    let levels = {};
+    async function loadLevels() {
+        const items = data.tonnage.filter((t) => !['fixed', 'withdrawn'].includes(t.status)).map((t) => ({ key: t.id, type: t.type, dwt: t.dwt, port: t.open_port }));
+        levels = items.length ? await post('chartering/market/levels', { items }, { quiet: true }) : {};
+        if (view === 'matching') draw();
     }
 
     function draw() {
@@ -329,7 +338,7 @@ export async function mount(el, ctx) {
             h('strong', `${o.qty ? fmt(o.qty, 0) + ' t ' : ''}${o.cargo ?? ''}`), h('small', `${o.load_port ?? '?'} → ${o.disch_port ?? '?'}`),
             h('small.dim', o.laycan_from ? `laycan ${fmtDate(o.laycan_from)}${o.laycan_to ? '–' + fmtDate(o.laycan_to).slice(0, 5) : ''}` : 'no laycan'))));
         const table = results.length ? h('div.ch-scroll', h('table.ch-table.ch-match__table',
-            h('thead', h('tr', ['Vessel', 'Open', 'Ballast nm', 'Laycan', 'Intake', 'Restrictions', 'Gear', 'TCE', 'Score', ''].map((x, i) => h('th', { class: i === 7 || i === 8 ? 'r' : '' }, x)))),
+            h('thead', h('tr', ['Vessel', 'Open', 'Ballast nm', 'Laycan', 'Intake', 'Restrictions', 'Gear', 'TCE', 'Market', 'Score', ''].map((x, i) => h('th', { class: i >= 7 && i <= 9 ? 'r' : '' }, x)))),
             h('tbody', results.map((m) => h('tr', { class: 'v-' + m.verdict },
                 h('td', h('span.ch-verdict.' + m.verdict), h('b', m.pos.name), h('small.dim', ` ${m.pos.dwt ? fmt(m.pos.dwt, 0) + ' dwt' : ''}`)),
                 h('td', `${m.pos.open_port ?? ''} ${m.pos.open_from ? fmtDate(m.pos.open_from).slice(0, 5) : ''}`),
@@ -339,6 +348,7 @@ export async function mount(el, ctx) {
                 h('td', badge(m.checks.restrictions.level, m.checks.restrictions.level === 'green' ? 'ok' : m.checks.restrictions.level === 'red' ? 'fail' : '?', m.checks.restrictions.text)),
                 h('td', badge(m.checks.gear.level, m.checks.gear.level === 'green' ? 'ok' : m.checks.gear.level === 'red' ? 'fail' : '?', m.checks.gear.text)),
                 h('td.r', { title: m.tceNote }, m.tce !== null ? usd(m.tce) : h('small.dim', m.tceNote)),
+                h('td.r', marketLevel(levels[m.pos.id])),
                 h('td.r', String(m.score)),
                 h('td', h('button.tiny', { type: 'button', title: 'Voyage Estimator’da bu gemi + kargo ile aç', on: { click: () => {
                     const est = m.estimate ?? toEstimate(m.pos, order, { ballastNm: m.checks.laycan.ballastNm, ladenNm, settings });
@@ -355,6 +365,15 @@ export async function mount(el, ctx) {
                     h('button.tiny', { type: 'button', on: { click: (e) => settingsPop(e.currentTarget) } }, 'Assumptions ▾')),
                 h('p.dim.ch-match__hint', 'Laycan: açılış tarihi + ballast (mesafe ÷ hız) · Intake: DWT − ROB − FW/stores − constant, hacim, draft ve CP min/max · TCE: varsayımlarla hızlı tahmin — ayrıntı için “Estimate →”. Eksik mesafeyi satıra yazın: matrise kaydedilir.'),
                 table));
+    }
+
+    /** "≈ $24,500" + segment / area; the segment as a whole when the open area has no rate in the last 30 days. */
+    function marketLevel(l) {
+        if (!l?.stats?.n) return h('small.dim', { title: 'Son 30 günde bu segment için charter rate / raporlanan fixture yok (Market → Data sources)' }, '—');
+        const where = l.scope === 'region' ? l.regions.slice(0, 2).join(', ') : 'all areas';
+        const latest = l.latest ? `\nLatest: ${l.latest.open_region ?? ''}${l.latest.to_region ? ' → ' + l.latest.to_region : ''} ${usd(l.latest.rate)} (${fmtDate(l.latest.date)})` : '';
+        return h('span.ch-mkt-level', { title: `${l.segment} · ${l.scope === 'region' ? l.regions.join(', ') : 'segment-wide (no rate for this open area)'}\nMedian of ${l.stats.n} trip rates / reported fixtures, last 30 days · range ${usd(l.stats.min)}–${usd(l.stats.max)}${latest}` },
+            `≈ ${usd(l.stats.median)}`, h('small', `${l.segment} · ${where}`));
     }
 
     function settingsPop(anchor) {

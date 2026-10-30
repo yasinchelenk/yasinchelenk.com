@@ -328,6 +328,7 @@ export async function mount(el, ctx, param) {
 
     function drawResults() {
         const r = res;
+        loadComparables();   // refetches only when the segment / open area changed
         const tile = (label, value, sub, cls = '') => h('div.ch-tile', { class: cls }, h('span.ch-tile__label', label), h('strong.ch-tile__value', value), sub ? h('span.ch-tile__sub', sub) : null);
         const sens = sensitivity(est);
         fill(right,
@@ -384,9 +385,58 @@ export async function mount(el, ctx, param) {
             h('div.ch-card',
                 h('h4', 'Sensitivity — TCE (USD/day)'),
                 sensTable(sens, r.tce)),
+            compBox,
             h('p.ch-disclaimer', DISCLAIMER, ' · handybulk: ',
                 [LESSONS.voyageEstimation, LESSONS.voyageTime, LESSONS.voyagePortDays].map(([href, label], i) => [i ? ' · ' : '', h('a', { href, target: '_blank', rel: 'noopener' }, label)])),
         );
+    }
+
+    // ------------------------------------------------------------ Market comparables (charter rates + reported fixtures, last 30 days)
+
+    const compBox = h('div.ch-card.ch-comp');
+    const compUi = store.get('ch_voy_comp', { segment: '', region: '', to: '' });
+    let compKey = null;
+    const segForDwt = (d) => (!(d >= 10000) ? null : d < 40000 ? 'Handysize' : d < 60000 ? 'Supramax' : d < 67000 ? 'Ultramax' : d < 80000 ? 'Panamax' : d < 90000 ? 'Kamsarmax' : d < 120000 ? 'Post-Panamax' : d < 200000 ? 'Capesize' : 'Newcastlemax');
+    // The ship's open position: the first ballast leg's "from", else the load port
+    const openPlace = () => est.route.find((x) => x.type === 'sea' && x.from)?.from || est.route.find((x) => x.type === 'load' && x.name)?.name || '';
+    const compQuery = () => ({ segment: compUi.segment || segForDwt(est.vessel.dwt) || '', ...(compUi.region ? { region: compUi.region } : { port: openPlace() }), ...(compUi.to ? { to: compUi.to } : {}), days: 30 });
+    const loadComparables = debounce(async () => {
+        const q = compQuery();
+        const key = JSON.stringify(q);
+        if (key === compKey) return;
+        compKey = key;
+        if (!q.segment) { drawComparables(null, 'DWT girin veya segment seçin.'); return; }
+        try {
+            drawComparables(await get('chartering/market/comparables', q));
+        } catch {
+            drawComparables(null, 'Piyasa verisi alınamadı.');
+        }
+    }, 700);
+
+    function drawComparables(c, msg) {
+        const saveUi = () => { store.set('ch_voy_comp', compUi); compKey = null; loadComparables(); };
+        const segSel = h('select', { on: { change: (e) => { compUi.segment = e.target.value; saveUi(); } } },
+            h('option', { value: '' }, `Auto${segForDwt(est.vessel.dwt) ? ` (${segForDwt(est.vessel.dwt)})` : ''}`),
+            ['Handysize', 'Supramax', 'Ultramax', 'Panamax', 'Kamsarmax', 'Post-Panamax', 'Capesize', 'Newcastlemax'].map((s) => h('option', { selected: compUi.segment === s }, s)));
+        const txt = (k, placeholder) => h('input', { type: 'text', value: compUi[k], placeholder, size: 14, on: { change: (e) => { compUi[k] = e.target.value.trim(); saveUi(); } } });
+        const s = c?.stats;
+        const pick = (r) => h('tr',
+            h('td', { style: { whiteSpace: 'nowrap' } }, fmtDate(r.date), ' ', sourceBadge(r, { short: true })),
+            h('td', r.kind === 'fixture' ? 'Fixture' : r.type === 'period' ? 'Period' : 'Rate', r.dwt ? h('small.dim', ` ${fmt(r.dwt / 1000, 0)}k`) : null),
+            h('td', [r.open_region, r.via ? `via ${r.via}` : null, r.to_region ? `→ ${r.to_region}` : r.type !== 'trip' ? `(${r.type}${r.period_months ? ` ${fmt(r.period_months, 0)} mo` : ''})` : null].filter(Boolean).join(' ')),
+            h('td.r', usd(r.rate)), h('td.r', r.ballast_bonus ? usd(r.ballast_bonus) : ''));
+        compBox.replaceChildren(...[
+            h('h4', 'Market comparables', h('small.dim', ' · last 30 days, charter rates + reported fixtures')),
+            h('div.ch-inline', segSel, txt('region', `Open: ${c?.regions?.slice(0, 3).join(', ') || openPlace() || 'region'}`), txt('to', 'To (optional)')),
+            msg ? h('p.dim', msg) : null,
+            c && !s.n && !c.rows.length ? h('p.dim', `${c.segment}${c.regions.length ? ` · ${c.regions.join(', ')}` : ''}: son 30 günde kayıt yok. Bölgeyi boş bırakırsanız segmentin tamamı gelir.`) : null,
+            s?.n ? h('div.ch-comp__stats',
+                h('span', 'Median ', h('b', usd(s.median))), h('span', 'Average ', h('b', usd(s.avg))), h('span', `Range ${usd(s.min)} – ${usd(s.max)}`), h('span.dim', `${s.n} trips`),
+                canEdit ? h('button.tiny', { type: 'button', title: 'Settings → TC alternative alanına medyanı yaz (TC vs voyage karşılaştırması)', on: { click: () => { est.settings.tcAlternative = Math.round(s.median); changed(); drawInputs(); } } }, 'Use median as TC alternative') : null) : null,
+            c?.rows.length ? h('div.ch-scroll', h('table.ch-table',
+                h('thead', h('tr', ['Date', 'Kind', 'Route', 'USD/day', 'BB'].map((x, i) => h('th', { class: i >= 3 ? 'r' : '' }, x)))),
+                h('tbody', c.rows.slice(0, 15).map(pick)))) : null,
+        ].filter(Boolean));
     }
 
     function sensTable(s, base) {

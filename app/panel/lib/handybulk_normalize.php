@@ -25,7 +25,7 @@ const HB_REGION_ALIASES = [
     'mediterranean' => 'Med', 'med' => 'Med', 'far east' => 'FEAST', 'feast' => 'FEAST', 'fe' => 'FEAST',
     'persian gulf' => 'PG', 'arabian gulf' => 'PG', 'pg' => 'PG', 'ag' => 'PG', 'red sea' => 'RSea', 'rsea' => 'RSea',
     'east coast australia' => 'ECAus', 'ecaus' => 'ECAus', 'west coast australia' => 'WCAus', 'wcaus' => 'WCAus',
-    'gulf of aden' => 'GOA', 'goa' => 'GOA', 'sw passage' => 'SW Pass', 'sw pass' => 'SW Pass', 'southwest pass' => 'SW Pass',
+    'gulf of aden' => 'GOA', 'goa' => 'GOA', 'sw passage' => 'SW Pass', 'sw pass' => 'SW Pass', 'southwest pass' => 'SW Pass', 'southwest passage' => 'SW Pass', 'south west passage' => 'SW Pass',
     'black sea' => 'Black Sea', 'bsea' => 'Black Sea', 'b.sea' => 'Black Sea', 'baltic' => 'Baltic', 'baltic sea' => 'Baltic',
     'caribbean' => 'Caribbean', 'caribs' => 'Caribbean', 'carribean' => 'Caribbean', 'turkish straits' => 'Turkish Straits',
     'turkiye' => 'Turkiye', 'türkiye' => 'Turkiye', 'turkey' => 'Turkiye', 'marmara' => 'Marmara', 'aegean' => 'Aegean', 'adriatic' => 'Adriatic',
@@ -50,6 +50,50 @@ const HB_PLACES = [
 
 /** Plain-language qualifiers around a known place: "North China", "Mexico West Coast", "South India". */
 const HB_QUALIFIER = '(?:North|South|East|West|Central|Northern|Southern|Eastern|Western|NE|NW|SE|SW|Upper|Lower)';
+
+/**
+ * Port country (ISO 3166-1 alpha-2, as in Ports) → the region names a market report would use for a ship open there,
+ * most specific first. Used by Market comparables and the Tonnage & Cargo market level.
+ */
+const HB_COUNTRY_REGIONS = [
+    'TR' => ['Turkiye', 'Marmara', 'Black Sea', 'EMED', 'Med'], 'GR' => ['Greece', 'Aegean', 'EMED', 'Med'], 'CY' => ['Cyprus', 'EMED', 'Med'],
+    'EG' => ['Egypt', 'EMED', 'Med'], 'IL' => ['Israel', 'EMED', 'Med'], 'LB' => ['Lebanon', 'EMED', 'Med'], 'SY' => ['Syria', 'EMED', 'Med'],
+    'RO' => ['Romania', 'Black Sea'], 'BG' => ['Bulgaria', 'Black Sea'], 'UA' => ['Ukraine', 'Black Sea'], 'GE' => ['Georgia', 'Black Sea'], 'RU' => ['Russia', 'Black Sea', 'Baltic'],
+    'IT' => ['Italy', 'Adriatic', 'Med', 'WMED', 'EMED'], 'HR' => ['Croatia', 'Adriatic', 'Med'], 'SI' => ['Slovenia', 'Adriatic', 'Med'], 'AL' => ['Albania', 'Adriatic', 'Med'],
+    'ES' => ['Spain', 'WMED', 'Med', 'Cont'], 'FR' => ['France', 'Cont', 'WMED', 'Med'], 'PT' => ['Portugal', 'Cont'], 'MT' => ['Malta', 'Med'],
+    'MA' => ['Morocco', 'WMED', 'WAFR'], 'DZ' => ['Algeria', 'WMED', 'Med'], 'TN' => ['Tunisia', 'Med'], 'LY' => ['Libya', 'Med'],
+    'NL' => ['Netherlands', 'ARAG', 'Cont', 'UKC'], 'BE' => ['Belgium', 'ARAG', 'Cont', 'UKC'], 'DE' => ['Germany', 'Cont', 'Baltic', 'UKC'], 'GB' => ['UK', 'UKC', 'Cont'],
+    'IE' => ['Ireland', 'UKC', 'Cont'], 'DK' => ['Denmark', 'Baltic', 'Cont'], 'NO' => ['Norway', 'Cont'], 'SE' => ['Sweden', 'Baltic'], 'FI' => ['Finland', 'Baltic'],
+    'PL' => ['Poland', 'Baltic'], 'LT' => ['Lithuania', 'Baltic'], 'LV' => ['Latvia', 'Baltic'], 'EE' => ['Estonia', 'Baltic'],
+    'US' => ['USG', 'USEC', 'USWC', 'PNW', 'SW Pass'], 'CA' => ['Canada', 'ECNA', 'St Lawrence', 'Canada West Coast'], 'MX' => ['Mexico', 'Mexico East Coast', 'Mexico West Coast'],
+    'BR' => ['Brazil', 'ECSA'], 'AR' => ['Argentina', 'River Plate', 'ECSA'], 'UY' => ['Uruguay', 'River Plate', 'ECSA'], 'CO' => ['Colombia', 'NCSA', 'Caribbean'],
+    'VE' => ['Venezuela', 'NCSA', 'Caribbean'], 'GY' => ['Guyana', 'NCSA'], 'SR' => ['Suriname', 'NCSA'], 'TT' => ['Trinidad', 'NCSA', 'Caribbean'],
+    'PE' => ['Peru', 'WCSA'], 'CL' => ['Chile', 'WCSA'], 'EC' => ['Ecuador', 'WCSA'],
+    'CN' => ['China', 'North China', 'South China', 'FEAST'], 'JP' => ['Japan', 'Japan-Korea', 'FEAST'], 'KR' => ['South Korea', 'Japan-Korea', 'FEAST'],
+    'TW' => ['Taiwan', 'FEAST'], 'HK' => ['Hong Kong', 'South China', 'FEAST'], 'ID' => ['Indonesia', 'SEA'], 'MY' => ['Malaysia', 'SEA'], 'TH' => ['Thailand', 'SEA'],
+    'VN' => ['Vietnam', 'SEA'], 'PH' => ['Philippines', 'SEA'], 'SG' => ['Singapore', 'SEA'], 'KH' => ['Cambodia', 'SEA'], 'MM' => ['Myanmar', 'SEA'],
+    'IN' => ['India', 'WCI', 'ECI'], 'PK' => ['Pakistan', 'WCI'], 'BD' => ['Bangladesh', 'ECI'], 'LK' => ['Sri Lanka', 'ECI'],
+    'AE' => ['UAE', 'PG'], 'SA' => ['Saudi Arabia', 'PG', 'RSea'], 'QA' => ['Qatar', 'PG'], 'KW' => ['Kuwait', 'PG'], 'OM' => ['Oman', 'PG'], 'BH' => ['Bahrain', 'PG'],
+    'IR' => ['Iran', 'PG'], 'IQ' => ['Iraq', 'PG'], 'JO' => ['Jordan', 'RSea'], 'DJ' => ['Djibouti', 'RSea', 'EAFR'], 'SD' => ['Sudan', 'RSea'],
+    'ZA' => ['SAF'], 'MZ' => ['Mozambique', 'EAFR', 'SAF'], 'KE' => ['Kenya', 'EAFR'], 'TZ' => ['Tanzania', 'EAFR'], 'MG' => ['Madagascar', 'EAFR'],
+    'NG' => ['Nigeria', 'WAFR'], 'GH' => ['Ghana', 'WAFR'], 'CI' => ['Ivory Coast', 'WAFR'], 'SN' => ['Senegal', 'WAFR'], 'GN' => ['Guinea', 'WAFR'],
+    'CM' => ['Cameroon', 'WAFR'], 'TG' => ['Togo', 'WAFR'], 'BJ' => ['Benin', 'WAFR'], 'AO' => ['Angola', 'WAFR'], 'MR' => ['Mauritania', 'WAFR'], 'SL' => ['Sierra Leone', 'WAFR'],
+    'AU' => ['Australia', 'ECAus', 'WCAus'], 'NZ' => ['New Zealand'], 'PG' => ['Papua New Guinea', 'SEA'],
+];
+
+/** Segment for a ship size (used when a position has no segment name): Handysize < 40k, Supramax < 60k, Ultramax < 67k … */
+function hb_segment_for_dwt(?float $dwt): ?string
+{
+    if (!$dwt || $dwt < 10000) {
+        return null;
+    }
+    foreach ([[40000, 'Handysize'], [60000, 'Supramax'], [67000, 'Ultramax'], [80000, 'Panamax'], [90000, 'Kamsarmax'], [120000, 'Post-Panamax'], [200000, 'Capesize']] as [$max, $seg]) {
+        if ($dwt < $max) {
+            return $seg;
+        }
+    }
+    return 'Newcastlemax';
+}
 
 /** "Handy" → "Handysize" … null when the word is not a dry-bulk segment. */
 function hb_segment(string $s): ?string

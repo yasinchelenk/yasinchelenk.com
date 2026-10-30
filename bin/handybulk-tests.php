@@ -69,6 +69,29 @@ $u = $byCode(hb_parse_baltic('The Baltic Handysize Index (BHSI) remained unchang
 eq([$u['BHSI'] ?? null, $u['HANDY'] ?? null], [[1020, 0], [18362, -1]], 'BHSI 1,020 (0); TC 18,362 (−1)');
 eq(hb_date('28-October-2026') . ' ' . var_export(hb_date('31-February-2026'), true) . ' ' . var_export(hb_date('28 October 2026'), true), '2026-10-28 NULL NULL', 'dates: DD-Month-YYYY only, real calendar days');
 
+// ---------------------------------------------------------------- 3–4 · Weekly commentary
+$wkp = hb_parse_weekly((string) file_get_contents($root . '/tests/handybulk/bdi.html'))['weeks'];
+$fx = array_map(fn($f) => [$f['segment'], $f['dwt'], hb_region((string) $f['open'])['code'], $f['via'] === null ? null : hb_region($f['via'])['code'], $f['to'] === null ? null : hb_region($f['to'])['code'], $f['type'], $f['rate'], $f['bb']], $wkp[0]['fixtures'] ?? []);
+$hasFx = fn(array $want) => in_array($want, $fx, true);
+
+section('3 · Weekly fixture sentences');
+eq([count($wkp), $wkp[0]['date'] ?? null], [1, '2026-10-19'], 'one weekly block (19-October-2026); the daily paragraphs and the “(BDI)” placeholder are not read as fixtures');
+check($hasFx(['Ultramax', 64000, 'Brazil', null, 'Egypt', 'trip', 36000.0, null]), '(Ultramax, 64,000, Brazil → Egypt, 36,000)', $fx);
+check($hasFx(['Ultramax', 63000, 'Argentina', null, 'China', 'trip', 19500.0, 1000000.0]), '(Ultramax, 63,000, Argentina → China, 19,500, BB 1,000,000 — “$1 million”)', $fx);
+check($hasFx(['Kamsarmax', 82000, 'Argentina', null, 'China', 'trip', 22500.0, 1250000.0]), '(Kamsarmax, 82,000 — “82K”, Argentina → China, 22,500, BB 1,250,000)', $fx);
+check($hasFx(['Handysize', 39000, 'Netherlands', 'Baltic', 'Turkiye', 'trip', 26000.0, null]), '(Handysize, 39,000, Netherlands via Baltic → Turkiye, 26,000)', $fx);
+check($hasFx(['Panamax', 76000, 'FEAST', null, null, 'short period', 19000.0, null]), '(Panamax, 76,000, FEAST, short period, 19,000)', $fx);
+check($hasFx(['Ultramax', 64000, 'Brazil', null, 'Bangladesh', 'trip', 21000.0, 1000000.0]), '“while another …” clause of the same sentence: open from “from Brazil to Bangladesh”', $fx);
+check($hasFx(['Handysize', 36000, 'SW Pass', 'USG', 'Colombia East Coast', 'trip', 22000.0, null]), '“Southwest Passage … via the US Gulf (USG) to Colombia’s East Coast”', $fx);
+eq([count($fx), (bool) array_filter($fx, fn($f) => $f[1] === 182000)], [8, false], '8 fixtures; the “182,000 DWT capesize … (C5TC182) dropped from …” index sentence is not a fixture');
+
+section('4 · Route values');
+$rt = array_map(fn($r) => [$r['code'], $r['point'], $r['value'], $r['unit']], $wkp[0]['routes'] ?? []);
+check(in_array(['C5', 'close', 11.7, 'USD/t'], $rt, true), '“… route (C5) to recover to approximately $11.70 by the close” → (C5, 11.70, USD/t)', $rt);
+check(in_array(['C5TC', 'open', 37618.0, 'USD/day'], $rt, true) && in_array(['C5TC', 'close', 29464.0, 'USD/day'], $rt, true), 'Capesize 5TC (C5TC182) from $37,618 on Monday to $29,464 by Friday → C5TC open / close, USD/day', $rt);
+check(in_array(['C3', 'single', 30.0, 'USD/t'], $rt, true) && count($rt) === 4, 'C3 “weakened towards $30 per metric ton” → single 30 USD/t; nothing else', $rt);
+eq(array_map(fn($r) => $r['code'], hb_parse_route_sentence('The Baltic Capesize Index (BCI) 182 5TC declined by $2,796 from Monday, lifting the assessment to a closing level of $45,731.')), ['C5TC'], '“182 5TC … closing level of $45,731” → C5TC (the “by $2,796” change is not a value)');
+
 // ---------------------------------------------------------------- 5–8 · Charter Rates
 $rp = hb_parse_rates_page((string) file_get_contents($root . '/tests/handybulk/rates.html'));
 $norm = fn(array $t) => [$t['segment'], hb_region($t['open'])['code'], array_map(fn($v) => hb_region($v)['code'], $t['via']), hb_region($t['to'])['code'], $t['rate'], $t['bb']];
@@ -238,6 +261,27 @@ if ($tmp) {
     $n = hb_region_map('Mars Base', 'Black Sea');
     $mapped = scalar("SELECT open_region FROM ch_charter_rates WHERE date = '2026-10-29' AND segment = 'Handysize' AND rate = 12000");
     eq([$n, $mapped, hb_region('mars base', hb_region_aliases())['code']], [1, 'Black Sea', 'Black Sea'], 'mapping “Mars Base” → Black Sea renames the stored row and is used from then on');
+
+    section('3–4 · Weekly import, comparables (temporary copy of the database)');
+    q("DELETE FROM ch_market_fixtures WHERE report_date = '2026-10-19'");
+    q("DELETE FROM ch_route_rates WHERE date = '2026-10-19'");
+    q("DELETE FROM ch_hb_review WHERE target IN ('ch_market_fixtures', 'ch_route_rates')");
+    $wctx = ['run_id' => 0, 'url' => 'https://www.handybulk.com/baltic-dry-index/', 'fetched_at' => '2026-10-29 12:00:00', 'adapter' => 'weekly'];
+    [$w1, $wAsOf] = hb_import_weekly($html, $wctx);
+    [$w2] = hb_import_weekly($html, $wctx);
+    $kmx = row("SELECT * FROM ch_market_fixtures WHERE report_date = '2026-10-19' AND segment = 'Kamsarmax'");
+    $c5 = row("SELECT value, unit, source FROM ch_route_rates WHERE date = '2026-10-19' AND code = 'C5' AND point = 'close'");
+    $wrev = array_column(rows("SELECT kind || ':' || record_key k FROM ch_hb_review WHERE status = 'open' AND target = 'ch_market_fixtures'"), 'k');
+    eq([$wAsOf, $w1['added'], $w2['added'], $w2['updated']], ['2026-10-19', 11, 0, 0], '7 fixtures + 4 route values added (the $900 fixture is out of range); the same page again → 0 new');
+    eq([(int) $kmx['dwt'], $kmx['open_region'], $kmx['to_region'], (float) $kmx['ballast_bonus'], $kmx['source'], $kmx['as_of_date']], [82000, 'Argentina', 'China', 1250000.0, 'handybulk', '2026-10-19'], 'fixture row: numbers and codes only, source = handybulk');
+    eq([(float) $c5['value'], $c5['unit'], count($wrev)], [11.7, 'USD/t', 1], 'route C5 11.70 USD/t stored; the $900 fixture went to review');
+    check(!array_filter(array_keys(row('SELECT * FROM ch_market_fixtures LIMIT 1') ?? []), fn($k) => in_array($k, ['text', 'sentence', 'body', 'note'], true)), 'no sentence / text column in ch_market_fixtures');
+    $cmp = ch_market_comparables('Ultramax', ch_market_regions_for('Brazil'), [], 3650);
+    eq([$cmp['stats']['n'] >= 2, in_array('ECSA', $cmp['regions'], true) || in_array('Brazil', $cmp['regions'], true), (bool) array_filter($cmp['rows'], fn($r) => $r['kind'] === 'fixture' && $r['to_region'] === 'Egypt')],
+        [true, true, true], 'comparables: Ultramax open Brazil finds the reported fixtures (Brazil → Egypt, → Bangladesh) with stats');
+    $kmxC = ch_market_comparables('Kamsarmax', ['Argentina'], ['China'], 3650);
+    eq([$kmxC['stats']['median'], $kmxC['stats']['n']], [22500.0, 1], 'comparables with a destination: Kamsarmax Argentina → China median 22,500');
+    eq(ch_market_regions_for('Turkiye'), ['Turkiye', 'Marmara', 'Black Sea', 'EMED', 'Med'], 'a country name expands to its regions (Turkiye → … Black Sea, EMED, Med)');
 }
 
 // ---------------------------------------------------------------- Snapshots (structure only, when present)
@@ -247,6 +291,10 @@ if (is_file("{$snap}/baltic-dry-index.html")) {
     $p = hb_parse_bdi_page((string) file_get_contents("{$snap}/baltic-dry-index.html"));
     check(count($p['days']) > 0 && count($p['archive']) > 0, 'BDI snapshot: days ' . count($p['days']) . ', archive months ' . count($p['archive']));
     check((bool) array_filter($p['days'], fn($d) => count($d['rows']) >= 5 && is_float($d['rows'][0]['value'])), 'BDI snapshot: each day has index values (floats)');
+    $w = hb_parse_weekly((string) file_get_contents("{$snap}/baltic-dry-index.html"))['weeks'];
+    $allFx = array_merge(...array_map(fn($x) => $x['fixtures'], $w ?: [['fixtures' => []]]));
+    check(count($w) > 0 && count($allFx) > 0 && !array_filter($allFx, fn($f) => !is_float($f['rate']) || !$f['segment'] || $f['dwt'] < 10000),
+        'BDI snapshot: weekly reports ' . count($w) . ', fixtures ' . count($allFx) . ', route values ' . array_sum(array_map(fn($x) => count($x['routes']), $w)) . ' (rates are numbers, DWT ≥ 10,000)');
 }
 if (is_file("{$snap}/ship-bunker.html")) {
     $p = hb_parse_bunker_page((string) file_get_contents("{$snap}/ship-bunker.html"));

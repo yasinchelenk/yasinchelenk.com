@@ -79,6 +79,32 @@ function module_routes_chartering_market(): void
     // Read by the estimator's "From market" picker and the dashboard's upcoming card (any logged-in user)
     route('GET', '/api/chartering/market/latest-bunkers', 'ch_market_latest_bunkers', '*');
     route('GET', '/api/chartering/upcoming', 'ch_upcoming', '*');
+    route('DELETE', '/api/chartering/market/fixtures/{id}', fn($p) => ch_market_delete_row('ch_market_fixtures', (int) $p['id']), 'ch-market');
+    route('DELETE', '/api/chartering/market/routes/{id}', fn($p) => ch_market_delete_row('ch_route_rates', (int) $p['id']), 'ch-market');
+    // Voyage Estimator "Market comparables" and the Tonnage & Cargo market level (any signed-in user; internal data)
+    route('GET', '/api/chartering/market/comparables', function ($p, $in) {
+        $segment = hb_segment((string) ($in['segment'] ?? '')) ?? hb_segment_for_dwt(parse_number($in['dwt'] ?? null)) ?? api_error('Segment veya DWT gerekli.');
+        $regions = trim((string) ($in['region'] ?? '')) !== '' ? [trim((string) $in['region'])] : ch_market_regions_for($in['port'] ?? null);
+        json_response(ch_market_comparables($segment, $regions, ch_market_regions_for($in['to'] ?? null), max(7, min(180, (int) ($in['days'] ?? 30)))));
+    }, '*');
+    route('POST', '/api/chartering/market/levels', function ($p, $in) {
+        $out = [];
+        foreach (array_slice((array) ($in['items'] ?? []), 0, 300) as $it) {
+            $segment = hb_segment((string) ($it['type'] ?? '')) ?? hb_segment((string) ($it['segment'] ?? '')) ?? hb_segment_for_dwt(parse_number($it['dwt'] ?? null));
+            if (!$segment || !isset($it['key'])) {
+                continue;
+            }
+            $regions = ch_market_regions_for($it['port'] ?? null);
+            $c = $regions ? ch_market_comparables($segment, $regions, [], 30) : null;
+            $scope = 'region';
+            if (!$c || !$c['stats']['n']) {
+                $c = ch_market_comparables($segment, [], [], 30);   // no rate for that area: the segment as a whole
+                $scope = 'segment';
+            }
+            $out[(string) $it['key']] = ['segment' => $segment, 'scope' => $scope, 'regions' => $regions, 'stats' => $c['stats'], 'latest' => $c['rows'][0] ?? null];
+        }
+        json_response($out);
+    }, '*');
 }
 
 function ch_market_bundle(array $p, array $in): never
@@ -96,6 +122,8 @@ function ch_market_bundle(array $p, array $in): never
         'tc'      => rows('SELECT id, date, kind, segment, label, rate, source, as_of_date, fetched_at, week, week_year FROM ch_tc_rates WHERE date >= ? ORDER BY date', [$since]),
         'bunkers' => rows('SELECT id, date, port, vlsfo, mgo, hsfo, extra, is_average, source, as_of_date, fetched_at FROM ch_bunker_prices WHERE date >= ? ORDER BY date', [$since]),
         'rates'   => rows('SELECT * FROM ch_charter_rates WHERE date >= ? ORDER BY date DESC, id DESC', [date('Y-m-d', strtotime('-120 days'))]),
+        'fixtures' => rows('SELECT * FROM ch_market_fixtures WHERE report_date >= ? ORDER BY report_date DESC, id', [date('Y-m-d', strtotime('-120 days'))]),
+        'routes'  => rows('SELECT id, date, code, point, value, unit, source, as_of_date, fetched_at FROM ch_route_rates WHERE date >= ? ORDER BY date', [$since]),
         'notes'   => rows("SELECT * FROM ch_market_notes WHERE (kind = 'news' AND date >= ?) OR (kind = 'weekly' AND date >= ?) ORDER BY date DESC, id DESC",
             [date('Y-m-d', strtotime('-90 days')), date('Y-m-d', strtotime('-120 days'))]),
         'fx'      => $fx && empty($fx['hata']) ? ['eur_usd' => $fx['eur_usd'], 'usd_try' => $fx['usd_alis'], 'date' => $fx['tarih']] : null,
@@ -216,8 +244,9 @@ function ch_market_delete_row(string $table, int $id): never
 {
     $row = row("SELECT * FROM {$table} WHERE id = ?", [$id]) ?? api_error('Kayıt bulunamadı.', 404);
     q("DELETE FROM {$table} WHERE id = ?", [$id]);
-    gecmis_log('ch_market', $row['date'], ($row['port'] ?? $row['label'] ?? '') . " {$row['date']}", $table, 'islem', null, 'silindi');
-    feed('ch_market', 'update', null, $row['date']);
+    $date = $row['date'] ?? $row['report_date'];
+    gecmis_log('ch_market', $date, ($row['port'] ?? $row['label'] ?? $row['code'] ?? $row['segment'] ?? '') . " {$date}", $table, 'islem', null, 'silindi');
+    feed('ch_market', 'update', null, $date);
     json_response(['ok' => true]);
 }
 
@@ -239,4 +268,66 @@ function ch_market_latest_bunkers(): never
 function ch_upcoming(): never
 {
     json_response(array_slice(ch_deadlines(30), 0, 40));
+}
+
+/**
+ * Region names a market report would use for a ship open at $place: the place itself when it is a region / country
+ * ("ECSA", "Turkiye"), plus the regions of its country when it is a port in Ports ("Iskenderun" → TR → Turkiye, Black Sea, EMED, Med).
+ */
+function ch_market_regions_for(mixed $place): array
+{
+    $place = trim((string) $place);
+    if ($place === '') {
+        return [];
+    }
+    $out = [];
+    $r = hb_region($place, hb_region_aliases());
+    if ($r['mapped'] && $r['code']) {
+        $out[] = $r['code'];
+        foreach (HB_COUNTRY_REGIONS as $list) {
+            if (strcasecmp($list[0], $r['code']) === 0) {
+                $out = [...$out, ...$list];
+            }
+        }
+    }
+    $country = scalar('SELECT country FROM ch_ports WHERE lower(name) = lower(?) OR lower(name) LIKE lower(?) OR lower(?) LIKE lower(name) || \'%\' ORDER BY length(name) DESC LIMIT 1',
+        [$place, addcslashes($place, '%_') . ' (%', $place]);
+    if ($country && isset(HB_COUNTRY_REGIONS[strtoupper((string) $country)])) {
+        $out = [...$out, ...HB_COUNTRY_REGIONS[strtoupper((string) $country)]];
+    }
+    return array_values(array_unique($out));
+}
+
+/**
+ * Charter rates and reported fixtures of the last $days days for a segment, whose open area is one of $regions
+ * ("North China" counts for "China") and, when given, whose destination is one of $to. Stats over trips / round voyages.
+ */
+function ch_market_comparables(string $segment, array $regions, array $to, int $days): array
+{
+    $since = date('Y-m-d', strtotime("-{$days} days"));
+    $rows = [
+        ...array_map(fn($r) => ['kind' => 'rate'] + $r, rows("SELECT id, date, segment, NULL AS dwt, open_region, via, to_region, CASE kind WHEN 'period' THEN 'period' ELSE 'trip' END AS type,
+            period_months, rate, ballast_bonus, source, as_of_date, fetched_at FROM ch_charter_rates WHERE date >= ? AND segment = ? AND rate IS NOT NULL", [$since, $segment])),
+        ...array_map(fn($r) => ['kind' => 'fixture'] + $r, rows('SELECT id, report_date AS date, segment, dwt, open_region, via, to_region, type, NULL AS period_months, rate, ballast_bonus, source, as_of_date, fetched_at
+            FROM ch_market_fixtures WHERE report_date >= ? AND segment = ?', [$since, $segment])),
+    ];
+    $hit = function (?string $value, array $names): bool {
+        $v = mb_strtolower(trim((string) $value));
+        foreach ($names as $n) {
+            $n = mb_strtolower($n);
+            if ($v === $n || str_ends_with($v, ' ' . $n)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    $rows = array_values(array_filter($rows, fn($r) => (!$regions || $hit($r['open_region'], $regions)) && (!$to || $hit($r['to_region'], $to))));
+    usort($rows, fn($a, $b) => strcmp($b['date'], $a['date']) ?: $b['rate'] <=> $a['rate']);
+    $vals = array_map(fn($r) => (float) $r['rate'], array_filter($rows, fn($r) => in_array($r['type'], ['trip', 'round voyage'], true)));
+    sort($vals);
+    $n = count($vals);
+    return ['segment' => $segment, 'regions' => $regions, 'to' => $to, 'days' => $days, 'rows' => array_slice($rows, 0, 100), 'stats' => [
+        'n' => $n, 'avg' => $n ? round(array_sum($vals) / $n) : null, 'median' => $n ? ($n % 2 ? $vals[intdiv($n, 2)] : ($vals[$n / 2 - 1] + $vals[$n / 2]) / 2) : null,
+        'min' => $n ? $vals[0] : null, 'max' => $n ? $vals[$n - 1] : null,
+    ]];
 }
