@@ -13,6 +13,22 @@ const KIND = { range: 'Out of range', consistency: 'Inconsistent', conflict: 'Ma
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const badge = (status) => { const [c, l] = STATUS[status] ?? ['amber', status ?? '—']; return h('span.ch-badge.' + c, l); };
 
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * “HandyBulk · as of 28 Oct” for a record that came from HandyBulk (null for manual data); amber when it was
+ * fetched more than 24 h ago. `short` → just “HB” (table cells).
+ */
+export function sourceBadge(row, { short = false } = {}) {
+    if (row?.source !== 'handybulk') return null;
+    const asOf = row.as_of_date ?? row.date;
+    const [, m, d] = asOf.split('-');
+    const age = row.fetched_at ? (Date.now() - Date.parse(row.fetched_at.replace(' ', 'T'))) / 3600000 : Infinity;
+    const stale = !(age <= 24);
+    return h('span.ch-badge.' + (stale ? 'amber' : 'green'), { title: `HandyBulk · as of ${asOf.split('-').reverse().join('.')} · fetched ${row.fetched_at ?? '—'}${stale ? ' (more than 24 h ago — Update from HandyBulk)' : ''}` },
+        short ? 'HB' : `HandyBulk · as of ${+d} ${MON[+m - 1]}`);
+}
+
 /**
  * One adapter run from the browser. A "throttled" answer (5 s gap) is retried after retry_after; returns the run row.
  * onManual() is called when the source is blocked by robots.txt or its format changed (→ the paste box).

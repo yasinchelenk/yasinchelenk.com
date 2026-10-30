@@ -8,6 +8,7 @@ import { apollon } from '../chartering/engine/examples.js';
 import { numInput, textInput, selectInput, checkInput, fld, section, kvList, fmt, usd, cell, exportButtons, textTable, DISCLAIMER } from '../chartering/ui.js';
 import { LESSONS } from '../chartering/links.js';
 import { kbTables, sfFor } from '../chartering/kb.js';
+import { sourceBadge } from '../chartering/sources.js';
 
 const TYPE_CAT = { sea: 'blue', load: 'green', disch: 'orange', bunker: 'teal', canal: 'purple', strait: 'indigo', weather: 'gray', other: 'brown' };
 const TYPE_NAME = { sea: 'Sea', load: 'Load', disch: 'Disch', ...STOP_TYPES };
@@ -263,13 +264,19 @@ export async function mount(el, ctx, param) {
         ], { actions: h('button.tiny', { type: 'button', title: 'Market Dashboard’daki son bunker fiyatları, EUA ve TCMB EUR/USD', on: { click: (ev) => fromMarket(ev.currentTarget).catch(() => {}) } }, 'From market ▾') });
     }
 
-    /** One click: latest bunker prices of a port (+ EUA and TCMB EUR/USD) from the Market Dashboard. */
+    /**
+     * One click: latest bunker prices of a port (+ EUA and TCMB EUR/USD) from the Market Dashboard.
+     * The last port used comes first; HandyBulk rows carry their source badge; the "Global Average" row is last.
+     */
     async function fromMarket(anchor) {
         const m = await get('chartering/market/latest-bunkers');
+        const lastPort = store.get('ch_voy_bunker_port', null);
+        m.bunkers.sort((a, b) => (b.port === lastPort) - (a.port === lastPort) || +a.is_average - +b.is_average || a.port.localeCompare(b.port));
         let pop;
         const apply = (b) => {
             const p = est.prices;
             if (b) {
+                store.set('ch_voy_bunker_port', b.port);
                 if (b.vlsfo !== null) p.ifo = b.vlsfo;
                 if (b.mgo !== null) p.mgo = b.mgo;
                 if (b.hsfo !== null) p.hsfo = b.hsfo;
@@ -279,11 +286,12 @@ export async function mount(el, ctx, param) {
             pop.close();
             changed();
             drawInputs();
-            toast(b ? `${b.port} ${fmtDate(b.date)} fiyatları uygulandı.` : 'EUA ve kur uygulandı.');
+            toast(b ? `${b.port} ${fmtDate(b.date)} fiyatları uygulandı${b.source === 'handybulk' ? ' (HandyBulk)' : ''}.` : 'EUA ve kur uygulandı.');
         };
         pop = popover(anchor, h('div.ch-saved',
             m.bunkers.length ? h('div.ch-saved__list', m.bunkers.map((b) => h('div.ch-saved__row', h('button.ch-saved__open', { type: 'button', on: { click: () => apply(b) } },
-                h('strong', b.port), h('small', `VLSFO ${b.vlsfo ?? '—'} · MGO ${b.mgo ?? '—'}${b.hsfo !== null ? ' · HSFO ' + b.hsfo : ''} · ${fmtDate(b.date)}`)))))
+                h('strong', b.port, b.port === lastPort ? h('small.dim', ' · last used') : null, ' ', sourceBadge(b)),
+                h('small', `VLSFO ${b.vlsfo ?? '—'} · MGO ${b.mgo ?? '—'}${b.hsfo !== null ? ' · HSFO ' + b.hsfo : ''} · ${fmtDate(b.date)}`)))))
                 : h('div.dim.ch-saved__empty', 'Market Dashboard’da bunker fiyatı yok.'),
             h('small.dim', `EUA: ${m.eua ? '€' + m.eua.value + ' (' + fmtDate(m.eua.date) + ')' : '—'} · EUR/USD: ${m.fx?.eur_usd ?? '—'} (TCMB) — birlikte uygulanır`),
             !m.bunkers.length && (m.eua || m.fx) ? h('button.tiny', { type: 'button', on: { click: () => apply(null) } }, 'Apply EUA & FX only') : null), { className: 'ch-saved-pop', align: 'right' });

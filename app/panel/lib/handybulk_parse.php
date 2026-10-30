@@ -144,3 +144,59 @@ function hb_parse_bdi_page(string $html): array
     ksort($archive);
     return ['days' => $days, 'weekly' => $weekly, 'archive' => array_values($archive)];
 }
+
+/**
+ * Ship Bunker page → ['as_of' => 'YYYY-MM-DD'|null, 'prices' => [['port', 'is_average', 'grades' => ['VLSFO' => 988.0, 'MGO' => 1602.5, …]]]].
+ * Tables whose first header cell is "Port…" (e.g. "Ship Bunker Prices", "Selected Ports"); grade columns are read from
+ * the header ("VLSFO Price $/mt" → VLSFO), so a new grade column is picked up without code changes.
+ */
+function hb_parse_bunker_page(string $html): array
+{
+    $doc = hb_dom($html);
+    $asOf = null;
+    foreach ($doc->getElementsByTagName('p') as $p) {
+        if (preg_match('/^(\d{1,2}-[A-Za-z]+-\d{4})\s+Daily Updated/i', hb_text($p), $m)) {
+            $asOf = hb_date($m[1]);
+            break;
+        }
+    }
+    $prices = [];
+    $seen = [];
+    foreach ($doc->getElementsByTagName('table') as $table) {
+        $rows = iterator_to_array($table->getElementsByTagName('tr'));
+        if (!$rows) {
+            continue;
+        }
+        $head = array_map('hb_text', iterator_to_array($rows[0]->getElementsByTagName('th')) ?: iterator_to_array($rows[0]->getElementsByTagName('td')));
+        if (!$head || !preg_match('/^port/i', $head[0])) {
+            continue;
+        }
+        $grades = [];
+        foreach (array_slice($head, 1, null, true) as $i => $h) {
+            if (preg_match('/^([A-Z][A-Z0-9]{1,9})\b/', $h, $g)) {
+                $grades[$i] = $g[1];
+            }
+        }
+        foreach (array_slice($rows, 1) as $tr) {
+            $cells = array_map('hb_text', iterator_to_array($tr->getElementsByTagName('td')));
+            if (count($cells) < 2 || $cells[0] === '') {
+                continue;
+            }
+            $name = $cells[0];
+            $avg = (bool) preg_match('/\baverage\b/i', $name);
+            $port = $avg ? trim(preg_replace('/\s*bunker price\s*$/i', '', $name)) : $name;
+            $vals = [];
+            foreach ($grades as $i => $grade) {
+                $v = hb_num($cells[$i] ?? '');
+                if ($v !== null) {
+                    $vals[$grade] = $v;
+                }
+            }
+            if ($vals && !isset($seen[strtolower($port)])) {
+                $seen[strtolower($port)] = true;
+                $prices[] = ['port' => $port, 'is_average' => $avg, 'grades' => $vals];
+            }
+        }
+    }
+    return ['as_of' => $asOf, 'prices' => $prices];
+}

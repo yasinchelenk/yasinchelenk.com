@@ -111,6 +111,8 @@ function panel_migrations(): array
         115 => 'chartering_migrate_115',
         // Data Sources (HandyBulk): import log, review list, endeks değerlerinin kaynağı
         116 => 'chartering_migrate_116',
+        // Data Sources (HandyBulk): bunker fiyatlarının kaynağı, ortalama satırı, Ports eşlemesi, ek yakıt türleri
+        117 => 'chartering_migrate_117',
     ];
 }
 

@@ -10,7 +10,7 @@ import { lineChart, SERIES_COLORS } from '../chartering/chart.js';
 import { regionHint } from '../chartering/regions.js';
 import { parseNum, fmt, usd, dueBadge } from '../chartering/ui.js';
 import { LESSONS } from '../chartering/links.js';
-import { runAdapter, sourcesView } from '../chartering/sources.js';
+import { runAdapter, sourcesView, sourceBadge } from '../chartering/sources.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const WEEKLY = ['Capesize', 'Panamax', 'Supramax / Ultramax', 'Handysize'];
@@ -116,11 +116,11 @@ export async function mount(el, ctx) {
                     h('tbody', Object.entries(INDICES).map(([k, v]) => row(k, v.short)))),
                 h('table.ch-table', h('thead', h('tr', ['Avg TC', 'USD/day', 'Change', '%'].map((x, i) => h('th', { class: i ? 'r' : '' }, x)))),
                     h('tbody', Object.entries(TC_CODES).map(([k, v]) => row(k, v.label, 0, true))))),
-            h('div.ch-dash__chartbar', sel, h('span.dim', asOf ? `as of ${fmtDate(asOf)}` : '')),
+            h('div.ch-dash__chartbar', sel, sourceBadge(idx.get('BDI')?.row) ?? h('span.dim', asOf ? `as of ${fmtDate(asOf)}` : '')),
             chart({ series, format: (v) => (ui.index === 'TC' ? usd(v) : fmt(v, 0)), title: ui.index === 'TC' ? 'TC earnings' : INDICES[ui.index].label }),
         ], {
             actions: canEdit ? [
-                h('button.tiny', { type: 'button', title: 'HandyBulk BDI sayfası sunucuda çekilir ve okunur (robots.txt, 12 saat önbellek); elle girilenler ezilmez, farklar Review’e düşer', on: { click: (e) => handybulkMenu(e.currentTarget) } }, 'Update from HandyBulk ▾'),
+                h('button.tiny', { type: 'button', title: 'HandyBulk BDI sayfası sunucuda çekilir ve okunur (robots.txt, 12 saat önbellek); elle girilenler ezilmez, farklar Review’e düşer', on: { click: (e) => handybulkMenu(e.currentTarget, 'bdi', 'Baltic Dry Index page', () => balticDialog()) } }, 'Update from HandyBulk ▾'),
                 h('button.tiny', { type: 'button', on: { click: () => balticDialog() } }, '+ Daily / paste report'),
             ] : null,
             links: [LESSONS.bdi],
@@ -129,11 +129,11 @@ export async function mount(el, ctx) {
 
     // ------------------------------------------------------------ HandyBulk (Data Sources; fetched and parsed on the server)
 
-    function handybulkMenu(anchor) {
+    function handybulkMenu(anchor, key, page, onManual) {
         let pop;
         const item = (label, hint, fn) => h('button.ctx-menu__item', { type: 'button', on: { click: () => { pop.close(); fn(); } } }, h('span.ctx-menu__label', label), hint ? h('small.ctx-menu__hint', hint) : null);
         pop = popover(anchor, h('div',
-            item('Update now', 'Baltic Dry Index page', async () => { const r = await runAdapter('bdi', { onManual: () => balticDialog() }); if (r && (r.added || r.updated)) load(); }),
+            item('Update now', page, async () => { const r = await runAdapter(key, { onManual }); if (r && (r.added || r.updated)) load(); }),
             item('Data sources…', 'all adapters, log, review', () => setView('sources'))), { align: 'right' });
     }
     function balticDialog() {
@@ -300,8 +300,10 @@ export async function mount(el, ctx) {
     // ------------------------------------------------------------ Bunkers
 
     function bunkerCard(bunk) {
-        const ports = [...new Set([...BUNKER_PORTS.filter((p) => bunk.has(p)), ...bunk.keys()])];
         const rows = data.bunkers;
+        const isAvg = (p) => rows.some((r) => r.port === p && +r.is_average);
+        // Fixed ports first, then the rest; "Global Average" (HandyBulk) at the bottom
+        const ports = [...new Set([...BUNKER_PORTS.filter((p) => bunk.has(p)), ...bunk.keys()])].sort((a, b) => isAvg(a) - isAvg(b));
         const lastBy = new Map(ports.map((p) => [p, rows.filter((r) => r.port === p).sort((a, b) => (a.date < b.date ? 1 : -1))]));
         if (!ports.includes(ui.port)) ui.port = ports[0] ?? 'Istanbul';
         const sel = h('select', { on: { change: (e) => { ui.port = e.target.value; saveUi(); draw(); } } }, ports.map((p) => h('option', { selected: p === ui.port }, p)));
@@ -312,21 +314,24 @@ export async function mount(el, ctx) {
                 h('tbody', ports.map((p) => {
                     const [cur, prev] = lastBy.get(p);
                     const d = (k) => (cur[k] !== null && prev?.[k] !== null && prev ? cur[k] - prev[k] : null);
-                    return h('tr', h('td', p), h('td.r', cur.vlsfo !== null ? fmt(cur.vlsfo, 0) : ''), h('td.r', { class: dirCls(d('vlsfo')) }, d('vlsfo') !== null ? signed(d('vlsfo')) : ''),
+                    return h('tr', { class: isAvg(p) ? 'dim' : '' }, h('td', p), h('td.r', cur.vlsfo !== null ? fmt(cur.vlsfo, 0) : ''), h('td.r', { class: dirCls(d('vlsfo')) }, d('vlsfo') !== null ? signed(d('vlsfo')) : ''),
                         h('td.r', cur.mgo !== null ? fmt(cur.mgo, 0) : ''), h('td.r', { class: dirCls(d('mgo')) }, d('mgo') !== null ? signed(d('mgo')) : ''),
                         h('td.r', cur.hsfo !== null ? fmt(cur.hsfo, 0) : ''),
                         h('td.r', cur.mgo !== null && cur.vlsfo !== null ? fmt(cur.mgo - cur.vlsfo, 0) : ''),
                         h('td.r', { title: 'Scrubber premium: what a scrubber-fitted ship saves per mt by burning HSFO' }, cur.hsfo !== null && cur.vlsfo !== null ? fmt(cur.vlsfo - cur.hsfo, 0) : ''),
-                        h('td', fmtDate(cur.date)),
+                        h('td', fmtDate(cur.date), ' ', sourceBadge(cur, { short: true })),
                         h('td', canEdit ? h('button.tiny.ghost', { type: 'button', title: `${fmtDate(cur.date)} kaydını sil`, on: { click: async () => { await del(`chartering/market/bunkers/${cur.id}`); load(); } } }, '✕') : null));
                 })))) : h('p.dim', 'Henüz bunker fiyatı yok. “+ Prices / paste” ile ekleyin.'),
-            ports.length ? h('div.ch-dash__chartbar', sel, h('span.dim', 'Voyage Estimator → Costs → “From market” ile tek tıkla kullanılır.')) : null,
+            ports.length ? h('div.ch-dash__chartbar', sel, sourceBadge(lastBy.get(ui.port)?.[0]), h('span.dim', 'Voyage Estimator → Costs → “From market” ile tek tıkla kullanılır.')) : null,
             ports.length ? chart({ series: [
                 { key: 'vlsfo', name: 'VLSFO', color: SERIES_COLORS[0], points: portRows.map((r) => ({ date: r.date, value: r.vlsfo })) },
                 { key: 'mgo', name: 'MGO', color: SERIES_COLORS[1], points: portRows.map((r) => ({ date: r.date, value: r.mgo })) },
                 { key: 'hsfo', name: 'HSFO', color: SERIES_COLORS[2], points: portRows.map((r) => ({ date: r.date, value: r.hsfo })) },
             ], format: (v) => usd(v), title: `${ui.port} bunker prices` }) : null,
-        ], { actions: canEdit ? h('button.tiny', { type: 'button', on: { click: () => bunkerDialog(lastBy) } }, '+ Prices / paste') : null });
+        ], { actions: canEdit ? [
+            h('button.tiny', { type: 'button', title: 'HandyBulk Ship Bunker sayfası sunucuda çekilir ve okunur; elle girilen fiyatlar ezilmez, farklar Review’e düşer', on: { click: (e) => handybulkMenu(e.currentTarget, 'bunker', 'Ship Bunker page', () => bunkerDialog(lastBy)) } }, 'Update from HandyBulk ▾'),
+            h('button.tiny', { type: 'button', on: { click: () => bunkerDialog(lastBy) } }, '+ Prices / paste'),
+        ] : null });
     }
 
     function bunkerDialog(lastBy) {

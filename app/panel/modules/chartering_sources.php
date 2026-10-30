@@ -40,6 +40,21 @@ function chartering_migrate_116(PDO $pdo): void
         SQL);
 }
 
+/** Migration 117: provenance of bunker prices, the "Global Average" row, link to Ports, grades without a column. */
+function chartering_migrate_117(PDO $pdo): void
+{
+    $pdo->exec(<<<'SQL'
+        ALTER TABLE ch_bunker_prices ADD COLUMN source TEXT;
+        ALTER TABLE ch_bunker_prices ADD COLUMN source_url TEXT;
+        ALTER TABLE ch_bunker_prices ADD COLUMN as_of_date TEXT;
+        ALTER TABLE ch_bunker_prices ADD COLUMN fetched_at TEXT;
+        ALTER TABLE ch_bunker_prices ADD COLUMN import_run_id INTEGER;
+        ALTER TABLE ch_bunker_prices ADD COLUMN is_average INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE ch_bunker_prices ADD COLUMN port_id INTEGER;
+        ALTER TABLE ch_bunker_prices ADD COLUMN extra TEXT;
+        SQL);
+}
+
 /** Plausibility ranges (spec §3): outside → not written, goes to review. */
 const HB_RANGES = [
     'index' => [0, 20000], 'tc' => [1000, 250000], 'bb' => [0, 5000000], 'bunker' => [100, 3000], 'route_t' => [1, 100],
@@ -51,7 +66,7 @@ function hb_adapters(): array
 {
     return [
         'bdi' => ['label' => 'Baltic Dry Index', 'path' => '/baltic-dry-index/', 'implemented' => true, 'targets' => 'Baltic indices, TC earnings'],
-        'bunker' => ['label' => 'Ship Bunker', 'path' => '/ship-bunker/', 'implemented' => false, 'phase' => 3, 'targets' => 'Bunker prices'],
+        'bunker' => ['label' => 'Ship Bunker', 'path' => '/ship-bunker/', 'implemented' => true, 'targets' => 'Bunker prices (VLSFO, MGO, …)'],
         'rates' => ['label' => 'Ship Charter Rates', 'path' => '/ship-charter-rates/', 'implemented' => false, 'phase' => 4, 'targets' => 'Trip & period rates, week TC, 1-year TC'],
         'weekly' => ['label' => 'BDI weekly reports', 'path' => '/baltic-dry-index/', 'implemented' => false, 'phase' => 5, 'targets' => 'Reported fixtures, route values'],
         'news' => ['label' => 'Dry Bulk Shipping News', 'path' => '/dry-bulk-shipping-news/', 'implemented' => false, 'phase' => 6, 'targets' => 'Dates + links (no text)'],
@@ -152,6 +167,7 @@ function hb_run(string $key, string $trigger, array $opt = []): array
     try {
         [$counts, $asOf, $msg] = match ($key) {
             'bdi' => hb_import_bdi($res['html'], $ctx),
+            'bunker' => hb_import_bunker($res['html'], $ctx),
         };
     } catch (HbFormatChanged $e) {
         // An old archive month may hold only a news item — that is not a format change of the live page
@@ -248,6 +264,120 @@ function hb_upsert_index(string $date, string $code, float $value, ?float $chang
     }
 }
 
+// ---------------------------------------------------------------- Bunker adapter
+
+/** Grades with their own column; anything else the page adds (e.g. "LSMGO") is kept in the row's extra JSON. */
+const HB_BUNKER_COLS = ['VLSFO' => 'vlsfo', 'MGO' => 'mgo', 'HSFO' => 'hsfo'];
+
+/** @return array{0: array, 1: ?string, 2: ?string} counts, as-of date, message */
+function hb_import_bunker(string $html, array $ctx): array
+{
+    $page = hb_parse_bunker_page($html);
+    if (!$page['as_of'] || !$page['prices']) {
+        throw new HbFormatChanged('Format changed: “DD-Month-YYYY Daily Updated Ship Bunker Prices” or the port / price tables not found. Nothing was written — use “+ Prices / paste”.');
+    }
+    $c = ['added' => 0, 'updated' => 0, 'skipped' => 0, 'review' => 0];
+    db()->beginTransaction();
+    try {
+        foreach ($page['prices'] as $p) {
+            hb_upsert_bunker($page['as_of'], $p, $ctx, $c);
+        }
+        db()->commit();
+    } catch (Throwable $e) {
+        db()->rollBack();
+        throw $e;
+    }
+    return [$c, $page['as_of'], count($page['prices']) . ' ports'];
+}
+
+/** "Istanbul" → the Ports row "Istanbul" or "Istanbul (Ambarlı)"; null when there is none. */
+function hb_bunker_port_id(string $name): ?int
+{
+    $id = scalar('SELECT id FROM ch_ports WHERE lower(name) = lower(?) OR lower(name) LIKE lower(?) ORDER BY length(name) LIMIT 1', [$name, addcslashes($name, '%_') . ' (%']);
+    return $id ? (int) $id : null;
+}
+
+/** One port's prices (date, port) with the range / manual-priority rules; a grade at a time for the review list. */
+function hb_upsert_bunker(string $date, array $p, array $ctx, array &$c): void
+{
+    [$lo, $hi] = HB_RANGES['bunker'];
+    $port = mb_substr($p['port'], 0, 60);
+    $portId = $p['is_average'] ? null : hb_bunker_port_id($port);
+    $base = ['date' => $date, 'port' => $port, 'is_average' => $p['is_average'], 'port_id' => $portId, 'url' => $ctx['url']];
+    $grades = [];
+    foreach ($p['grades'] as $g => $v) {
+        if ($v < $lo || $v > $hi) {
+            hb_review($ctx, 'range', 'ch_bunker_prices', "{$date}|{$port}|{$g}", $base + ['grade' => $g, 'value' => $v], "{$port} {$g} {$date}: {$v} \$/mt outside {$lo}–{$hi}");
+            $c['review']++;
+            continue;
+        }
+        $grades[$g] = $v;
+    }
+    if (!$p['is_average'] && !$portId && !scalar("SELECT 1 FROM ch_hb_review WHERE kind = 'unmapped' AND target = 'ch_ports' AND record_key = ?", [mb_strtolower($port)])) {
+        hb_review($ctx, 'unmapped', 'ch_ports', mb_strtolower($port), ['name' => $port], "Bunker port “{$port}” is not in Ports — prices are saved under this name; add the port to link it");
+        $c['review']++;
+    }
+    if (!$grades) {
+        $c['skipped']++;
+        return;
+    }
+    $cur = row('SELECT * FROM ch_bunker_prices WHERE date = ? AND port = ?', [$date, $port]);
+    $curVal = function (string $g) use ($cur): ?float {
+        $v = isset(HB_BUNKER_COLS[$g]) ? ($cur[HB_BUNKER_COLS[$g]] ?? null) : (json_decode((string) ($cur['extra'] ?? ''), true)[$g] ?? null);
+        return $v === null ? null : (float) $v;
+    };
+    $diff = $cur ? array_filter($grades, fn($v, $g) => $curVal($g) === null || abs($curVal($g) - $v) >= 0.005, ARRAY_FILTER_USE_BOTH) : $grades;
+    if (!$diff) {
+        $c['skipped']++;
+        return;
+    }
+    if ($cur && ($cur['source'] ?? '') !== 'handybulk') {
+        foreach ($diff as $g => $v) {
+            $m = $curVal($g);
+            hb_review($ctx, 'conflict', 'ch_bunker_prices', "{$date}|{$port}|{$g}", $base + ['grade' => $g, 'value' => $v, 'manual' => $m],
+                "{$port} {$g} {$date}: manual " . ($m ?? '—') . " vs HandyBulk {$v} — manual value kept");
+            $c['review']++;
+        }
+        $c['skipped']++;
+        return;
+    }
+    hb_bunker_write($cur, $base, $grades, $ctx['run_id'], $ctx['fetched_at'], 'HandyBulk');
+    if ($cur) {
+        $old = implode(' / ', array_map(fn($g) => "{$g} " . ($curVal($g) ?? '—'), array_keys($diff)));
+        gecmis_log('ch_market', "{$date}|{$port}", "Bunker {$port} {$date}", 'prices', 'islem', $old, implode(' / ', array_map(fn($g, $v) => "{$g} {$v}", array_keys($diff), $diff)) . " · HandyBulk run {$ctx['run_id']}");
+        $c['updated']++;
+    } else {
+        $c['added']++;
+    }
+}
+
+/**
+ * Writes grades into a (date, port) row as HandyBulk data; other grades of an existing row stay as they are.
+ * A manual row keeps its provenance (an accepted review value changes only that grade), so later runs still leave it alone.
+ */
+function hb_bunker_write(?array $cur, array $base, array $grades, ?int $runId, string $fetchedAt, string $by): void
+{
+    $extra = json_decode((string) ($cur['extra'] ?? ''), true) ?: [];
+    $set = ['updated_at' => now(), 'updated_by' => $by];
+    if (!$cur || ($cur['source'] ?? '') === 'handybulk') {
+        $set += ['source' => 'handybulk', 'source_url' => $base['url'] ?? null, 'as_of_date' => $base['date'], 'fetched_at' => $fetchedAt, 'import_run_id' => $runId,
+            'is_average' => $base['is_average'] ? 1 : 0, 'port_id' => $base['port_id'] ?? null];
+    }
+    foreach ($grades as $g => $v) {
+        if (isset(HB_BUNKER_COLS[$g])) {
+            $set[HB_BUNKER_COLS[$g]] = $v;
+        } else {
+            $extra[$g] = $v;
+        }
+    }
+    $set['extra'] = $extra ? json_encode($extra) : null;
+    if ($cur) {
+        update('ch_bunker_prices', $cur['id'], $set);
+    } else {
+        insert('ch_bunker_prices', ['date' => $base['date'], 'port' => $base['port'], 'created_at' => now(), 'created_by' => $by] + $set);
+    }
+}
+
 /** Review actions: accept (conflict → take the source value; range → write anyway; consistency → acknowledge) or dismiss. */
 function ch_sources_review_resolve(array $p, array $in): never
 {
@@ -264,6 +394,12 @@ function ch_sources_review_resolve(array $p, array $in): never
             insert('ch_market_indices', ['date' => $d['date'], 'code' => $d['code'], 'created_at' => now(), 'created_by' => actor()['name']] + $set);
         }
         gecmis_log('ch_market', "{$d['date']}|{$d['code']}", "Baltic {$d['code']} {$d['date']}", 'value', 'islem', $cur['value'] ?? null, "{$d['value']} (review accepted)");
+        feed('ch_market', 'update', null, 'handybulk');
+    }
+    if ($action === 'accept' && $r['target'] === 'ch_bunker_prices' && in_array($r['kind'], ['conflict', 'range'], true)) {
+        $cur = row('SELECT * FROM ch_bunker_prices WHERE date = ? AND port = ?', [$d['date'], $d['port']]);
+        hb_bunker_write($cur, $d, [$d['grade'] => (float) $d['value']], $r['run_id'] === null ? null : (int) $r['run_id'], now(), actor()['name']);
+        gecmis_log('ch_market', "{$d['date']}|{$d['port']}", "Bunker {$d['port']} {$d['date']}", 'prices', 'islem', $d['manual'] ?? null, "{$d['grade']} {$d['value']} (review accepted)");
         feed('ch_market', 'update', null, 'handybulk');
     }
     update('ch_hb_review', $r['id'], ['status' => $action === 'accept' ? 'accepted' : 'dismissed', 'resolved_at' => now(), 'resolved_by' => actor()['name']]);

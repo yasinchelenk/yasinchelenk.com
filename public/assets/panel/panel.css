@@ -1069,7 +1069,7 @@ table.ch-compare thead th { white-space: normal; min-width: 150px; max-width: 24
 .ch-saved__row { display: flex; align-items: center; gap: 4px; border-radius: 6px; }
 .ch-saved__row:hover { background: var(--row-hover); }
 .ch-saved__row.is-current { background: var(--row-selected); }
-.ch-saved__open { flex: 1; display: grid !important; justify-items: start; gap: 1px; text-align: left; border: 0 !important; background: none !important; padding: 6px 8px !important; white-space: normal !important; }
+.ch-saved__open { flex: 1; display: grid !important; justify-items: start; justify-content: start !important; gap: 1px; text-align: left; border: 0 !important; background: none !important; padding: 6px 8px !important; white-space: normal !important; }
 .ch-saved__open small { font-size: 12px; }
 .ch-saved__empty { padding: 12px; text-align: center; }
 .ch-compare-pick { display: grid; gap: 6px; max-height: 50vh; overflow: auto; }

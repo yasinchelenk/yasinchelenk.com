@@ -68,6 +68,18 @@ $u = $byCode(hb_parse_baltic('The Baltic Handysize Index (BHSI) remained unchang
 eq([$u['BHSI'] ?? null, $u['HANDY'] ?? null], [[1020, 0], [18362, -1]], 'BHSI 1,020 (0); TC 18,362 (−1)');
 eq(hb_date('28-October-2026') . ' ' . var_export(hb_date('31-February-2026'), true) . ' ' . var_export(hb_date('28 October 2026'), true), '2026-10-28 NULL NULL', 'dates: DD-Month-YYYY only, real calendar days');
 
+// ---------------------------------------------------------------- 9 · Bunker
+section('9 · Bunker');
+$bk = hb_parse_bunker_page((string) file_get_contents($root . '/tests/handybulk/bunker.html'));
+$bp = array_column($bk['prices'], null, 'port');
+eq($bk['as_of'], '2026-10-29', 'as of the “29-October-2026 Daily Updated” line');
+eq([$bp['Istanbul']['grades']['VLSFO'] ?? null, $bp['Istanbul']['grades']['MGO'] ?? null], [909.0, 1560.0], 'Istanbul VLSFO 909.00, MGO 1560.00');
+eq([$bp['Rotterdam']['grades'] ?? null], [['VLSFO' => 770.0, 'MGO' => 1438.0]], 'Rotterdam VLSFO 770.00, MGO 1438.00');
+eq([$bp['Global Average']['grades'] ?? null, $bp['Global Average']['is_average'] ?? null], [['VLSFO' => 988.0, 'MGO' => 1602.5], true], 'Global Average 988.00 / 1602.50, is_average = true');
+eq($bp['Istanbul']['grades']['HSFO'] ?? null, 612.0, 'grade columns come from the table header (a new HSFO column is picked up)');
+eq(array_keys($bp), ['Global Average', 'Singapore', 'Rotterdam', 'LA / Long Beach', 'Istanbul', 'Piraeus'], 'both tables; the article after the <h1> is not read');
+eq(hb_parse_bunker_page('<table><tr><th>Port</th><th>Price</th></tr><tr><td>X</td><td>1</td></tr></table>')['as_of'], null, 'no “Daily Updated” date → nothing (format changed)');
+
 // ---------------------------------------------------------------- 10 · errors
 section('10 · Error cases');
 $empty = hb_parse_bdi_page('');
@@ -136,6 +148,30 @@ if ($tmp) {
     } catch (HbFormatChanged $e) {
         check(true, 'changed format → HbFormatChanged, nothing written');
     }
+
+    section('9 · Bunker import (temporary copy of the database)');
+    q("DELETE FROM ch_bunker_prices WHERE date = '2026-10-29'");
+    q("DELETE FROM ch_hb_review WHERE target IN ('ch_bunker_prices', 'ch_ports')");
+    q("INSERT INTO ch_bunker_prices (date, port, vlsfo, mgo) VALUES ('2026-10-29', 'Rotterdam', 765, 1438)");   // a manual entry
+    $istanbul = scalar("SELECT id FROM ch_ports WHERE name LIKE 'Istanbul%' ORDER BY length(name) LIMIT 1");
+    $bctx = ['run_id' => 0, 'url' => 'https://www.handybulk.com/ship-bunker/', 'fetched_at' => '2026-10-29 10:00:00', 'adapter' => 'bunker'];
+    $bhtml = (string) file_get_contents($root . '/tests/handybulk/bunker.html');
+    [$b1, $asOf] = hb_import_bunker($bhtml, $bctx);
+    [$b2] = hb_import_bunker($bhtml, $bctx);
+    $ist = row("SELECT * FROM ch_bunker_prices WHERE date = '2026-10-29' AND port = 'Istanbul'");
+    $avg = row("SELECT * FROM ch_bunker_prices WHERE date = '2026-10-29' AND port = 'Global Average'");
+    $rot = row("SELECT * FROM ch_bunker_prices WHERE date = '2026-10-29' AND port = 'Rotterdam'");
+    $pir = row("SELECT * FROM ch_bunker_prices WHERE date = '2026-10-29' AND port = 'Piraeus'");
+    $rev = rows("SELECT kind, record_key FROM ch_hb_review WHERE status = 'open' AND target IN ('ch_bunker_prices', 'ch_ports') ORDER BY kind, record_key");
+    eq([$asOf, $b1['added'], $b2['added'], $b2['updated']], ['2026-10-29', 5, 0, 0], '5 ports added (manual Rotterdam not overwritten); the same page again → 0 new, 0 updated');
+    eq([(float) $ist['vlsfo'], (float) $ist['mgo'], (float) $ist['hsfo'], $ist['source'], $ist['as_of_date']], [909.0, 1560.0, 612.0, 'handybulk', '2026-10-29'], 'Istanbul 909 / 1560 (+ HSFO 612), source = handybulk, as_of_date');
+    eq($istanbul ? (int) $ist['port_id'] === (int) $istanbul : $ist['port_id'] === null, true, 'Istanbul linked to the Ports row “Istanbul (…)”' . ($istanbul ? '' : ' (none in this DB → unlinked)'));
+    eq([(float) $avg['vlsfo'], (float) $avg['mgo'], (int) $avg['is_average'], $avg['port_id']], [988.0, 1602.5, 1, null], 'Global Average 988 / 1602.5 stored with is_average = 1, no port');
+    eq([(float) $rot['vlsfo'], $rot['source']], [765.0, null], 'manual Rotterdam VLSFO 765 kept');
+    eq([(float) $pir['vlsfo'], $pir['mgo']], [870.0, null], 'Piraeus MGO 9,999 outside 100–3,000 → not written (VLSFO is)');
+    check(in_array(['kind' => 'conflict', 'record_key' => '2026-10-29|Rotterdam|VLSFO'], $rev) && in_array(['kind' => 'range', 'record_key' => '2026-10-29|Piraeus|MGO'], $rev)
+        && in_array(['kind' => 'unmapped', 'record_key' => 'la / long beach'], $rev) && !in_array(['kind' => 'conflict', 'record_key' => '2026-10-29|Rotterdam|MGO'], $rev),
+        'review: Rotterdam VLSFO conflict (MGO equal → none), Piraeus MGO out of range, “LA / Long Beach” not in Ports', $rev);
 }
 
 // ---------------------------------------------------------------- Snapshots (structure only, when present)
@@ -145,6 +181,10 @@ if (is_file("{$snap}/baltic-dry-index.html")) {
     $p = hb_parse_bdi_page((string) file_get_contents("{$snap}/baltic-dry-index.html"));
     check(count($p['days']) > 0 && count($p['archive']) > 0, 'BDI snapshot: days ' . count($p['days']) . ', archive months ' . count($p['archive']));
     check((bool) array_filter($p['days'], fn($d) => count($d['rows']) >= 5 && is_float($d['rows'][0]['value'])), 'BDI snapshot: each day has index values (floats)');
+}
+if (is_file("{$snap}/ship-bunker.html")) {
+    $p = hb_parse_bunker_page((string) file_get_contents("{$snap}/ship-bunker.html"));
+    check($p['as_of'] !== null && count($p['prices']) >= 5 && ($p['prices'][0]['is_average'] ?? false), 'Bunker snapshot: as of ' . $p['as_of'] . ', ports ' . count($p['prices']) . ', average row first');
 }
 
 echo "\n" . ($fail ? "FAIL {$pass}/" . ($pass + $fail) : "PASS {$pass}/{$pass}") . " — HandyBulk tests\n";
