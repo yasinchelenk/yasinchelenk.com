@@ -206,14 +206,64 @@ function xlsx_read(string $file, int $maxRows = 3000, int $maxCols = 30, bool $n
     if (!$sheet) {
         return [];
     }
+
+    return xlsx_sheet_rows($files[$sheet], xlsx_shared_strings($files['xl/sharedStrings.xml'] ?? ''), $maxRows, $maxCols);
+}
+
+/**
+ * Every worksheet of an .xlsx in workbook order: [['name' => 'Sheet name', 'rows' => [[…], …]], …].
+ * Values as in xlsx_read (dates stay Excel serial numbers; formulas give their last calculated value).
+ */
+function xlsx_read_book(string $file, int $maxRows = 3000, int $maxCols = 30, int $maxSheets = 60, bool $noExtension = false): array
+{
+    $files = zip_entries($file, ['#^xl/sharedStrings\.xml$#', '#^xl/workbook\.xml$#', '#^xl/_rels/workbook\.xml\.rels$#', '#^xl/worksheets/sheet\d+\.xml$#'], $noExtension);
+    $shared = xlsx_shared_strings($files['xl/sharedStrings.xml'] ?? '');
+    $targets = [];
+    $rels = @simplexml_load_string($files['xl/_rels/workbook.xml.rels'] ?? '');
+    foreach ($rels?->Relationship ?? [] as $r) {
+        $targets[(string) $r['Id']] = 'xl/' . ltrim(preg_replace('#^/?xl/#', '', (string) $r['Target']), '/');
+    }
+    $out = [];
+    $wb = @simplexml_load_string($files['xl/workbook.xml'] ?? '');
+    foreach ($wb?->sheets->sheet ?? [] as $sh) {
+        $rid = (string) ($sh->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships')['id'] ?? '');
+        $path = $targets[$rid] ?? null;
+        if ($path === null || !isset($files[$path])) {
+            continue;
+        }
+        $out[] = ['name' => (string) $sh['name'], 'rows' => xlsx_sheet_rows($files[$path], $shared, $maxRows, $maxCols)];
+        if (count($out) >= $maxSheets) {
+            break;
+        }
+    }
+    // No readable workbook.xml: fall back to the sheet files in name order
+    if (!$out) {
+        $sheets = array_filter(array_keys($files), fn($n) => str_starts_with($n, 'xl/worksheets/'));
+        natsort($sheets);
+        foreach (array_slice(array_values($sheets), 0, $maxSheets) as $i => $path) {
+            $out[] = ['name' => 'Sheet' . ($i + 1), 'rows' => xlsx_sheet_rows($files[$path], $shared, $maxRows, $maxCols)];
+        }
+    }
+    return $out;
+}
+
+/** @return list<string> */
+function xlsx_shared_strings(string $xml): array
+{
     $shared = [];
-    if (!empty($files['xl/sharedStrings.xml'])) {
-        $sx = @simplexml_load_string($files['xl/sharedStrings.xml']);
+    if ($xml !== '') {
+        $sx = @simplexml_load_string($xml);
         foreach ($sx?->si ?? [] as $si) {
             $shared[] = isset($si->t) ? (string) $si->t : implode('', array_map(fn($r) => (string) $r->t, iterator_to_array($si->r, false)));
         }
     }
-    $xml = @simplexml_load_string($files[$sheet]);
+    return $shared;
+}
+
+/** One worksheet's XML as rows of strings (empty rows are skipped). */
+function xlsx_sheet_rows(string $sheetXml, array $shared, int $maxRows = 3000, int $maxCols = 30): array
+{
+    $xml = @simplexml_load_string($sheetXml);
     $rows = [];
     foreach ($xml?->sheetData->row ?? [] as $row) {
         $cells = [];

@@ -121,6 +121,8 @@ function panel_migrations(): array
         120 => 'chartering_migrate_120',
         // Tatil takvimleri: liman bazlı tatil, kaynak (BIMCO / elle / yerleşik TR / Nager.Date), ülke-yıl eşitleme kaydı
         121 => 'chartering_migrate_121',
+        // Chartering · Fleet: gemilerin TC durumu (charterer, delivery, min/max redelivery, hire, next DD) ve sefer kayıtları
+        122 => 'chartering_migrate_122',
     ];
 }
 
