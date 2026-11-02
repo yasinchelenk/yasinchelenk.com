@@ -7,8 +7,12 @@ const PASSWORD_HINT = h('span', 'En az 8 karakter; içinde bir ', h('b', 'büyü
 
 const logo = (firma) => h('div.auth__logo', firma.logo ? h('img', { src: firma.logo, alt: firma.ad }) : firma.kisa ?? firma.ad);
 
-/** Giriş / kayıt ekranı. Başarılı girişte onDone(user) çağrılır. register: false → yalnızca giriş (Chartering Desk) */
-export function renderLogin(root, info, onDone, { register = true } = {}) {
+/**
+ * Giriş / kayıt ekranı. Başarılı girişte onDone(user) çağrılır. register: false → yalnızca giriş.
+ * kaynak: 'chartering' → Chartering Desk'ten açılan hesap (yalnızca Chartering sayfaları alabilir, paneli göremez)
+ */
+export function renderLogin(root, info, onDone, opts = {}) {
+    const { register = true, kaynak = null } = opts;
     let mode = info.kurulum ? 'kayit' : 'giris';
     let color = null;
     const card = h('form.auth__card');
@@ -65,9 +69,9 @@ export function renderLogin(root, info, onDone, { register = true } = {}) {
             submit.textContent = 'Please wait…';
             try {
                 const res = isReg
-                    ? await post('oturum/kayit', { ad: name.value, kullaniciAdi: user.value, sifre: pass.value, renk: color, hatirla: remember.checked, kayitKodu: code.value, kurulumKodu: setup.value }, { quiet: true })
+                    ? await post('oturum/kayit', { ad: name.value, kullaniciAdi: user.value, sifre: pass.value, renk: color, hatirla: remember.checked, kayitKodu: code.value, kurulumKodu: setup.value, kaynak }, { quiet: true })
                     : await post('oturum/giris', { kullaniciAdi: user.value, sifre: pass.value, hatirla: remember.checked }, { quiet: true });
-                if (res.ikinciAdim) return renderSecondStep(root, info, res.jeton, onDone);
+                if (res.ikinciAdim) return renderSecondStep(root, info, res.jeton, onDone, opts);
                 if (res.user) return onDone(res.user);
                 if (res.kullaniciAdi) {
                     mode = 'giris';
@@ -89,7 +93,7 @@ export function renderLogin(root, info, onDone, { register = true } = {}) {
 }
 
 /** Giriş sonrası 6 haneli kod (ya da kurtarma kodu) */
-function renderSecondStep(root, info, jeton, onDone) {
+function renderSecondStep(root, info, jeton, onDone, loginOpts = {}) {
     let recovery = false;
     const card = h('form.auth__card');
     fill(root, h('div.auth', card));
@@ -106,7 +110,7 @@ function renderSecondStep(root, info, jeton, onDone) {
             h('button.auth__link', { type: 'button', on: { click: () => { recovery = !recovery; draw(); } } }, recovery ? 'Use the code from the app' : 'Use a recovery code'),
             h('label.check', trust, "Don't ask again on this computer for 30 days"),
             submit,
-            h('button', { type: 'button', on: { click: () => renderLogin(root, info, onDone) } }, 'Back'),
+            h('button', { type: 'button', on: { click: () => renderLogin(root, info, onDone, loginOpts) } }, 'Back'),
         );
         code.focus();
         card.onsubmit = async (e) => {
@@ -230,8 +234,9 @@ export function renderForcedTotp(root, info, me, onDone) {
     totpWizard(body, me, onDone);
 }
 
-export async function loadSession() {
-    const info = await get('oturum/ben');
+/** ctx: 'chartering' → Chartering Desk (panelin firma bilgisi ve sayfa adları gelmez) */
+export async function loadSession(ctx) {
+    const info = await get('oturum/ben', ctx ? { ctx } : undefined);
     setCsrf(info.csrf);
     return info;
 }
