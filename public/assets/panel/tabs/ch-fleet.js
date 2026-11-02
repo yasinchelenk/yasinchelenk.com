@@ -188,16 +188,23 @@ export async function mount(el, ctx, param) {
                 s += `<text class="fl-tl__name" x="0" y="${y + 15}"><title>${esc(f.vessel)}</title>${esc(f.vessel.length > 20 ? f.vessel.slice(0, 19) + '…' : f.vessel)}</text>`;
                 if (f.charterers && (f.delivery_date || f.redel_min || f.redel_max)) {
                     const a = f.delivery_date ?? t0;
-                    const b = f.redel_min ?? f.redel_max;
-                    const tip = esc(`${f.vessel} · ${f.charterers}${f.hire_rate ? ' · $' + fmt(f.hire_rate, 0) + '/day' : ''}\nDelivery ${fmtDate(f.delivery_date)} · redelivery ${fmtDate(f.redel_min)} – ${fmtDate(f.redel_max)}`);
+                    // Time already used is green, even inside the redelivery window (charterers using the extension);
+                    // only the part of the window still ahead is yellow
+                    const t = today();
+                    const inWindow = f.redel_min && f.redel_max && f.redel_min < t && f.redel_max >= t;
+                    const b = inWindow ? t : f.redel_min ?? f.redel_max;
+                    const tip = esc(`${f.vessel} · ${f.charterers}${f.hire_rate ? ' · $' + fmt(f.hire_rate, 0) + '/day' : ''}\nDelivery ${fmtDate(f.delivery_date)} · redelivery ${fmtDate(f.redel_min)} – ${fmtDate(f.redel_max)}`
+                        + (inWindow ? `\nIn the redelivery window since ${fmtDate(f.redel_min)} · ${daysBetween(t, f.redel_max)} d left to max` : ''));
                     if (b && b >= t0 && a <= t1) {
                         const X1 = x(a); const X2 = x(b);
                         s += `<rect class="fl-tl__bar is-${st}" x="${X1}" y="${y + 4}" width="${Math.max(2, X2 - X1)}" height="16" rx="3"><title>${tip}</title></rect>`;
+                        if (inWindow && x(f.redel_min) > X1 && x(f.redel_min) < X2) s += `<line class="fl-tl__min" x1="${x(f.redel_min)}" x2="${x(f.redel_min)}" y1="${y + 4}" y2="${y + 20}"><title>Min redelivery ${fmtDate(f.redel_min)}</title></line>`;
                         if (X2 - X1 > 70) s += `<text class="fl-tl__label" x="${X1 + 6}" y="${y + 16}">${esc(f.charterers.slice(0, Math.floor((X2 - X1) / 7)))}</text>`;
                     }
-                    if (f.redel_min && f.redel_max && f.redel_max >= t0 && f.redel_min <= t1) {
-                        const X1 = x(f.redel_min); const X2 = x(f.redel_max);
-                        s += `<rect class="fl-tl__win" x="${X1}" y="${y + 4}" width="${Math.max(2, X2 - X1)}" height="16" rx="3"><title>Redelivery window ${fmtDate(f.redel_min)} – ${fmtDate(f.redel_max)}</title></rect>`;
+                    const w0 = inWindow ? t : f.redel_min;
+                    if (w0 && f.redel_max && f.redel_max >= t0 && w0 <= t1 && w0 <= f.redel_max) {
+                        const X1 = x(w0); const X2 = x(f.redel_max);
+                        s += `<rect class="fl-tl__win" x="${X1}" y="${y + 4}" width="${Math.max(2, X2 - X1)}" height="16" rx="3"><title>${inWindow ? `Remaining redelivery window: today – ${fmtDate(f.redel_max)} (${daysBetween(t, f.redel_max)} d)` : `Redelivery window ${fmtDate(f.redel_min)} – ${fmtDate(f.redel_max)}`}</title></rect>`;
                     }
                 }
                 if (f.next_dd && f.next_dd >= t0 && f.next_dd <= t1) {
@@ -219,7 +226,7 @@ export async function mount(el, ctx, param) {
         box.dispose = () => ro.disconnect();
         return h('section.ch-sec.cat-teal',
             h('header.ch-sec__head.is-static', h('span.ch-sec__title', 'Timeline'),
-                h('span.fl-legend', h('i.is-on_hire'), 'on hire', h('i.is-win'), 'redelivery window', h('i.is-dd'), 'dry dock', h('i.is-today'), 'today'),
+                h('span.fl-legend', h('i.is-on_hire'), 'on hire', h('i.is-win'), 'redelivery window (still ahead)', h('i.is-dd'), 'dry dock', h('i.is-today'), 'today'),
                 h('span.spacer'), segmented(Object.entries(TIMELINE_SPANS).map(([value, label]) => ({ value, label })), String(span), (v) => { span = Number(v); store.set('ch_fleet_span', span); draw(); })),
             h('div.ch-sec__body', h('div.ch-scroll', box)));
     }

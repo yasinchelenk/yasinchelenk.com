@@ -1367,6 +1367,7 @@ tr.fl-charter-line td { font-style: italic; color: var(--dim); }
 .fl-tl__bar { fill: var(--cat-green); opacity: .85; cursor: pointer; }
 .fl-tl__bar.is-fixed { fill: var(--cat-blue); } .fl-tl__bar.is-overdue { fill: var(--red); } .fl-tl__bar.is-window { fill: var(--cat-green); }
 .fl-tl__win { fill: var(--cat-yellow); opacity: .55; cursor: pointer; }
+.fl-tl__min { stroke: #fff; stroke-width: 1.5; stroke-dasharray: 2 2; opacity: .9; }
 .fl-tl__label { font-size: 11px; fill: #fff; font-weight: 600; pointer-events: none; }
 .fl-tl__dd { fill: var(--cat-purple); stroke: #fff; stroke-width: 1.5; cursor: pointer; }
 .fl-tl__dd.is-late { fill: var(--red); }
