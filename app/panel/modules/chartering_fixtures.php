@@ -234,6 +234,16 @@ function ch_deadlines(int $days = 60): array
             }
         }
     }
+    if (izinli($user, 'ch-fleet')) {
+        foreach (rows("SELECT id, vessel, charterers, redel_min, redel_max, next_dd, status FROM ch_fleet WHERE COALESCE(status, '') <> 'idle'") as $f) {
+            $detail = trim($f['vessel'] . ($f['charterers'] ? " · {$f['charterers']}" : ''));
+            foreach ([['redelivery', $f['redel_min'], 'Redelivery window opens (min)'], ['redelivery', $f['redel_max'], 'Latest redelivery (max)'], ['drydock', $f['next_dd'], 'Dry dock due']] as [$kind, $date, $title]) {
+                if ($in($date)) {
+                    $items[] = ['kind' => $kind, 'date' => $date, 'title' => $title, 'detail' => $detail, 'tab' => 'ch-fleet', 'id' => (int) $f['id']];
+                }
+            }
+        }
+    }
     usort($items, fn($a, $b) => strcmp($a['date'], $b['date']));
 
     return $items;

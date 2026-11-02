@@ -15,6 +15,7 @@ export const TABS = [
     { code: 'ch-fixtures', label: 'Fixtures', tip: 'Fixture register from recaps, post-fixture checklist, deadlines, document templates' },
     { code: 'ch-sof', label: 'SOF', tip: 'Statement of facts: templates, chronological events, stoppages, checks' },
     { code: 'ch-laytime', label: 'Laytime & Demurrage', tip: 'Time sheets from the SOF, demurrage / despatch, claim letter' },
+    { code: 'ch-fleet', label: 'Fleet', tip: 'Own / managed vessels: current charter, min-max redelivery, hire, next dry dock and each vessel’s voyage log' },
     { code: 'ch-tc', label: 'TC Desk', tip: 'Hire statement and schedule, off-hire, speed & consumption claim' },
     { code: 'ch-calc', label: 'Calculators', tip: 'TPC/draft, intake & SF, draft survey, deadfreight, bunkers, ETA, EU ETS, commissions' },
     { code: 'ch-ports', label: 'Ports', tip: 'Port database (limits, density, time zone, NOR rules, agent) and the distance matrix' },

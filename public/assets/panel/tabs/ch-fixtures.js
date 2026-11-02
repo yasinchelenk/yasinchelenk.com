@@ -18,7 +18,7 @@ const PIPE = [
     ['post', 'Post voyage', 'cat-purple', ['completed', 'accounts']],
     ['closed', 'Closed / failed', 'cat-gray', ['closed', 'failed']],
 ];
-const KIND = { laycan: 'Laycan', cancelling: 'Cancelling', notice: 'ETA notice', freight: 'Freight', time_bar: 'Time bar', task: 'Task', hire: 'Hire' };
+const KIND = { laycan: 'Laycan', cancelling: 'Cancelling', notice: 'ETA notice', freight: 'Freight', time_bar: 'Time bar', task: 'Task', hire: 'Hire', redelivery: 'Redelivery', drydock: 'Dry dock' };
 
 const FORM = [
     ['vessel', 'Vessel', 'text'], ['type', 'Type', 'select', FIXTURE_TYPES], ['status', 'Status', 'select', FIXTURE_STATUS], ['fixture_date', 'Fixture date', 'date'],
@@ -264,8 +264,8 @@ export async function mount(el, ctx, param) {
             shown.length ? h('div.ch-scroll', h('table.ch-table',
                 h('thead', h('tr', ['Date', '', 'Kind', 'What', 'Fixture / detail', ''].map((x) => h('th', x)))),
                 h('tbody', shown.map((x) => h('tr', h('td', fmtDate(x.date)), h('td', dueBadge(x.date)), h('td', KIND[x.kind] ?? x.kind), h('td', h('b', x.title)), h('td', x.detail),
-                    h('td', h('button.tiny', { type: 'button', on: { click: () => (x.tab === 'ch-fixtures' ? openFixture(x.id) : ctx.open(x.tab)) } }, 'Open'))))))) : h('p.dim', 'Önümüzdeki 90 günde iş yok.'),
-            h('p.dim', 'Laycan, cancelling, ETA notice’ları, navlun vadesi, kontrol listesi görevleri, claim time bar’ları ve hire ödemeleri. Market sekmesindeki “Upcoming” kartı da buradan beslenir.'));
+                    h('td', h('button.tiny', { type: 'button', on: { click: () => (x.tab === 'ch-fixtures' ? openFixture(x.id) : ctx.open(x.tab, x.tab === 'ch-fleet' && x.id ? { openId: x.id } : undefined)) } }, 'Open'))))))) : h('p.dim', 'Önümüzdeki 90 günde iş yok.'),
+            h('p.dim', 'Laycan, cancelling, ETA notice’ları, navlun vadesi, kontrol listesi görevleri, claim time bar’ları, hire ödemeleri ve Fleet’teki redelivery / dry dock tarihleri. Market sekmesindeki “Upcoming” kartı da buradan beslenir.'));
     }
 
     // ------------------------------------------------------------ Mount

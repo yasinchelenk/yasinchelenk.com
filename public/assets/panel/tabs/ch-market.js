@@ -487,7 +487,7 @@ export async function mount(el, ctx) {
         const box = h('div', h('p.dim', 'Loading…'));
         get('chartering/upcoming').then((items) => {
             box.replaceChildren(items.length ? h('ul.ch-upcoming', items.slice(0, 12).map((x) => h('li',
-                h('button.ch-link', { type: 'button', on: { click: () => ctx.open(x.tab, x.tab === 'ch-fixtures' && x.id ? { openId: x.id } : undefined) } }, x.title),
+                h('button.ch-link', { type: 'button', on: { click: () => ctx.open(x.tab, (x.tab === 'ch-fixtures' || x.tab === 'ch-fleet') && x.id ? { openId: x.id } : undefined) } }, x.title),
                 h('small.dim', ` ${x.detail}`), ' ', h('span.dim', fmtDate(x.date)), ' ', dueBadge(x.date))))
                 : h('p.dim', 'Önümüzdeki 30 günde laycan, notice, time bar veya hire ödemesi yok.'));
         }).catch(() => box.replaceChildren(h('p.dim', 'Yüklenemedi.')));
