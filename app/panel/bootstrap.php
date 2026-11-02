@@ -54,6 +54,10 @@ function handle_panel(string $path, string $method): never
     }
 
     db(); // ilk açılışta şemayı kurar
+    // Yalnızca Chartering'e yetkili hesap paneli açamaz: kendi sayfasına gider
+    if (($u = current_user()) && chartering_only($u)) {
+        redirect('/chartering');
+    }
     render('panel/shell', []);
     exit;
 }

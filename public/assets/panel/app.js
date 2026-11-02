@@ -59,6 +59,11 @@ function allowed(code) {
 }
 
 function start() {
+    // Chartering hesabı paneli göremez (sunucu da /panel'den yönlendirir; burası girişten hemen sonrası için)
+    if (info.user.role !== 'yonetici' && (info.user.origin === 'chartering' || !info.firma)) {
+        location.replace('/chartering');
+        return;
+    }
     if (info.ikiAdimZorunlu && !info.user.totp) {
         return renderForcedTotp(root, info, info.user, afterLogin);
     }

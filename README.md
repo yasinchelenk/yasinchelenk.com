@@ -73,6 +73,12 @@ Aynı kullanıcı hesapları ve oturum; giriş ekranında kayıt yoktur, panelin
 "Chartering Desk ↗" bağlantısı vardır. Paneldeki Vessels kayıtları Chartering'de kullanılmaz: gemiler Chartering'in kendi
 **vessel profile** kayıtlarıdır (`ch_vessel_profiles`).
 
+**Chartering Desk'ten kayıt:** giriş ekranında "Create account" vardır (ilk kurulum hariç). Buradan açılan hesap `origin = chartering`
+olarak işaretlenir, onay bekler ve sayfasız açılır; yönetici panel → Users'ta (veya Chartering Desk → hesap menüsü → Users) onaylar,
+onaylayınca sayfa seçimi açılır. Bu hesaplara sunucu yalnızca `ch-*` sayfaları verir ("hepsi" seçilse bile), yönetici yapılamaz,
+`/panel` açıldığında `/chartering`'e yönlendirilir; giriş ekranı ve bu hesaplar panelin firma bilgisini ve sayfa adlarını almaz.
+Kayıt kodu ve onay ayarı panelle ortaktır (Firma Ayarları → Hesaplar).
+
 Yalnızca `ch-*` sayfalarına yetkili bir kullanıcı (ör. broker'a açılan hesap) panelin hiçbir API'sine erişemez —
 "her oturum okuyabilir" uçları dahil; yalnızca `/api/chartering/*`, oturum ve canlı akış (canlı akışta da yalnızca
 Chartering değişiklikleri, panel kullanıcıları listelenmez). Kullanıcı yönetimi: panel → Users → sayfa yetkileri.

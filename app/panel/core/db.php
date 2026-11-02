@@ -123,6 +123,8 @@ function panel_migrations(): array
         121 => 'chartering_migrate_121',
         // Chartering · Fleet: gemilerin TC durumu (charterer, delivery, min/max redelivery, hire, next DD) ve sefer kayıtları
         122 => 'chartering_migrate_122',
+        // Hesabın açıldığı yer: 'chartering' = Chartering Desk'ten kayıt (yalnızca ch-* sayfaları alabilir, paneli göremez)
+        123 => fn(PDO $pdo) => $pdo->exec('ALTER TABLE users ADD COLUMN origin TEXT'),
     ];
 }
 

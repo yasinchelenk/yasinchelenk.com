@@ -127,7 +127,14 @@ function izinli(array $user, string $page): bool
  */
 function chartering_only(array $user): bool
 {
-    if ($user['role'] === 'yonetici' || !is_array($user['pages'])) {
+    if ($user['role'] === 'yonetici') {
+        return false;
+    }
+    // Chartering Desk'ten açılan hesap: sayfaları ne olursa olsun yalnızca Chartering
+    if (($user['origin'] ?? null) === 'chartering') {
+        return true;
+    }
+    if (!is_array($user['pages'])) {
         return false;
     }
     foreach ($user['pages'] as $page) {
@@ -152,7 +159,14 @@ function public_user(array $u): array
         'pages'     => $pages,
         'totp'      => !empty($u['totp_since']),
         'totp_since'=> $u['totp_since'],
+        'origin'    => $u['origin'] ?? null,
     ];
+}
+
+/** Chartering Desk sayfaları (ch-*): Chartering hesaplarına yalnızca bunlar verilebilir. */
+function chartering_pages(): array
+{
+    return array_values(array_filter(array_keys(PAGES), fn($k) => str_starts_with($k, 'ch-')));
 }
 
 function start_session(int $userId, bool $remember): array
@@ -233,6 +247,9 @@ function auth_me(): never
         setup_code(); // kurulum kodu dosyası yoksa oluşturulur
     }
 
+    // Chartering Desk giriş ekranı ve Chartering hesapları: panelin firma bilgisi ve sayfa adları gönderilmez
+    $desk = ($_GET['ctx'] ?? '') === 'chartering' || ($user && chartering_only($user));
+
     json_response([
         'user'           => $user ? public_user($user) : null,
         'dolu'           => array_column(rows('SELECT color FROM users WHERE id <> ?', [$user['id'] ?? 0]), 'color'),
@@ -242,8 +259,8 @@ function auth_me(): never
         'kayitKodu'      => (string) setting('kayit_kodu') !== '',
         'bekleyen'       => $user && $user['role'] === 'yonetici' ? (int) scalar("SELECT COUNT(*) FROM users WHERE status = 'bekliyor'") : 0,
         'ikiAdimZorunlu' => setting('iki_adim_zorunlu') === '1',
-        'sayfalar'       => PAGES,
-        'firma'          => firma_public(),
+        'sayfalar'       => $desk ? array_intersect_key(PAGES, array_flip(chartering_pages())) : PAGES,
+        'firma'          => $desk ? null : firma_public(),
         'csrf'           => csrf_token(),
     ]);
 }
@@ -356,6 +373,10 @@ function trusted_device_valid(int $userId): bool
 function auth_register(array $p, array $in): never
 {
     $kurulum = !scalar('SELECT COUNT(*) FROM users');
+    $desk = ($in['kaynak'] ?? '') === 'chartering';
+    if ($kurulum && $desk) {
+        api_error('Henüz kayıt açılmadı.');
+    }
     if ($kurulum) {
         if (!hash_equals(setup_code(), trim((string) ($in['kurulumKodu'] ?? '')))) {
             api_error('Kurulum kodu hatalı. Kod sunucuda storage/panel-kurulum-kodu.txt dosyasında.');
@@ -397,6 +418,7 @@ function auth_register(array $p, array $in): never
         'role'          => $kurulum ? 'yonetici' : 'uye',
         'status'        => $status,
         'pages'         => $kurulum ? null : '[]',
+        'origin'        => $desk ? 'chartering' : null,
         'created_at'    => now(),
     ]);
     gecmis_log('user', $id, $name, null, 'insert', null, $username, null, ['id' => $id, 'name' => $name]);
@@ -606,6 +628,7 @@ function users_list(): never
     json_response([
         'rows'           => $rows,
         'sayfalar'       => array_map(fn($k, $v) => ['kod' => $k, 'ad' => $v], array_keys(PAGES), PAGES),
+        'chSayfalar'     => chartering_pages(),
         'ikiAdimZorunlu' => setting('iki_adim_zorunlu') === '1',
     ]);
 }
@@ -631,10 +654,15 @@ function users_update(array $p, array $in, array $me): never
         if ((int) $u['id'] === (int) $me['id'] && $in['role'] !== 'yonetici') {
             api_error('Kendi yöneticiliğinizi alamazsınız.');
         }
+        if ($in['role'] === 'yonetici' && ($u['origin'] ?? null) === 'chartering') {
+            api_error('Chartering hesabı yönetici yapılamaz (yönetici paneli de görür).');
+        }
         $changes['role'] = $in['role'];
     }
     if (array_key_exists('pages', $in)) {
-        $changes['pages'] = $in['pages'] === null ? null : json_encode(array_values(array_intersect(array_keys(PAGES), (array) $in['pages'])));
+        // Chartering hesabı: "hepsi" bile olsa yalnızca Chartering sayfaları (panel sayfası verilemez)
+        $allowed = ($u['origin'] ?? null) === 'chartering' ? chartering_pages() : array_keys(PAGES);
+        $changes['pages'] = $in['pages'] === null && $allowed === array_keys(PAGES) ? null : json_encode(array_values(array_intersect($allowed, $in['pages'] === null ? $allowed : (array) $in['pages'])));
     }
 
     foreach ($changes as $field => $value) {

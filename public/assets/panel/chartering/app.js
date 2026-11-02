@@ -5,7 +5,7 @@ import { post } from '../core/api.js';
 import { live } from '../core/live.js';
 import { popover } from '../core/ui.js';
 import { renderLogin, renderForcedTotp, loadSession } from '../auth.js';
-import { changePassword, twoStep } from '../account.js';
+import { changePassword, twoStep, usersDialog } from '../account.js';
 
 export const TABS = [
     { code: 'ch-market', label: 'Market', tip: 'Baltic indices, TC earnings, charter rates, period TC, bunker prices' },
@@ -37,18 +37,18 @@ let meWrap;
 async function boot() {
     root.replaceChildren(h('div.splash', h('div.splash__logo', BRAND.kisa)));
     try {
-        info = await loadSession();
+        info = await loadSession('chartering');
     } catch {
         root.replaceChildren(h('div.auth', h('div.auth__card', h('p', 'Server unreachable — check your connection and reload.'), h('button.primary', { on: { click: () => location.reload() } }, 'Reload'))));
         return;
     }
     info.firma = BRAND;
-    if (!info.user) return renderLogin(root, info, afterLogin, { register: false });
+    if (!info.user) return renderLogin(root, info, afterLogin, { register: !info.kurulum, kaynak: 'chartering' });
     start();
 }
 
 async function afterLogin() {
-    info = await loadSession();
+    info = await loadSession('chartering');
     info.firma = BRAND;
     start();
 }
@@ -60,14 +60,17 @@ function start() {
     mounted.forEach((m) => m.inst?.dispose?.());
     mounted.clear();
     current = null;
-    ctx = { user: info.user, info, firma: BRAND, open: (code, param) => show(code, param), allowed, setUser: (u) => { Object.assign(ctx.user, u); drawMe(); } };
+    ctx = {
+        user: info.user, info, firma: BRAND, open: (code, param) => show(code, param), allowed, setUser: (u) => { Object.assign(ctx.user, u); drawMe(); },
+        refreshMe: async () => { info.bekleyen = (await loadSession('chartering')).bekleyen; drawMe(); },
+    };
     document.title = 'Chartering Desk';
     root.replaceChildren(buildShell());
     live.start(info.user);
 
     const visible = TABS.filter((t) => allowed(t.code));
     if (!visible.length) {
-        host.replaceChildren(h('div.empty-state', 'You have no access to the Chartering Desk yet. Ask the administrator for page access.'));
+        host.replaceChildren(h('div.empty-state', 'Your account is active, but no pages have been opened for you yet. The administrator will give you access shortly.'));
         return;
     }
     const saved = store.get('ch_tab', null, true);
@@ -106,6 +109,7 @@ function drawMe() {
             h('span.ctx-menu__label', label), opts.hint ? h('small.ctx-menu__hint', opts.hint) : null);
         pop = popover(chip, h('div',
             h('div.acc-menu__who', h('strong', u.name), h('small', '@' + u.username)),
+            u.role === 'yonetici' ? item('Users', () => usersDialog(ctx), { hint: info.bekleyen ? `${info.bekleyen} waiting` : '' }) : null,
             item('Change my password', changePassword),
             item('Two-step verification', () => twoStep(ctx), { hint: u.totp ? 'on' : 'off' }),
             h('div.ctx-menu__sep'),
