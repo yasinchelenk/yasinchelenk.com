@@ -212,9 +212,12 @@ function ch_holidays_for_port(array $p, array $in): never
         $key = ch_port_key($port);
         foreach (rows('SELECT name, country, holiday_country FROM ch_ports') as $r) {
             $k = ch_port_key($r['name']);
-            if ($k === $key || str_starts_with($k, $key . ' (') || str_starts_with($key, $k . ' ')) {
+            if ($k === $key) {          // an exact name wins over "Name (…)": several countries can have a port of the same name
                 $matched = $r;
                 break;
+            }
+            if (!$matched && (str_starts_with($k, $key . ' (') || str_starts_with($key, $k . ' '))) {
+                $matched = $r;
             }
         }
         $cc = $matched ? ch_hol_country($matched['holiday_country'] ?: $matched['country']) : null;

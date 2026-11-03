@@ -156,6 +156,76 @@ function chartering_migrate_124(PDO $pdo): void
     }
 }
 
+/**
+ * Loads app/panel/data/ports_seed.csv (bin/build-port-seed.py). A port already in the list keeps everything entered for it:
+ * only an empty UN/LOCODE, time zone or coordinate is filled and the source is added to the notes. A row that names an
+ * existing port which has since been deleted stays deleted.
+ */
+function chartering_migrate_125(PDO $pdo): void
+{
+    $file = dirname(__DIR__) . '/data/ports_seed.csv';
+    $h = fopen($file, 'r');
+    if (!$h) {
+        throw new RuntimeException("Port list not found: {$file}");
+    }
+    $head = fgetcsv($h, null, ',', '"', '');
+    $zones = array_flip(DateTimeZone::listIdentifiers());
+    $current = $pdo->query('SELECT id, name, locode, country, tz, lat, lon, notes FROM ch_ports')->fetchAll(PDO::FETCH_ASSOC);
+    $byName = [];
+    $byPlace = [];
+    $codes = [];
+    foreach ($current as $r) {
+        $byName[tr_fold($r['name'])] = $r['id'];
+        $byPlace[tr_fold($r['name']) . '|' . strtoupper((string) $r['country'])] = $r['id'];
+        if ($r['locode']) {
+            $codes[strtoupper($r['locode'])] = $r['id'];
+        }
+    }
+    $rows = array_column($current, null, 'id');
+    $ins = $pdo->prepare('INSERT INTO ch_ports (name, locode, country, tz, lat, lon, notes, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $upd = $pdo->prepare('UPDATE ch_ports SET locode = ?, tz = ?, lat = ?, lon = ?, notes = ?, updated_at = ?, updated_by = ? WHERE id = ?');
+    $at = date('Y-m-d H:i:s');
+    while (($line = fgetcsv($h, null, ',', '"', '')) !== false) {
+        $s = array_combine($head, $line);
+        $code = $s['locode'] ?: null;
+        $tz = isset($zones[$s['tz']]) ? $s['tz'] : null;
+        $lat = $s['lat'] === '' ? null : (float) $s['lat'];
+        $lon = $s['lon'] === '' ? null : (float) $s['lon'];
+        if ($s['match'] !== '') {
+            $id = $byName[tr_fold($s['match'])] ?? null;
+            if ($id === null) {
+                continue;
+            }
+        } else {
+            $id = ($code ? ($codes[$code] ?? null) : null) ?? $byPlace[tr_fold($s['name']) . '|' . $s['country']] ?? null;
+        }
+        if ($id !== null) {
+            $r = $rows[$id];
+            $notes = trim((string) $r['notes']);
+            if ($s['notes'] !== '' && !str_contains($notes, $s['notes'])) {
+                $notes = $notes === '' ? $s['notes'] : "{$notes}\n{$s['notes']}";
+            }
+            $fillCode = !$r['locode'] && $code && !isset($codes[$code]);
+            $upd->execute([$fillCode ? $code : $r['locode'], $r['tz'] ?: $tz, $r['lat'] ?? $lat, $r['lon'] ?? $lon, $notes === '' ? null : $notes, $at, 'system', $id]);
+            if ($fillCode) {
+                $codes[$code] = $id;
+            }
+            continue;
+        }
+        // A port added by hand since the list was built can hold this name in another country
+        $name = isset($byName[tr_fold($s['name'])]) ? "{$s['name']} ({$s['country']})" : $s['name'];
+        if (isset($byName[tr_fold($name)])) {
+            continue;
+        }
+        $ins->execute([$name, $code, $s['country'], $tz, $lat, $lon, $s['notes'] ?: null, $at, 'system', $at, 'system']);
+        $byName[tr_fold($name)] = (int) $pdo->lastInsertId();
+        if ($code) {
+            $codes[$code] = $byName[tr_fold($name)];
+        }
+    }
+    fclose($h);
+}
+
 entity_define('ch_port', [
     'table'  => 'ch_ports',
     'page'   => 'ch-ports',

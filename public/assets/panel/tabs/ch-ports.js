@@ -1,7 +1,7 @@
 // CHARTERING · Ports & Distances (spec §11.1–11.2): port database (limits, density, time zone, NOR rules, agent)
 // and the port-to-port distance matrix shared with the matching engine.
 import { h, fill, toast, store, debounce } from '../core/dom.js';
-import { get, post, del, put } from '../core/api.js';
+import { api, get, post, del, put } from '../core/api.js';
 import { modal, confirmBox, segmented } from '../core/ui.js';
 import { Grid, resetLayoutButton } from '../core/grid.js';
 import { live } from '../core/live.js';
@@ -14,12 +14,22 @@ const REGION = [
     ['tr', 'Türkiye', 'cat-blue', ['TR']],
     ['bsea', 'Black Sea', 'cat-teal', ['RO', 'BG', 'UA', 'RU', 'GE', 'MD']],
     ['med', 'Mediterranean', 'cat-green', ['GR', 'EG', 'LB', 'SY', 'CY', 'IT', 'GI', 'ES', 'FR', 'MT', 'TN', 'DZ', 'MA', 'LY', 'IL', 'AL', 'HR', 'SI', 'ME', 'PT']],
-    ['eur', 'North Europe / Baltic', 'cat-purple', ['NL', 'BE', 'DE', 'PL', 'GB', 'IE', 'DK', 'SE', 'NO', 'FI', 'EE', 'LV', 'LT']],
-    ['me', 'Middle East', 'cat-orange', ['AE', 'SA', 'QA', 'OM', 'KW', 'BH', 'IQ', 'IR']],
-    ['asia', 'Asia / Far East', 'cat-indigo', ['CN', 'HK', 'TW', 'JP', 'KR', 'SG', 'MY', 'ID', 'VN', 'TH', 'PH', 'IN', 'PK', 'BD', 'LK']],
-    ['amer', 'Americas', 'cat-brown', ['US', 'CA', 'MX', 'PA', 'BR', 'AR', 'CL', 'CO', 'PE', 'UY']],
+    ['eur', 'North Europe / Baltic', 'cat-purple', ['NL', 'BE', 'DE', 'PL', 'GB', 'IE', 'DK', 'SE', 'NO', 'FI', 'EE', 'LV', 'LT', 'IS', 'FO', 'GG', 'JE', 'IM', 'SJ', 'GL']],
+    ['me', 'Middle East', 'cat-orange', ['AE', 'SA', 'QA', 'OM', 'KW', 'BH', 'IQ', 'IR', 'YE', 'JO']],
+    ['asia', 'Asia / Far East', 'cat-indigo', ['CN', 'HK', 'MO', 'TW', 'JP', 'KR', 'KP', 'SG', 'MY', 'ID', 'BN', 'TL', 'VN', 'KH', 'TH', 'MM', 'PH', 'IN', 'PK', 'BD', 'LK', 'MV']],
+    ['amer', 'Americas', 'cat-brown', ['US', 'CA', 'MX', 'PA', 'BR', 'AR', 'CL', 'CO', 'PE', 'UY', 'PY', 'EC', 'VE', 'GY', 'SR', 'GF', 'FK', 'BZ', 'GT', 'HN', 'SV', 'NI', 'CR', 'CU', 'DO', 'HT', 'JM', 'PR', 'BS', 'BB', 'TT', 'AG', 'AW', 'BM', 'BQ', 'CW', 'DM', 'GD', 'GP', 'KN', 'KY', 'LC', 'MQ', 'PM', 'SX', 'TC', 'VC', 'VG', 'VI']],
+    ['africa', 'Africa', 'cat-yellow', ['ZA', 'NG', 'GH', 'CI', 'SN', 'AO', 'CM', 'GA', 'CG', 'CD', 'TG', 'BJ', 'GN', 'SL', 'LR', 'GM', 'GW', 'MR', 'CV', 'ST', 'GQ', 'NA', 'MZ', 'TZ', 'KE', 'SO', 'DJ', 'ER', 'SD', 'MG', 'MU', 'SC', 'KM', 'RE', 'YT']],
+    ['oceania', 'Oceania', 'cat-teal', ['AU', 'NZ', 'PG', 'FJ', 'NC', 'PF', 'SB', 'VU', 'WS', 'TO', 'KI', 'GU', 'MP', 'FM', 'MH', 'PW']],
     ['other', 'Rest of world', 'cat-gray', null],
 ];
+// With a long list the regions start closed, so the tab opens at once; a search always shows its matches
+const COLLAPSE_ABOVE = 300;
+// A country's region, except where a long coast lies elsewhere: Russia outside the Black Sea, France on the Atlantic
+const regionOf = (r) => {
+    if (r.country === 'RU' && !(r.lat < 48 && r.lon < 42)) return 'other';
+    if (r.country === 'FR' && r.lat > 44) return 'eur';
+    return REGION.find(([, , , cc]) => cc?.includes(r.country))?.[0] ?? 'other';
+};
 const ZONES = (() => { try { return Intl.supportedValuesOf('timeZone'); } catch { return []; } })();
 
 const FORM = [
@@ -44,6 +54,7 @@ export async function mount(el, ctx, param) {
     let view = store.get('ch_ports_view', 'ports');
     let search = '';
     let grid;
+    const openRegions = new Set(store.get('ch_ports_open', []));
     const body = h('div.ch-board');
     const viewSeg = h('span');
     const portList = h('datalist', { id: 'ch-port-names' });
@@ -60,7 +71,8 @@ export async function mount(el, ctx, param) {
         if (view === 'ports') drawPorts(); else drawDistances();
     }
 
-    const matches = (row, keys) => !search || keys.map((k) => row[k] ?? '').join(' ').toLowerCase().includes(search.toLowerCase());
+    // Turkish letters and accents do not matter: çeşme finds Cesme
+    const matches = (row, keys) => !search || normPort(keys.map((k) => row[k] ?? '').join(' ')).includes(normPort(search));
     const searchInput = (redraw) => h('input.search-input', { type: 'search', placeholder: 'Search…', value: search, style: { width: '200px' },
         on: { input: debounce((e) => { search = e.target.value; redraw(); body.querySelector('input[type=search]')?.focus(); }, 250) } });
     const byName = () => new Map(ports.map((p) => [normPort(p.name), p]));
@@ -89,16 +101,64 @@ export async function mount(el, ctx, param) {
             ],
         });
         const rows = ports.filter((r) => matches(r, ['name', 'country', 'locode', 'agent', 'berths', 'notes']));
-        const known = REGION.flatMap(([, , , cc]) => cc ?? []);
-        grid.setSections(REGION.map(([key, label, cls, cc]) => {
-            const list = rows.filter((r) => (cc ? cc.includes(r.country) : !known.includes(r.country)));
-            return { key, className: cls, rows: list, head: h('div.grp.' + cls, h('span.grp__name', label), h('span.grp__pill', String(list.length))) };
+        grid.setSections(REGION.map(([key, label, cls]) => {
+            const list = rows.filter((r) => regionOf(r) === key);
+            const closable = !search && ports.length > COLLAPSE_ABOVE;
+            const collapsed = closable && !openRegions.has(key);
+            const name = closable
+                ? h('button.grp__name.raw', { type: 'button', on: { click: () => {
+                    collapsed ? openRegions.add(key) : openRegions.delete(key);
+                    store.set('ch_ports_open', [...openRegions]);
+                    drawPorts();
+                } } }, label, ' ', collapsed ? '▶' : '▼')
+                : h('span.grp__name', label);
+            return { key, className: cls, rows: list, collapsed, head: h('div.grp.' + cls, name, h('span.grp__pill', { style: { marginLeft: '0' } }, String(list.length))) };
         }).filter((s) => s.rows.length));
         fill(body, h('div.toolbar',
             canEdit ? h('button.primary', { type: 'button', on: { click: () => editor({}) } }, '+ Port') : null,
+            canEdit ? h('button', { type: 'button', title: 'Liman listesini .csv veya .xlsx dosyasından aktar', on: { click: () => fileInput.click() } }, 'Import list…') : null,
             searchInput(drawPorts), h('span.count', `${rows.length} ports`), resetLayoutButton(grid, '↺ columns')),
-        h('p.dim', 'Limitler, yoğunluk ve LOCODE elle girilir (tahmin edilmez). Saat dilimi Laytime’da liman seçilince kullanılır; koordinatlar Position Monitor haritasında ve laycan aracında.'),
+        h('p.dim', 'Limitler ve yoğunluk elle girilir veya listeden aktarılır (tahmin edilmez). Saat dilimi Laytime’da liman seçilince kullanılır; koordinatlar Position Monitor haritasında ve laycan aracında.'),
         grid.el);
+    }
+
+    // ------------------------------------------------------------ Import a list
+
+    const fileInput = h('input', { type: 'file', accept: '.csv,.txt,.tsv,.xlsx', hidden: true, on: { change: () => importFile(fileInput.files[0]) } });
+    const importForm = (file, extra = {}) => {
+        const form = new FormData();
+        form.append('file', file);
+        Object.entries(extra).forEach(([k, v]) => form.append(k, v));
+        return form;
+    };
+
+    async function importFile(file) {
+        fileInput.value = '';
+        if (!file) return;
+        const res = await api('POST', 'chartering/ports/import', undefined, { form: importForm(file) });
+        const c = res.counts;
+        const overwrite = h('input', { type: 'checkbox' });
+        const badge = (r) => (r.action === 'new' ? h('span.ch-badge.green', 'new') : r.action === 'update' ? h('span.ch-badge.amber', 'update') : h('span.ch-badge.gray', 'same'));
+        const summary = [`${c.new} new`, `${c.update} update`, `${c.same} unchanged`,
+            c.duplicates ? `${c.duplicates} repeated in the file` : '', c.invalid ? `${c.invalid} unreadable` : ''].filter(Boolean).join(' · ');
+        modal({ title: `Import ${file.name}`, width: 1000,
+            body: h('div.fl-import',
+                h('p', summary),
+                h('p.dim', 'Eşleşme sırası: UN/LOCODE, sonra liman adı + ülke. Boş alanlar doldurulur, boş hücreler hiçbir şeyi silmez.'),
+                c.missing_zone ? h('p.dim', `${c.missing_zone} limanda saat dilimi yok: dosyada belirtilmemiş ve ülkede birden fazla saat dilimi var.`) : null,
+                res.ignored.length ? h('p.dim', `Kullanılmayan sütunlar: ${res.ignored.join(', ')}`) : null,
+                res.invalid.length ? h('div.notice.warn', h('b', 'Okunamayan satırlar: '), h('ul', res.invalid.map((x) => h('li', `Satır ${x.line}${x.name ? ` (${x.name})` : ''}: ${x.reason}`)))) : null,
+                c.conflicts ? h('label', overwrite, ` ${c.conflicts} limanda dosyadaki farklı değerleri mevcut değerlerin üzerine yaz`) : null,
+                h('div.ch-scroll', { style: { maxHeight: '48vh' } }, h('table.ch-table',
+                    h('thead', h('tr', ['', 'Port', 'Fills', 'Different from the database'].map((x) => h('th', x)))),
+                    h('tbody', res.rows.map((r) => h('tr', h('td', badge(r)), h('td', h('b', r.name)), h('td', r.changes.join(', ')),
+                        h('td', r.conflicts.map((x) => `${x.field}: ${x.old} → ${x.new}`).join(' · '))))))),
+                res.total > res.rows.length ? h('p.dim', `İlk ${res.rows.length} satır gösteriliyor (toplam ${res.total}).`) : null),
+            actions: [{ label: 'Cancel' }, c.new + c.update + c.conflicts ? { label: 'Import', primary: true, onClick: async () => {
+                const r = await api('POST', 'chartering/ports/import/apply', undefined, { form: importForm(file, overwrite.checked ? { overwrite: '1' } : {}) });
+                toast(`${r.added} liman eklendi, ${r.updated} liman güncellendi.`, 'ok', 7000);
+                await load();
+            } } : null].filter(Boolean) });
     }
 
     function editor(row) {
@@ -168,7 +228,7 @@ export async function mount(el, ctx, param) {
 
     // ------------------------------------------------------------ Mount
 
-    el.append(portList, h('div.toolbar', h('strong', 'Ports & Distances'), viewSeg), body);
+    el.append(portList, fileInput, h('div.toolbar', h('strong', 'Ports & Distances'), viewSeg), body);
     body.append(h('div.empty-state', 'Loading…'));
     await load();
     if (param?.port) { const p = ports.find((x) => normPort(x.name) === normPort(param.port)); editor(p ?? { name: param.port }); }
