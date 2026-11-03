@@ -61,6 +61,101 @@ function chartering_migrate_112(PDO $pdo): void
     }
 }
 
+/**
+ * Busiest ports (figures as published, read 2026-11-03). Only group A is a worldwide ranking by port calls; the country
+ * figures are one month of the same source, the volume ranks are another measure. Canal locks and offshore supply
+ * bases in those reports (Brunsbüttel, Holtenau, Panama Canal, Miraflores, Ismailia, Port Weller, Port Fourchon,
+ * Carmopolis) are left out: they are transits and service calls, not port calls a chartering desk works with.
+ * [name, country, time zone, lat, lon, note, other names to match an existing row]. Coordinates: approximate port area.
+ */
+const CH_BUSIEST_PORTS_TAG = 'Busiest ports list';
+const CH_BUSIEST_PORTS = [
+    // A · trading-fleet port calls worldwide, Jan–Sep 2026 (MagicPort, State of the Maritime Industry Q1–Q3 2026)
+    ['Singapore', 'SG', 'Asia/Singapore', 1.260, 103.840, '#1 worldwide by port calls, 51,974 (Jan–Sep 2026, MagicPort)', []],
+    ['Shanghai', 'CN', 'Asia/Shanghai', 31.350, 121.600, '#2 worldwide by port calls, 26,233 (Jan–Sep 2026, MagicPort)', []],
+    ['Ningbo-Zhoushan', 'CN', 'Asia/Shanghai', 29.940, 121.850, '#3 worldwide by port calls, 24,865 (Jan–Sep 2026, MagicPort)', ['Ningbo', 'Zhoushan']],
+    ['Rotterdam', 'NL', 'Europe/Amsterdam', 51.950, 4.140, '#4 worldwide by port calls, 18,129 (Jan–Sep 2026, MagicPort)', []],
+    ['Hong Kong', 'HK', 'Asia/Hong_Kong', 22.330, 114.120, '#5 worldwide by port calls, 16,998 (Jan–Sep 2026, MagicPort)', []],
+    ['Osaka', 'JP', 'Asia/Tokyo', 34.640, 135.420, '#6 worldwide by port calls, 12,784 (Jan–Sep 2026, MagicPort)', []],
+    ['Nagoya', 'JP', 'Asia/Tokyo', 35.050, 136.850, '#7 worldwide by port calls, 11,782 (Jan–Sep 2026, MagicPort)', []],
+    ['Mizushima', 'JP', 'Asia/Tokyo', 34.500, 133.740, '#8 worldwide by port calls, 11,712 (Jan–Sep 2026, MagicPort)', []],
+    ['Antwerp', 'BE', 'Europe/Brussels', 51.270, 4.330, '#9 worldwide by port calls, 11,431 (Jan–Sep 2026, MagicPort)', ['Antwerp-Bruges']],
+    ['Busan', 'KR', 'Asia/Seoul', 35.100, 129.050, '#10 worldwide by port calls, 11,033 (Jan–Sep 2026, MagicPort)', ['Pusan']],
+
+    // B · country reports, September 2026 (MagicPort): a country's first port, or 300+ calls in the month
+    ['Port Klang', 'MY', 'Asia/Kuala_Lumpur', 2.980, 101.330, '1,329 calls in Sep 2026 as “Westport” (MagicPort)', ['Westport', 'Klang']],
+    ['Gwangyang', 'KR', 'Asia/Seoul', 34.910, 127.700, '1,112 calls in Sep 2026 as “Kwangyang” (MagicPort)', ['Kwangyang']],
+    ['Abu Dhabi', 'AE', 'Asia/Dubai', 24.810, 54.650, '1,061 calls in Sep 2026 (MagicPort)', ['Khalifa Port']],
+    ['Jakarta', 'ID', 'Asia/Jakarta', -6.100, 106.880, '1,027 calls in Sep 2026 (MagicPort)', ['Tanjung Priok']],
+    ['Tianjin', 'CN', 'Asia/Shanghai', 38.980, 117.780, '1,022 calls in Sep 2026 (MagicPort)', ['Xingang']],
+    ['Port Said', 'EG', 'Africa/Cairo', 31.260, 32.300, '907 calls in Sep 2026 (MagicPort)', []],
+    ['Surabaya', 'ID', 'Asia/Jakarta', -7.200, 112.730, '863 calls in Sep 2026 (MagicPort)', []],
+    ['Houston', 'US', 'America/Chicago', 29.730, -95.270, '769 calls in Sep 2026 (MagicPort)', []],
+    ['Hamburg', 'DE', 'Europe/Berlin', 53.540, 9.970, '741 calls in Sep 2026 (MagicPort)', []],
+    ['Ulsan', 'KR', 'Asia/Seoul', 35.500, 129.380, '671 calls in Sep 2026 (MagicPort)', []],
+    ['Algeciras', 'ES', 'Europe/Madrid', 36.130, -5.430, '560 calls in Sep 2026 (MagicPort)', []],
+    ['Las Palmas', 'ES', 'Atlantic/Canary', 28.130, -15.420, '528 calls in Sep 2026 (MagicPort)', ['Las Palmas de Gran Canaria']],
+    ['Batam', 'ID', 'Asia/Jakarta', 1.130, 104.050, '525 calls in Sep 2026 as “Batam (ex Batu Besar)” (MagicPort)', []],
+    ['Skagen', 'DK', 'Europe/Copenhagen', 57.720, 10.590, '499 calls in Sep 2026 (MagicPort)', ['Skaw']],
+    ['Dubai (Jebel Ali)', 'AE', 'Asia/Dubai', 25.010, 55.060, '494 calls in Sep 2026 as “Dubai” (MagicPort); #9 container port in 2024 (Lloyd’s List)', ['Jebel Ali', 'Dubai']],
+    ['Galveston', 'US', 'America/Chicago', 29.310, -94.790, '492 calls in Sep 2026 (MagicPort)', []],
+    ['Ras Laffan', 'QA', 'Asia/Qatar', 25.900, 51.580, '465 calls in Sep 2026 (MagicPort)', []],
+    ['Santos', 'BR', 'America/Sao_Paulo', -23.960, -46.300, '459 calls in Sep 2026 (MagicPort)', []],
+    ['Vancouver', 'CA', 'America/Vancouver', 49.290, -123.100, '447 calls in Sep 2026 (MagicPort)', []],
+    ['Tanjung Pelepas', 'MY', 'Asia/Kuala_Lumpur', 1.360, 103.550, '436 calls in Sep 2026 (MagicPort)', ['PTP']],
+    ['Le Havre', 'FR', 'Europe/Paris', 49.480, 0.130, '426 calls in Sep 2026 (MagicPort)', []],
+    ['Barcelona', 'ES', 'Europe/Madrid', 41.340, 2.160, '379 calls in Sep 2026 (MagicPort)', []],
+    ['Rio de Janeiro', 'BR', 'America/Sao_Paulo', -22.890, -43.180, '367 calls in Sep 2026 (MagicPort)', []],
+    ['Fujairah', 'AE', 'Asia/Dubai', 25.170, 56.360, '343 calls in Sep 2026 (MagicPort)', []],
+    ['Nhava Sheva (JNPA)', 'IN', 'Asia/Kolkata', 18.950, 72.950, '336 calls in Sep 2026 (MagicPort)', ['Nhava Sheva', 'JNPA', 'JNPT']],
+    ['Mongstad', 'NO', 'Europe/Oslo', 60.810, 5.030, '330 calls in Sep 2026 (MagicPort)', []],
+    ['Genoa', 'IT', 'Europe/Rome', 44.410, 8.900, '318 calls in Sep 2026 as “Genova” (MagicPort)', ['Genova']],
+    ['Mundra', 'IN', 'Asia/Kolkata', 22.740, 69.710, '309 calls in Sep 2026 (MagicPort)', []],
+    ['Montreal', 'CA', 'America/Toronto', 45.550, -73.520, '303 calls in Sep 2026 (MagicPort)', []],
+    ['Port Hedland', 'AU', 'Australia/Perth', -20.310, 118.580, '298 calls in Sep 2026, first in Australia (MagicPort)', []],
+    ['Jubail', 'SA', 'Asia/Riyadh', 26.980, 49.660, '263 calls in Sep 2026 as “Al Jubail”, first in Saudi Arabia (MagicPort)', ['Al Jubail']],
+    ['Balboa', 'PA', 'America/Panama', 8.950, -79.570, '225 calls in Sep 2026, first port in Panama after the canal (MagicPort)', []],
+
+    // C · no port-call figure found: large by container volume or cargo tonnage
+    ['Shenzhen', 'CN', 'Asia/Shanghai', 22.570, 114.270, '#4 container port in 2024 (Lloyd’s List); port calls not found', ['Yantian', 'Shekou']],
+    ['Qingdao', 'CN', 'Asia/Shanghai', 36.000, 120.200, '#5 container port in 2024 (Lloyd’s List); port calls not found', []],
+    ['Guangzhou', 'CN', 'Asia/Shanghai', 22.640, 113.670, '#6 container port in 2024 (Lloyd’s List); port calls not found', ['Nansha']],
+    ['Los Angeles', 'US', 'America/Los_Angeles', 33.730, -118.260, '#16 container port in 2024 (Lloyd’s List); port calls not found', []],
+    ['Tanger Med', 'MA', 'Africa/Casablanca', 35.880, -5.500, '#17 container port in 2024 (Lloyd’s List); port calls not found', ['Tangier', 'Tanger']],
+    ['Long Beach', 'US', 'America/Los_Angeles', 33.750, -118.210, '#19 container port in 2024 (Lloyd’s List); port calls not found', []],
+    ['Ho Chi Minh City', 'VN', 'Asia/Ho_Chi_Minh', 10.760, 106.790, '#22 container port in 2024 (Lloyd’s List); port calls not found', ['Saigon']],
+    ['New York (NY/NJ)', 'US', 'America/New_York', 40.670, -74.150, '#24 container port in 2024 (Lloyd’s List); port calls not found', ['New York', 'New Jersey']],
+    ['Hai Phong', 'VN', 'Asia/Ho_Chi_Minh', 20.850, 106.720, '#29 container port in 2024 (Lloyd’s List); port calls not found', ['Haiphong']],
+    ['Cai Mep', 'VN', 'Asia/Ho_Chi_Minh', 10.530, 107.030, '#30 container port in 2024 (Lloyd’s List); port calls not found', []],
+    ['Tangshan', 'CN', 'Asia/Shanghai', 39.200, 119.010, '#2 by cargo tonnage, 768.87 Mt (about 2022, Wikipedia); port calls not found', ['Jingtang', 'Caofeidian']],
+];
+
+/** Adds the busiest ports. A port already in the list keeps everything the user entered and only gets the note. */
+function chartering_migrate_124(PDO $pdo): void
+{
+    $key = fn(string $s) => tr_fold(trim((string) preg_replace('/\s*\(.*$/', '', $s)));
+    $rows = [];
+    foreach ($pdo->query('SELECT id, name, notes FROM ch_ports')->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $rows[$key($r['name'])] ??= $r;
+    }
+    $ins = $pdo->prepare('INSERT INTO ch_ports (name, country, tz, lat, lon, notes, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $upd = $pdo->prepare('UPDATE ch_ports SET notes = ?, updated_at = ?, updated_by = ? WHERE id = ?');
+    $at = date('Y-m-d H:i:s');
+    foreach (CH_BUSIEST_PORTS as [$name, $cc, $tz, $lat, $lon, $note, $aliases]) {
+        $note .= ' · ' . CH_BUSIEST_PORTS_TAG;
+        $found = null;
+        foreach ([$name, ...$aliases] as $n) {
+            $found ??= $rows[$key($n)] ?? null;
+        }
+        if ($found) {
+            $old = trim((string) $found['notes']);
+            $upd->execute([$old === '' ? $note : "{$old}\n{$note}", $at, 'system', $found['id']]);
+        } else {
+            $ins->execute([$name, $cc, $tz, $lat, $lon, $note, $at, 'system', $at, 'system']);
+        }
+    }
+}
+
 entity_define('ch_port', [
     'table'  => 'ch_ports',
     'page'   => 'ch-ports',

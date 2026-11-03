@@ -125,6 +125,8 @@ function panel_migrations(): array
         122 => 'chartering_migrate_122',
         // Hesabın açıldığı yer: 'chartering' = Chartering Desk'ten kayıt (yalnızca ch-* sayfaları alabilir, paneli göremez)
         123 => fn(PDO $pdo) => $pdo->exec('ALTER TABLE users ADD COLUMN origin TEXT'),
+        // Chartering · Ports: dünyanın en yoğun limanları (uğrak sayısı ve hacim notlarıyla); mevcut kayıtlara yalnızca not eklenir
+        124 => 'chartering_migrate_124',
     ];
 }
 
