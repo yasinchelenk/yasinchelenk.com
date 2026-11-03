@@ -1,6 +1,6 @@
 // Position Monitor helpers: distance, bearing, sea areas, freshness, ETA and laycan reach.
 import { test, approx, near, eq } from './harness.js';
-import { gcNm, bearing, seaArea, freshness, etaMs, laycanReach, aisEtaIso, shipType } from '../engine/geo.js';
+import { gcNm, bearing, seaArea, freshness, etaMs, laycanReach, aisEtaIso, shipType, shipCategory, SHIP_CATEGORIES } from '../engine/geo.js';
 
 test('Great circle and bearing', () => {
     approx(gcNm(51.5074, -0.1278, 48.8566, 2.3522), 185.5, 'London → Paris ≈ 185.5 nm (343.5 km)', 0.5);
@@ -30,4 +30,22 @@ test('Freshness, ETA, laycan reach, AIS codes', () => {
     eq(laycanReach(eta, '2026-10-25', '2026-11-01').status, 'late', 'arrives after cancelling');
     eq(aisEtaIso({ Month: 1, Day: 5, Hour: 8, Minute: 0 }, new Date('2026-12-20T00:00:00Z')), '2027-01-05 08:00', 'AIS ETA without year rolls into next year');
     eq([shipType(70), shipType(82), shipType(52)], ['Cargo', 'Tanker', 'Tug'], 'ship type codes');
+});
+
+test('Ship categories for the map', () => {
+    eq([70, 79].map((c) => shipCategory(c)), ['cargo', 'cargo'], 'AIS 70-79 is dry cargo');
+    eq([80, 89].map((c) => shipCategory(c)), ['tanker', 'tanker'], 'AIS 80-89 is a tanker');
+    eq([60, 40, 30, 37, 36, 52, 31, 50].map((c) => shipCategory(c)), ['passenger', 'passenger', 'fishing', 'pleasure', 'pleasure', 'service', 'service', 'service'], 'other AIS codes');
+    eq([null, 0, 90, 35, ''].map((c) => shipCategory(c)), ['other', 'other', 'other', 'other', 'other'], 'unknown codes');
+    eq(shipCategory(70, 'Chemical/Oil Products Tanker'), 'tanker', 'typed type beats the AIS code');
+    eq(shipCategory(70, 'Container Ship'), 'container', 'container only comes from the typed type');
+    eq(shipCategory(80, 'Bulk Carrier'), 'cargo', 'bulk carrier');
+    eq(shipCategory(null, 'General Cargo Ship'), 'cargo', 'general cargo');
+    eq(shipCategory(null, 'Kuru yük'), 'cargo', 'Turkish dry cargo');
+    eq(shipCategory(null, 'DÖKME YÜK'), 'cargo', 'Turkish capitals');
+    eq(shipCategory(null, 'Römorkör'), 'service', 'Turkish tug');
+    eq(shipCategory(null, 'Passenger/Ro-Ro'), 'passenger', 'ro-pax counts as passenger');
+    eq(shipCategory(null, 'Supramax'), 'cargo', 'size names are dry cargo, not "supply"');
+    eq(shipCategory(70, 'something else'), 'cargo', 'unrecognised text falls back to the code');
+    eq(new Set(Object.values(SHIP_CATEGORIES).map((c) => c.color)).size, Object.keys(SHIP_CATEGORIES).length, 'every category has its own colour');
 });

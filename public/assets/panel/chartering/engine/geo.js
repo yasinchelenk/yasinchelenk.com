@@ -62,6 +62,47 @@ export function shipType(code) {
     return `Type ${c}`;
 }
 
+/** Map colours by kind of ship. Ports are drawn hollow and grey, so no ship colour may be a dark navy or a light grey. */
+export const SHIP_CATEGORIES = {
+    cargo: { label: 'Dry cargo', color: '#16a34a' },
+    container: { label: 'Container', color: '#0284c7' },
+    tanker: { label: 'Tanker', color: '#dc2626' },
+    passenger: { label: 'Passenger', color: '#c026d3' },
+    service: { label: 'Tug / service', color: '#ea580c' },
+    fishing: { label: 'Fishing', color: '#eab308' },
+    pleasure: { label: 'Pleasure craft', color: '#7c3aed' },
+    other: { label: 'Other / unknown', color: '#64748b' },
+};
+
+// Checked in this order, so "Oil/Bulk/Ore" counts as a tanker and "General Cargo" as dry cargo.
+const CATEGORY_WORDS = [
+    ['tanker', /tanker|\blng\b|\blpg\b|crude|chemical|\bproducts?\b|\boil\b|bunker|gas carrier/],
+    ['container', /container|konteyner|feeder|\bteu\b/],
+    ['passenger', /passenger|ferry|feribot|cruise|ro-?pax|yolcu/],
+    ['service', /\btug\b|r[öo]mork[öo]r|pilot|dredg|offshore|supply|rescue|towing/],
+    ['fishing', /fish|bal[ıi]k/],
+    ['pleasure', /yacht|\byat\b|sailing|pleasure/],
+    ['cargo', /bulk|cargo|general|d[öo]kme|kuru y[üu]k|handy|supra|ultra|panamax|capesize|kamsar|ro-?ro|reefer|\blog\b/],
+];
+
+/**
+ * Kind of ship: the type typed on the vessel wins when it is recognised, else the AIS code.
+ * AIS only says "cargo" (70-79), so bulkers and container ships look alike unless the type text says which.
+ */
+export function shipCategory(code, text) {
+    const t = String(text ?? '').toLocaleLowerCase('tr');
+    const byWord = t && CATEGORY_WORDS.find(([, re]) => re.test(t));
+    if (byWord) return byWord[0];
+    const c = Number(code);
+    if (c >= 70 && c <= 79) return 'cargo';
+    if (c >= 80 && c <= 89) return 'tanker';
+    if ((c >= 60 && c <= 69) || (c >= 40 && c <= 49)) return 'passenger';
+    if (c === 30) return 'fishing';
+    if (c === 36 || c === 37) return 'pleasure';
+    if ([31, 32, 33, 34].includes(c) || (c >= 50 && c <= 59)) return 'service';
+    return 'other';
+}
+
 /** Hours since an ISO/UTC timestamp, and the freshness level (amber > 6 h, red > 24 h). */
 export function freshness(iso, now = Date.now()) {
     const t = Date.parse(String(iso ?? '').replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(String(iso ?? '')) ? '' : 'Z'));
