@@ -266,7 +266,9 @@ export async function mount(el, ctx) {
         const sea = L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', { maxZoom: 18, attribution: 'Seamarks © OpenSeaMap' });
         shipLayer = L.layerGroup().addTo(map);
         trackLayer = L.layerGroup().addTo(map);
-        const portLayer = L.layerGroup(PORT_LIST.map((p) => L.circleMarker([p.lat, p.lon], { radius: 3, color: '#12365c', weight: 1, fillOpacity: 0.7 }).bindTooltip(`${p.name} (${p.country}) — approx.`)));
+        // Canvas, not one SVG element per port: the list can hold thousands of ports
+        const portRenderer = L.canvas({ padding: 0.3 });
+        const portLayer = L.layerGroup(PORT_LIST.map((p) => L.circleMarker([p.lat, p.lon], { renderer: portRenderer, radius: 3, color: '#12365c', weight: 1, fillOpacity: 0.7 }).bindTooltip(`${p.name} (${p.country}) — approx.`)));
         const anchLayer = L.layerGroup(ANCHORAGES.map((a) => L.circle([a.lat, a.lon], { radius: a.radiusNm * 1852, color: '#a86e12', weight: 1, dashArray: '4 4', fillOpacity: 0.06 }).bindTooltip(`${a.name} — approx.`)));
         portLayer.addTo(map);
         anchLayer.addTo(map);
@@ -355,11 +357,12 @@ export async function mount(el, ctx) {
             if (Number.isFinite(tool.lat)) targetMarker = L.circleMarker([tool.lat, tool.lon], { radius: 7, color: '#c0392b', weight: 2, fillOpacity: 0.2 }).bindTooltip(tool.port || 'target').addTo(trackLayer);
         };
         const num = (k, small = true) => h('input.ch-num', { type: 'text', value: tool[k] ?? '', placeholder: k === 'nm' ? 'auto (GC × factor)' : '', on: { input: (e) => { tool[k] = parseNum(e.target.value, small); calc(); } } });
-        const portSel = h('select', { on: { change: (e) => {
-            const p = PORT_LIST.find((x) => x.name === e.target.value);
+        // Searchable: a plain drop-down is unusable with thousands of ports
+        const portSel = h('span', h('input', { type: 'text', placeholder: '— port (approx.) —', value: tool.port || '', list: 'ch-mon-ports', on: { change: (e) => {
+            const p = PORT_LIST.find((x) => x.name.toLowerCase() === e.target.value.trim().toLowerCase());
             if (p) Object.assign(tool, { port: p.name, lat: p.lat, lon: p.lon, nm: null });
             drawTool(panel, L, mapEl);
-        } } }, h('option', { value: '' }, '— port (approx.) —'), PORT_LIST.map((p) => h('option', { value: p.name, selected: tool.port === p.name }, `${p.name} (${p.country})`)));
+        } } }), h('datalist#ch-mon-ports', PORT_LIST.map((p) => h('option', { value: p.name }, p.country))));
         panel.replaceChildren(
             h('h4', 'Can she make the laycan?'),
             h('label.ch-field', h('span.ch-field__label', 'Vessel'), h('select', { on: { change: (e) => { tool.watchId = +e.target.value; tool.forId = null; drawTool(panel, L, mapEl); } } },

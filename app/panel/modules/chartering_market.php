@@ -294,7 +294,7 @@ function ch_market_regions_for(mixed $place): array
             }
         }
     }
-    $country = scalar('SELECT country FROM ch_ports WHERE lower(name) = lower(?) OR lower(name) LIKE lower(?) OR lower(?) LIKE lower(name) || \'%\' ORDER BY length(name) DESC LIMIT 1',
+    $country = scalar('SELECT country FROM ch_ports WHERE lower(name) = lower(?) OR lower(name) LIKE lower(?) OR lower(?) LIKE lower(name) || \' %\' ORDER BY length(name) DESC LIMIT 1',
         [$place, addcslashes($place, '%_') . ' (%', $place]);
     if ($country && isset(HB_COUNTRY_REGIONS[strtoupper((string) $country)])) {
         $out = [...$out, ...HB_COUNTRY_REGIONS[strtoupper((string) $country)]];
