@@ -15,6 +15,9 @@ const REGION = [
     ['bsea', 'Black Sea', 'cat-teal', ['RO', 'BG', 'UA', 'RU', 'GE', 'MD']],
     ['med', 'Mediterranean', 'cat-green', ['GR', 'EG', 'LB', 'SY', 'CY', 'IT', 'GI', 'ES', 'FR', 'MT', 'TN', 'DZ', 'MA', 'LY', 'IL', 'AL', 'HR', 'SI', 'ME', 'PT']],
     ['eur', 'North Europe / Baltic', 'cat-purple', ['NL', 'BE', 'DE', 'PL', 'GB', 'IE', 'DK', 'SE', 'NO', 'FI', 'EE', 'LV', 'LT']],
+    ['me', 'Middle East', 'cat-orange', ['AE', 'SA', 'QA', 'OM', 'KW', 'BH', 'IQ', 'IR']],
+    ['asia', 'Asia / Far East', 'cat-indigo', ['CN', 'HK', 'TW', 'JP', 'KR', 'SG', 'MY', 'ID', 'VN', 'TH', 'PH', 'IN', 'PK', 'BD', 'LK']],
+    ['amer', 'Americas', 'cat-brown', ['US', 'CA', 'MX', 'PA', 'BR', 'AR', 'CL', 'CO', 'PE', 'UY']],
     ['other', 'Rest of world', 'cat-gray', null],
 ];
 const ZONES = (() => { try { return Intl.supportedValuesOf('timeZone'); } catch { return []; } })();
@@ -74,6 +77,7 @@ export async function mount(el, ctx, param) {
                 { key: 'country', label: 'Ctry', width: 55 },
                 { key: 'locode', label: 'LOCODE', width: 80 },
                 { key: 'tz', label: 'Time zone · local now', width: 220, render: (r) => (r.tz ? h('span', r.tz, h('small.dim', ` ${localTime(r.tz)}`)) : '') },
+                { key: 'notes', label: 'Notes', width: 460 },
                 { key: 'max_draft', label: 'Max draft', width: 80, align: 'r', render: (r) => (r.max_draft ? fmt(r.max_draft, 2) : '') },
                 { key: 'max_loa', label: 'LOA', width: 65, align: 'r', render: (r) => (r.max_loa ? fmt(r.max_loa, 0) : '') },
                 { key: 'max_beam', label: 'Beam', width: 65, align: 'r', render: (r) => (r.max_beam ? fmt(r.max_beam, 1) : '') },
