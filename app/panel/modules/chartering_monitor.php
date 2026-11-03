@@ -59,7 +59,7 @@ entity_define('ch_watch', [
                 api_error('Bu MMSI listede zaten var.');
             }
             if (!$before && (int) scalar("SELECT COUNT(*) FROM ch_watchlist WHERE mmsi IS NOT NULL AND mmsi <> ''") >= 200) {
-                api_error('AIS takibi en fazla 200 gemi (aisstream sınırı). Gemiyi MMSI olmadan ekleyip elle izleyebilirsiniz.');
+                api_error('AIS takibi en fazla 200 gemi. Gemiyi MMSI olmadan ekleyip elle izleyebilirsiniz.');
             }
         }
         return $d + ($before ? [] : ['grp' => 'watch']);
@@ -76,19 +76,28 @@ function module_routes_chartering_monitor(): void
     crud_routes('ch_watch', '/api/chartering/watch');
 }
 
-/** Which provider runs: setting ch_ais_provider (aisstream | demo | off); default aisstream when a key exists. */
+const CH_AIS_PROVIDERS = ['pelyr', 'aisstream', 'demo', 'off'];
+
+/** Which provider runs: setting ch_ais_provider; without one the provider whose key exists (Pelyr first). */
 function ch_ais_provider_name(): string
 {
     $set = setting('ch_ais_provider');
-    if (in_array($set, ['aisstream', 'demo', 'off'], true)) {
+    if (in_array($set, CH_AIS_PROVIDERS, true)) {
         return $set;
     }
-    return config('ais.aisstream_key') ? 'aisstream' : 'off';
+    return config('ais.pelyr_key') ? 'pelyr' : (config('ais.aisstream_key') ? 'aisstream' : 'off');
+}
+
+/** .env name of the key the provider needs (null: it needs none). */
+function ch_ais_key_name(string $provider): ?string
+{
+    return ['pelyr' => 'PELYR_API_KEY', 'aisstream' => 'AISSTREAM_API_KEY'][$provider] ?? null;
 }
 
 function ch_ais_provider(): ?AisProvider
 {
     return match (ch_ais_provider_name()) {
+        'pelyr'     => config('ais.pelyr_key') ? new PelyrProvider((string) config('ais.pelyr_key'), (int) config('ais.pelyr_per_minute')) : null,
         'aisstream' => config('ais.aisstream_key') ? new AisStreamProvider((string) config('ais.aisstream_key')) : null,
         'demo'      => new DemoAisProvider(),
         default     => null,
@@ -98,9 +107,12 @@ function ch_ais_provider(): ?AisProvider
 function ch_monitor_status(): array
 {
     $last = row('SELECT * FROM ch_ais_runs ORDER BY id DESC LIMIT 1');
+    $name = ch_ais_provider_name();
     return [
-        'provider'      => ch_ais_provider_name(),
-        'keyConfigured' => (bool) config('ais.aisstream_key'),
+        'provider'      => $name,
+        'keyName'       => ch_ais_key_name($name),
+        'keyConfigured' => match ($name) { 'pelyr' => (bool) config('ais.pelyr_key'), 'aisstream' => (bool) config('ais.aisstream_key'), default => true },
+        'attribution'   => $name === 'pelyr' ? PelyrProvider::attribution() : null,
         'lastRun'       => $last,
         'lastOk'        => row("SELECT at, ships, messages FROM ch_ais_runs WHERE error IS NULL AND messages > 0 ORDER BY id DESC LIMIT 1"),
         'runs24h'       => (int) scalar('SELECT COUNT(*) FROM ch_ais_runs WHERE at >= ?', [gmdate('Y-m-d H:i:s', time() - 86400)]),
@@ -127,7 +139,7 @@ function ch_monitor_refresh(): never
 function ch_monitor_set_provider(array $p, array $in): never
 {
     $v = (string) ($in['provider'] ?? '');
-    if (!in_array($v, ['aisstream', 'demo', 'off'], true)) {
+    if (!in_array($v, CH_AIS_PROVIDERS, true)) {
         api_error('Bilinmeyen sağlayıcı.');
     }
     setting_set('ch_ais_provider', $v);
@@ -167,18 +179,18 @@ function ch_watch_manual(array $p, array $in): never
  * ship, add a track point at most every 10 min (or after ~2 nm), refresh static AIS data, clean old track points.
  * A lock file prevents overlapping runs (cron + button). Returns a summary.
  */
-function ch_ais_collect(int $seconds, string $trigger): array
+function ch_ais_collect(int $seconds, string $trigger, ?AisProvider $provider = null): array
 {
     $lockFile = panel_storage('ais.lock');
     $lock = fopen($lockFile, 'c');
     if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
         return ['skipped' => 'running'];
     }
-    $provider = ch_ais_provider();
-    $run = ['at' => gmdate('Y-m-d H:i:s'), 'trigger' => $trigger, 'provider' => ch_ais_provider_name(), 'seconds' => $seconds, 'messages' => 0, 'ships' => 0, 'error' => null];
+    $provider ??= ch_ais_provider();
+    $run = ['at' => gmdate('Y-m-d H:i:s'), 'trigger' => $trigger, 'provider' => $provider?->name() ?? ch_ais_provider_name(), 'seconds' => $seconds, 'messages' => 0, 'ships' => 0, 'error' => null];
     try {
         if (!$provider) {
-            $run['error'] = ch_ais_provider_name() === 'off' ? 'AIS kapalı (sağlayıcı: off).' : 'AISSTREAM_API_KEY sunucudaki .env’de yok.';
+            $run['error'] = ch_ais_provider_name() === 'off' ? 'AIS kapalı (sağlayıcı: off).' : ch_ais_key_name(ch_ais_provider_name()) . ' sunucudaki .env’de yok.';
             return ch_ais_finish($run, $lock);
         }
         $watch = rows("SELECT * FROM ch_watchlist WHERE mmsi IS NOT NULL AND mmsi <> ''");
@@ -204,9 +216,16 @@ function ch_ais_collect(int $seconds, string $trigger): array
             }
             $id = (int) $w['id'];
             if ($r['kind'] === 'position') {
+                if (!empty($r['suspect'])) {                    // provider doubts this fix: keep the last good position, show why
+                    if ($w['last_source'] !== 'manual') {           // a manual position's note is the user's own
+                        update('ch_watchlist', $id, ['last_note' => $r['note'] ?? null]);
+                        $touched[$id] = true;
+                    }
+                    continue;
+                }
                 if ($w['last_time'] === null || $r['at'] >= $w['last_time']) {
                     $upd = ['last_lat' => $r['lat'], 'last_lon' => $r['lon'], 'last_sog' => $r['sog'], 'last_cog' => $r['cog'], 'last_heading' => $r['heading'],
-                        'last_nav' => $r['nav'], 'last_time' => $r['at'], 'last_source' => $provider->name(), 'last_note' => null];
+                        'last_nav' => $r['nav'], 'last_time' => $r['at'], 'last_source' => $provider->name(), 'last_note' => $r['note'] ?? null];
                     update('ch_watchlist', $id, $upd);
                     $byMmsi[$r['mmsi']] = array_merge($w, $upd);
                     $touched[$id] = true;

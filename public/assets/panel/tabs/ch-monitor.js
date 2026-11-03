@@ -85,15 +85,16 @@ export async function mount(el, ctx) {
         const s = status;
         const last = s?.lastRun;
         const age = last ? freshness(last.at) : null;
-        const provider = { aisstream: 'aisstream.io', demo: 'DEMO data', off: 'off' }[s?.provider] ?? s?.provider;
+        const provider = { pelyr: 'Pelyr', aisstream: 'aisstream.io', demo: 'DEMO data', off: 'off' }[s?.provider] ?? s?.provider;
         fill(statusBox,
             h('span.ch-mon__chip', { class: s?.provider === 'demo' ? 'is-demo' : '' }, `AIS: ${provider}`),
-            s?.provider === 'aisstream' && !s.keyConfigured ? badge('red', 'API key missing', 'AISSTREAM_API_KEY sunucudaki .env dosyasına eklenmeli') : null,
+            s?.keyName && !s.keyConfigured ? badge('red', 'API key missing', `${s.keyName} sunucudaki .env dosyasına eklenmeli`) : null,
             last ? h('span.dim', `last run ${age.text} (${last.trigger}) · ${last.ships} ships updated · ${last.messages} messages`) : h('span.dim', 'no collection run yet'),
             last?.error ? badge('amber', 'error', last.error) : null,
             h('span.dim', `· ${s?.tracked ?? 0} / 200 with MMSI · ${s?.runs24h ?? 0} runs in 24 h`),
             admin ? h('select.tiny', { title: 'AIS provider (yönetici)', on: { change: async (e) => { status = (await put('chartering/monitor/provider', { provider: e.target.value })).status; drawStatus(); } } },
-                [['aisstream', 'aisstream.io'], ['demo', 'Demo (fake positions)'], ['off', 'Off']].map(([v, l]) => h('option', { value: v, selected: s?.provider === v }, l))) : null);
+                [['pelyr', 'Pelyr'], ['aisstream', 'aisstream.io'], ['demo', 'Demo (fake positions)'], ['off', 'Off']].map(([v, l]) => h('option', { value: v, selected: s?.provider === v }, l))) : null,
+            s?.attribution ? h('span.dim', `· ${s.attribution}`) : null);
     }
 
     function draw() {
@@ -141,7 +142,7 @@ export async function mount(el, ctx) {
 
     function lastCell(r) {
         const f = freshness(r.last_time);
-        const src = r.last_source === 'manual' ? badge('amber', 'manual', r.last_note || 'Manual override') : r.last_source === 'demo' ? badge('amber', 'DEMO') : null;
+        const src = r.last_source === 'manual' ? badge('amber', 'manual', r.last_note || 'Manual override') : r.last_source === 'demo' ? badge('amber', 'DEMO') : r.last_note ? badge('amber', 'check', r.last_note) : null;
         return h('span.ch-cell-gap', r.last_time ? badge(f.level, f.text, fmtUtc(utcMs(r.last_time))) : h('span.dim', 'no position'), src);
     }
 

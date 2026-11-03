@@ -9,7 +9,7 @@ import { changePassword, twoStep, usersDialog } from '../account.js';
 
 export const TABS = [
     { code: 'ch-market', label: 'Market', tip: 'Baltic indices, TC earnings, charter rates, period TC, bunker prices' },
-    { code: 'ch-monitor', label: 'Position Monitor', tip: 'Watchlist with live AIS (aisstream.io), manual positions, map, tracks and laycan reach' },
+    { code: 'ch-monitor', label: 'Position Monitor', tip: 'Watchlist with live AIS, manual positions, map, tracks and laycan reach' },
     { code: 'ch-board', label: 'Tonnage & Cargo', tip: 'Market positions, cargo orders, matching and the distance matrix' },
     { code: 'ch-voyage', label: 'Voyage Estimator', tip: 'Intake, bunkers, freight, TCE, breakeven and sensitivity' },
     { code: 'ch-fixtures', label: 'Fixtures', tip: 'Fixture register from recaps, post-fixture checklist, deadlines, document templates' },

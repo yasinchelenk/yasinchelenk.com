@@ -46,9 +46,11 @@ return [
         'account' => $env('MAIL_ACCOUNT'),              // armatöre DA (ör. account@…)
         'outbox'  => $env('MAIL_OUTBOX') === '1',       // geliştirme: göndermek yerine storage/outbox'a yaz
     ],
-    // Chartering Desk · Position Monitor: canlı AIS. Anahtar yalnızca sunucudaki .env'de (AISSTREAM_API_KEY), tarayıcıya gitmez.
+    // Chartering Desk · Position Monitor: canlı AIS. Anahtarlar yalnızca sunucudaki .env'de, tarayıcıya gitmez.
     'ais' => [
-        'aisstream_key' => $env('AISSTREAM_API_KEY'),
+        'pelyr_key'        => $env('PELYR_API_KEY'),
+        'pelyr_per_minute' => (int) $env('PELYR_PER_MINUTE', '2'),      // planın dakika limiti (Free 2, Fleet 5, Horizon 60)
+        'aisstream_key'    => $env('AISSTREAM_API_KEY'),
     ],
     // Chartering Desk · Market: "Update from HandyBulk" kendini tanıtan User-Agent ile gider; iletişim adresi .env'de (CHARTDESK_CONTACT), repoda değil.
     'handybulk' => [
