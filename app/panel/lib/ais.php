@@ -32,8 +32,12 @@ final class AisStreamProvider implements AisProvider
     private const HOST = 'stream.aisstream.io';
     private const TYPES = ['PositionReport', 'StandardClassBPositionReport', 'ExtendedClassBPositionReport', 'ShipStaticData', 'StaticDataReport'];
 
-    public function __construct(private string $key)
+    /** @var callable(): object */
+    private $connect;
+
+    public function __construct(private string $key, ?callable $connect = null)
     {
+        $this->connect = $connect ?? fn() => new MiniWebSocket(self::HOST, '/v0/stream');
     }
 
     public function name(): string
@@ -47,7 +51,7 @@ final class AisStreamProvider implements AisProvider
         if (!$mmsis) {
             return [];
         }
-        $ws = new MiniWebSocket(self::HOST, '/v0/stream');
+        $ws = ($this->connect)();
         $ws->sendText(json_encode([
             'APIKey'             => $this->key,
             'BoundingBoxes'      => [[[-90, -180], [90, 180]]],
@@ -60,19 +64,22 @@ final class AisStreamProvider implements AisProvider
             $msg = $ws->receive(max(0.2, $deadline - microtime(true)));
             if ($msg === null) {
                 if ($ws->closed) {
-                    if ($ws->closeReason !== '' && !$out) {
-                        throw new RuntimeException('aisstream closed the connection: ' . $ws->closeReason);
+                    if (!$out) {
+                        // Invalid keys and server trouble often close the socket with no reason at all (code 1006):
+                        // say so, otherwise the panel only shows "0 messages", the same as a quiet ship.
+                        $after = round($seconds - ($deadline - microtime(true)), 1);
+                        throw new RuntimeException("aisstream closed the connection after {$after} s" . ($ws->closeReason !== '' ? ': ' . $ws->closeReason : ' without a reason (key or service problem).'));
                     }
                     break;
                 }
                 continue;
             }
             $m = json_decode($msg, true);
+            if (is_array($m) && (isset($m['error']) || isset($m['Error']))) {     // error messages have no MessageType
+                throw new RuntimeException('aisstream: ' . ($m['error'] ?? $m['Error']));
+            }
             if (!is_array($m) || !isset($m['MessageType'])) {
                 continue;
-            }
-            if (isset($m['error']) || isset($m['Error'])) {
-                throw new RuntimeException('aisstream: ' . ($m['error'] ?? $m['Error']));
             }
             if ($rec = self::normalize($m)) {
                 $out[] = $rec;
@@ -130,6 +137,241 @@ final class AisStreamProvider implements AisProvider
         }
 
         return null;
+    }
+}
+
+/**
+ * Pelyr HTTPS API (https://dashboard.pelyr.com/en/docs/api): one request per vessel, Bearer key, per-key limit per minute.
+ * Each run asks as many ships as the limit allows inside its time window and continues where the last run stopped, so a
+ * long watchlist is covered over several runs. Licence: data from the Free plan is non-commercial only (a company's
+ * internal tool counts as commercial, Pelyr Data Licence 2.0 §2.2 and §5); a paid plan's data may be used commercially.
+ */
+final class PelyrProvider implements AisProvider
+{
+    private const BASE = 'https://api.pelyr.com';
+    private const CURSOR = 'ch_ais_pelyr_cursor';
+    private const SOURCES = 'ch_ais_pelyr_sources';     // JSON {at, sources: {id: attribution}}
+    private const SEEN = 'ch_ais_pelyr_licenses';       // JSON list of licence ids seen in responses
+    private const SOURCES_MAX_AGE = 7 * 86400;
+
+    /** @var callable(string): array{status: int, body: string, retryAfter: ?int} */
+    private $http;
+    /** @var callable(float): void */
+    private $sleep;
+
+    public function __construct(private string $key, private int $perMinute = 2, ?callable $http = null, ?callable $sleep = null)
+    {
+        $this->http = $http ?? fn(string $path) => $this->curlGet($path);
+        $this->sleep = $sleep ?? fn(float $s) => usleep((int) ($s * 1e6));
+    }
+
+    public function name(): string
+    {
+        return 'pelyr';
+    }
+
+    public function fetch(array $mmsis, int $seconds): array
+    {
+        $mmsis = array_values(array_unique(array_filter(array_map(fn($m) => preg_replace('/\D/', '', (string) $m), $mmsis), fn($m) => strlen($m) === 9)));
+        $n = count($mmsis);
+        if (!$n) {
+            return [];
+        }
+        $gap = 60 / max(1, $this->perMinute) + 0.5;
+        $slots = (int) floor($seconds / $gap) + 1;
+        $start = (int) setting(self::CURSOR, '0') % $n;
+        $out = [];
+        $done = 0;
+        $used = 0;
+        $searched = false;
+        $failure = null;
+        $call = function (string $path) use (&$used, $gap) {
+            if ($used++ > 0) {
+                ($this->sleep)($gap);
+            }
+            return ($this->http)($path);
+        };
+        while ($used < $slots && $done < $n) {
+            $mmsi = $mmsis[($start + $done) % $n];
+            $res = $call("/v1/vessels/{$mmsi}");
+            if ($res['status'] === 200) {
+                array_push($out, ...self::normalize($this->decode($res), $mmsi));
+                $done++;
+            } elseif ($res['status'] === 404) {                 // nothing heard for over an hour: last known position from search
+                if ($searched) {
+                    $done++;
+                } elseif ($used >= $slots) {
+                    break;                                       // keep this ship first in line for the next run
+                } else {
+                    $searched = true;
+                    $res = $call("/v1/vessels/search?mmsi={$mmsi}&max=1");
+                    if ($res['status'] === 200) {
+                        foreach ($this->decode($res)['results'] ?? [] as $hit) {
+                            if ((string) ($hit['mmsi'] ?? '') === $mmsi) {
+                                array_push($out, ...self::normalize($hit, $mmsi));
+                            }
+                        }
+                        $done++;
+                    } elseif ($res['status'] !== 404) {
+                        $failure = self::describe($res);
+                        break;
+                    } else {
+                        $done++;
+                    }
+                }
+            } elseif ($res['status'] === 422) {                 // this MMSI is not valid for Pelyr: skip it
+                $done++;
+            } elseif (in_array($res['status'], [400, 401, 403], true)) {
+                throw new RuntimeException(self::describe($res));   // key or plan problem: every ship would fail
+            } else {
+                $failure = self::describe($res);                 // 429, 5xx, network: stop, the next run continues here
+                break;
+            }
+        }
+        setting_set(self::CURSOR, (string) (($start + $done) % $n));
+        $this->rememberLicenses($out);
+        $this->refreshSources();
+        if (!$out && $failure) {
+            throw new RuntimeException($failure);
+        }
+
+        return $out;
+    }
+
+    /**
+     * One vessel record (live endpoint or search hit) → normalized records.
+     * A "low" plausibility position is marked, not trusted: the collector keeps the last good one and shows the note.
+     * @return list<array<string, mixed>>
+     */
+    public static function normalize(array $v, string $mmsi): array
+    {
+        $out = [];
+        $p = $v['position'] ?? null;
+        if (is_array($p) && is_numeric($p['lat'] ?? null) && is_numeric($p['lon'] ?? null) && !empty($p['ts'])) {
+            $plausibility = $p['plausibility'] ?? null;
+            $flags = implode(', ', array_map('strval', (array) ($p['flags'] ?? [])));
+            $rec = ['mmsi' => $mmsi, 'kind' => 'position', 'at' => self::utc($p['ts']), 'name' => null, 'license' => (string) ($p['license'] ?? ''),
+                'lat' => (float) $p['lat'], 'lon' => (float) $p['lon'],
+                'sog' => isset($p['sog']) ? (float) $p['sog'] : null, 'cog' => isset($p['cog']) ? (float) $p['cog'] : null,
+                'heading' => isset($p['heading']) && $p['heading'] < 360 ? (int) $p['heading'] : null,
+                'nav' => isset($p['nav_status']) ? (int) $p['nav_status'] : null,
+                'note' => in_array($plausibility, ['medium', 'low'], true) ? "Pelyr plausibility {$plausibility}" . ($flags !== '' ? ": {$flags}" : '') : null];
+            if ($plausibility === 'low') {
+                $rec['suspect'] = true;
+            }
+            $out[] = $rec;
+        }
+        $s = $v['static'] ?? $v['registry'] ?? null;
+        if (is_array($s)) {
+            $eta = null;
+            if (preg_match('/^(\d{2})-(\d{2})T(\d{2}):(\d{2})/', (string) ($s['eta'] ?? ''), $m)) {
+                $eta = ['Month' => (int) $m[1], 'Day' => (int) $m[2], 'Hour' => (int) $m[3], 'Minute' => (int) $m[4]];
+            }
+            $out[] = ['mmsi' => $mmsi, 'kind' => 'static', 'at' => !empty($s['ts']) ? self::utc($s['ts']) : gmdate('Y-m-d H:i:s'), 'license' => (string) ($s['license'] ?? ''),
+                'name' => trim((string) ($s['name'] ?? '')) ?: null, 'imo' => !empty($s['imo']) ? (string) $s['imo'] : null,
+                'callsign' => trim((string) ($s['callsign'] ?? '')) ?: null, 'type' => isset($s['type']) && is_numeric($s['type']) ? (int) $s['type'] : null,
+                'length' => !empty($s['length']) ? $s['length'] : null, 'beam' => !empty($s['beam']) ? $s['beam'] : null,
+                'draught' => !empty($s['draught']) ? (float) $s['draught'] : null, 'dest' => trim((string) ($s['dest'] ?? '')) ?: null, 'eta' => $eta];
+        }
+
+        return $out;
+    }
+
+    /** Text the panel shows wherever positions from Pelyr appear. */
+    public static function attribution(): string
+    {
+        $sources = json_decode((string) setting(self::SOURCES, ''), true)['sources'] ?? [];
+        $seen = json_decode((string) setting(self::SEEN, '[]'), true) ?: [];
+        $lines = [];
+        foreach ($seen as $id) {
+            $text = trim((string) ($sources[$id] ?? ''));
+            if ($text !== '') {
+                $lines[$text] = true;
+            }
+        }
+
+        return $lines ? implode(' · ', array_keys($lines)) : 'AIS data from Pelyr (pelyr.com)';
+    }
+
+    private function rememberLicenses(array $records): void
+    {
+        $seen = json_decode((string) setting(self::SEEN, '[]'), true) ?: [];
+        $new = array_values(array_unique(array_merge($seen, array_values(array_filter(array_column($records, 'license'), fn($l) => $l !== '')))));
+        if ($new !== $seen) {
+            setting_set(self::SEEN, json_encode($new));
+        }
+    }
+
+    /** The source directory rarely changes and has its own limit (1 / min): keep a copy, never let it fail a run. */
+    private function refreshSources(): void
+    {
+        $at = json_decode((string) setting(self::SOURCES, ''), true)['at'] ?? 0;
+        if (time() - (int) $at < self::SOURCES_MAX_AGE) {
+            return;
+        }
+        $res = ($this->http)('/v1/sources');
+        $list = $res['status'] === 200 ? (json_decode($res['body'], true)['sources'] ?? null) : null;
+        if (is_array($list)) {
+            $map = [];
+            foreach ($list as $s) {
+                $map[(string) ($s['id'] ?? '')] = (string) ($s['attribution'] ?? '');
+            }
+            setting_set(self::SOURCES, json_encode(['at' => time(), 'sources' => $map], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        }
+    }
+
+    private function decode(array $res): array
+    {
+        $j = json_decode($res['body'], true);
+        if (!is_array($j)) {
+            throw new RuntimeException('Pelyr: unreadable response.');
+        }
+
+        return $j;
+    }
+
+    private static function describe(array $res): string
+    {
+        $status = $res['status'];
+        $code = json_decode($res['body'] ?? '', true)['error']['code'] ?? null;
+        if ($status === 0) {
+            return 'Pelyr: no connection (' . mb_substr($res['body'] ?? '', 0, 120) . ').';
+        }
+        if ($status === 429) {
+            return 'Pelyr: rate limit' . (isset($res['retryAfter']) ? ", retry in {$res['retryAfter']} s" : '') . '.';
+        }
+
+        return "Pelyr: HTTP {$status}" . ($code ? " ({$code})" : '') . '.';
+    }
+
+    private static function utc(mixed $ts): string
+    {
+        $t = strtotime((string) $ts);
+
+        return gmdate('Y-m-d H:i:s', $t === false ? time() : $t);
+    }
+
+    /** @return array{status: int, body: string, retryAfter: ?int} */
+    private function curlGet(string $path): array
+    {
+        $retry = null;
+        $c = curl_init(self::BASE . $path);
+        curl_setopt_array($c, [
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15, CURLOPT_CONNECTTIMEOUT => 8, CURLOPT_USERAGENT => 'chartering-desk',
+            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $this->key, 'Accept: application/json'],
+            CURLOPT_HEADERFUNCTION => function ($ch, $line) use (&$retry) {
+                if (stripos($line, 'Retry-After:') === 0) {
+                    $retry = (int) trim(substr($line, 12));
+                }
+                return strlen($line);
+            },
+        ]);
+        $body = curl_exec($c);
+        $status = (int) curl_getinfo($c, CURLINFO_RESPONSE_CODE);
+        $err = curl_error($c);
+        unset($c);
+
+        return ['status' => $body === false ? 0 : $status, 'body' => $body === false ? $err : (string) $body, 'retryAfter' => $retry];
     }
 }
 
