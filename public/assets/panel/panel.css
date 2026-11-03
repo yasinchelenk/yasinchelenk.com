@@ -1176,6 +1176,15 @@ input.ch-nm { width: 90px; padding: 2px 6px; font-size: 12.5px; }
 .ch-mon__result { display: grid; gap: 4px; font-size: 13px; padding: 6px 0; border-top: 1px solid var(--row-line); }
 .ch-mon__note { font-size: 11.5px; margin: 0; }
 .ch-ship-icon { background: none !important; border: 0 !important; }
+.ch-cat-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 0; box-shadow: 0 0 0 1px rgba(0, 0, 0, .15); }
+.ch-map-legend { background: rgba(255, 255, 255, .94); border-radius: 6px; box-shadow: 0 1px 5px rgba(0, 0, 0, .3); padding: 6px 10px; font-size: 12px; line-height: 1.5; color: var(--navy); }
+.ch-map-legend summary { cursor: pointer; font-weight: 600; }
+.ch-map-legend[open] summary { margin-bottom: 4px; }
+.ch-map-legend hr { border: 0; border-top: 1px solid var(--row-line); margin: 4px 0; }
+.ch-map-legend__row { display: flex; align-items: center; white-space: nowrap; }
+.ch-map-legend__port { display: inline-block; width: 7px; height: 7px; border-radius: 50%; border: 1px solid #6b7280; background: #fff; margin: 0 7px 0 1px; }
+.ch-map-legend__mark { display: inline-block; width: 15px; font-size: 10px; color: #475569; }
+.ch-map-legend__mark.is-faded { opacity: .45; }
 .ch-pop { display: grid; gap: 2px; font-size: 12.5px; min-width: 220px; }
 .ch-pop__actions { display: flex; gap: 4px; margin-top: 4px; }
 .ch-row-actions { display: inline-flex; gap: 2px; }

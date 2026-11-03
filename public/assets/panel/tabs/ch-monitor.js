@@ -5,7 +5,7 @@ import { get, post, put, del } from '../core/api.js';
 import { modal, confirmBox, segmented } from '../core/ui.js';
 import { Grid, resetLayoutButton } from '../core/grid.js';
 import { live } from '../core/live.js';
-import { gcNm, seaArea, NAV_STATUS, shipType, freshness, etaMs, laycanReach, aisEtaIso } from '../chartering/engine/geo.js';
+import { gcNm, seaArea, NAV_STATUS, shipType, shipCategory, SHIP_CATEGORIES, freshness, etaMs, laycanReach, aisEtaIso } from '../chartering/engine/geo.js';
 import { PORTS, ANCHORAGES } from '../chartering/engine/ports.js';
 import { blankEstimate } from '../chartering/engine/voyage.js';
 import { parseNum, fmt } from '../chartering/ui.js';
@@ -14,6 +14,8 @@ const GROUPS = {
     fixed: ['Fixed / On voyage', 'cat-purple', '#7d4fd6'], open: ['Open / Prompt', 'cat-green', '#18996c'], ballast: ['Ballasting', 'cat-blue', '#2f6fdd'],
     port: ['At port / Working', 'cat-orange', '#ec7a22'], waiting: ['Waiting / Anchorage', 'cat-yellow', '#c79100'], watch: ['Watchlist', 'cat-gray', '#64748b'],
 };
+const categoryOf = (r) => SHIP_CATEGORIES[shipCategory(r.ais_type, r.type)];
+const categoryDot = (cat) => h('span.ch-cat-dot', { style: `background:${cat.color}`, title: cat.label });
 const DEFAULT_FACTOR = 1.15;
 const DEFAULT_SPEED = 12;
 const badge = (level, text, title) => h('span.ch-badge.' + level, { title: title ?? text }, text);
@@ -115,7 +117,7 @@ export async function mount(el, ctx) {
             columns: [
                 { key: 'name', label: 'Vessel', width: 200, render: (r) => h('span', h('b', r.name), h('small.dim', ` ${[r.imo && 'IMO ' + r.imo, r.mmsi && 'MMSI ' + r.mmsi].filter(Boolean).join(' · ')}`)) },
                 { key: 'grp', label: 'Group', width: 150, render: (r) => groupSelect(r) },
-                { key: 'type', label: 'Type / DWT', width: 130, render: (r) => [r.type || shipType(r.ais_type), r.dwt ? fmt(r.dwt, 0) + ' dwt' : '', r.draft ? fmt(r.draft, 1) + ' m' : ''].filter(Boolean).join(' · ') },
+                { key: 'type', label: 'Type / DWT', width: 130, render: (r) => h('span', categoryDot(categoryOf(r)), [r.type || shipType(r.ais_type), r.dwt ? fmt(r.dwt, 0) + ' dwt' : '', r.draft ? fmt(r.draft, 1) + ' m' : ''].filter(Boolean).join(' · ')) },
                 { key: 'pos', label: 'Position', width: 230, render: (r) => (Number.isFinite(r.last_lat) ? h('span', latLonText(r.last_lat, r.last_lon), h('small.dim', ` ${seaArea(r.last_lat, r.last_lon)}`)) : h('span.dim', '—')) },
                 { key: 'sog', label: 'SOG / COG', width: 95, align: 'r', render: (r) => (r.last_sog !== null && r.last_sog !== undefined ? `${fmt(r.last_sog, 1)} kn${r.last_cog !== null ? ' / ' + Math.round(r.last_cog) + '°' : ''}` : '') },
                 { key: 'nav', label: 'Nav status', width: 150, render: (r) => NAV_STATUS[r.last_nav] ?? '' },
@@ -269,11 +271,12 @@ export async function mount(el, ctx) {
         trackLayer = L.layerGroup().addTo(map);
         // Canvas, not one SVG element per port: the list can hold thousands of ports
         const portRenderer = L.canvas({ padding: 0.3 });
-        const portLayer = L.layerGroup(PORT_LIST.map((p) => L.circleMarker([p.lat, p.lon], { renderer: portRenderer, radius: 3, color: '#12365c', weight: 1, fillOpacity: 0.7 }).bindTooltip(`${p.name} (${p.country}) — approx.`)));
+        const portLayer = L.layerGroup(PORT_LIST.map((p) => L.circleMarker([p.lat, p.lon], { renderer: portRenderer, radius: 2.5, color: '#6b7280', weight: 1, fillColor: '#ffffff', fillOpacity: 1 }).bindTooltip(`${p.name} (${p.country}) — approx.`)));
         const anchLayer = L.layerGroup(ANCHORAGES.map((a) => L.circle([a.lat, a.lon], { radius: a.radiusNm * 1852, color: '#a86e12', weight: 1, dashArray: '4 4', fillOpacity: 0.06 }).bindTooltip(`${a.name} — approx.`)));
         portLayer.addTo(map);
         anchLayer.addTo(map);
         L.control.layers({ OpenStreetMap: osm }, { 'Seamarks (OpenSeaMap)': sea, Vessels: shipLayer, Tracks: trackLayer, Ports: portLayer, 'Anchorages / waiting areas': anchLayer }, { collapsed: true }).addTo(map);
+        mapLegend(L).addTo(map);
         map.on('click', (e) => {
             if (!pickTarget) return;
             const fn = pickTarget;
@@ -285,8 +288,28 @@ export async function mount(el, ctx) {
         drawTool(panel, L, mapEl);
     }
 
+    function mapLegend(L) {
+        const legend = L.control({ position: 'bottomleft' });
+        legend.onAdd = () => {
+            const key = (mark, text) => h('div.ch-map-legend__row', mark, text);
+            const el = h('details.ch-map-legend',
+                h('summary', 'Legend'),
+                Object.values(SHIP_CATEGORIES).map((c) => key(categoryDot(c), c.label)),
+                h('hr'),
+                key(h('span.ch-map-legend__port'), 'Port'),
+                key(h('span.ch-map-legend__mark', '▲'), 'Under way'),
+                key(h('span.ch-map-legend__mark', '●'), 'Stopped'),
+                key(h('span.ch-map-legend__mark.is-faded', '●'), 'Position over 6 h old'));
+            el.open = true;
+            L.DomEvent.disableClickPropagation(el);
+            L.DomEvent.disableScrollPropagation(el);
+            return el;
+        };
+        return legend;
+    }
+
     function shipIcon(L, r) {
-        const color = GROUPS[r.grp ?? 'watch']?.[2] ?? '#64748b';
+        const color = categoryOf(r).color;
         const dir = r.last_heading ?? r.last_cog;
         const moving = r.last_sog > 0.5 && dir !== null && dir !== undefined;
         const stale = freshness(r.last_time).level !== 'green';
@@ -304,7 +327,7 @@ export async function mount(el, ctx) {
             const f = freshness(r.last_time);
             const e = ourEta(r);
             const popup = h('div.ch-pop',
-                h('strong', r.name), h('div.dim', `${GROUPS[r.grp ?? 'watch'][0]}${r.last_source === 'manual' ? ' · manual position' : r.last_source === 'demo' ? ' · DEMO' : ''}`),
+                h('strong', r.name), h('div', categoryDot(categoryOf(r)), r.type || categoryOf(r).label), h('div.dim', `${GROUPS[r.grp ?? 'watch'][0]}${r.last_source === 'manual' ? ' · manual position' : r.last_source === 'demo' ? ' · DEMO' : ''}`),
                 h('div', `${latLonText(r.last_lat, r.last_lon)} · ${seaArea(r.last_lat, r.last_lon)}`),
                 h('div', `${r.last_sog !== null ? fmt(r.last_sog, 1) + ' kn' : ''} ${r.last_cog !== null ? Math.round(r.last_cog) + '°' : ''} ${NAV_STATUS[r.last_nav] ?? ''}`),
                 h('div', `Last position ${f.text} (${fmtUtc(utcMs(r.last_time))})`),
@@ -314,7 +337,7 @@ export async function mount(el, ctx) {
                     h('button.tiny', { type: 'button', on: { click: () => showTrack(L, r, 24) } }, 'Track 24 h'),
                     h('button.tiny', { type: 'button', on: { click: () => showTrack(L, r, 72) } }, '72 h'),
                     h('button.tiny', { type: 'button', on: { click: () => { tool.watchId = r.id; drawMap(); } } }, 'Laycan tool')));
-            L.marker([r.last_lat, r.last_lon], { icon: shipIcon(L, r), title: r.name }).bindPopup(popup).bindTooltip(r.name, { direction: 'top', offset: [0, -8] }).addTo(shipLayer);
+            L.marker([r.last_lat, r.last_lon], { icon: shipIcon(L, r), title: r.name }).bindPopup(popup).bindTooltip(`${r.name} · ${categoryOf(r).label}`, { direction: 'top', offset: [0, -8] }).addTo(shipLayer);
             pts.push([r.last_lat, r.last_lon]);
         }
         if (fit && pts.length) map.fitBounds(pts, { padding: [40, 40], maxZoom: 8 });
@@ -328,8 +351,9 @@ export async function mount(el, ctx) {
         const pts = await get(`chartering/watch/${r.id}/track`, { hours });
         trackLayer.clearLayers();
         if (pts.length < 2) { toast(`${r.name}: son ${hours} saatte yeterli konum yok (${pts.length}).`, 'error'); return; }
-        L.polyline(pts.map((p) => [p.lat, p.lon]), { color: GROUPS[r.grp ?? 'watch'][2], weight: 2 }).addTo(trackLayer);
-        pts.forEach((p) => L.circleMarker([p.lat, p.lon], { radius: 2.5, color: p.source === 'manual' ? '#a86e12' : '#12365c', weight: 1 }).bindTooltip(`${p.at} UTC · ${p.sog ?? '?'} kn · ${p.source}`).addTo(trackLayer));
+        const trackColor = categoryOf(r).color;
+        L.polyline(pts.map((p) => [p.lat, p.lon]), { color: trackColor, weight: 2 }).addTo(trackLayer);
+        pts.forEach((p) => L.circleMarker([p.lat, p.lon], { radius: 2.5, color: p.source === 'manual' ? '#a86e12' : trackColor, weight: 1 }).bindTooltip(`${p.at} UTC · ${p.sog ?? '?'} kn · ${p.source}`).addTo(trackLayer));
         map.fitBounds(pts.map((p) => [p.lat, p.lon]), { padding: [40, 40] });
     }
 
