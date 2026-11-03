@@ -24,6 +24,41 @@ function eq(mixed $got, mixed $want, string $label): void
     echo ($ok ? '  ✓ ' : '  ✗ ') . $label . ($ok ? '' : '  — got ' . json_encode($got, JSON_UNESCAPED_UNICODE)) . "\n";
 }
 
+echo "Port list\n";
+$list = rows('SELECT * FROM ch_ports');
+$names = array_map(fn($r) => tr_fold($r['name']), $list);
+eq(count($names) > 4000, true, 'over 4,000 ports');
+eq(count($names), count(array_unique($names)), 'every name once');
+$codes = array_filter(array_column($list, 'locode'));
+eq(count($codes), count(array_unique($codes)), 'every UN/LOCODE once');
+eq(array_filter($codes, fn($c) => !preg_match('/^[A-Z]{2}[A-Z2-9]{3}$/', $c)), [], 'codes are well formed');
+$zones = DateTimeZone::listIdentifiers();
+eq(array_values(array_filter(array_unique(array_filter(array_column($list, 'tz'))), fn($z) => !in_array($z, $zones, true))), [], 'time zones are valid');
+eq(array_filter($list, fn($r) => ($r['lat'] !== null && abs($r['lat']) > 90) || ($r['lon'] !== null && abs($r['lon']) > 180)), [], 'coordinates are in range');
+$port = fn(string $n) => row('SELECT * FROM ch_ports WHERE name = ?', [$n]);
+eq([$port('Singapore')['locode'], $port('Rotterdam')['locode'], $port('Antwerp')['locode'], $port('Istanbul (Ambarlı)')['locode'], $port('Shanghai')['locode']], ['SGSIN', 'NLRTM', 'BEANR', 'TRAMR', 'CNSHG'], 'known codes');
+eq([$port('Marport')['country'], $port('Marport')['tz'], $port('Evyap Port / Kocaeli')['locode']], ['TR', 'Europe/Istanbul', 'TREYP'], 'Turkish terminals from UN/LOCODE');
+eq(str_contains($port('Singapore')['notes'], '#1 worldwide') , true, 'earlier note kept');
+eq($port('Antwerp') && row("SELECT 1 FROM ch_ports WHERE name = 'Antwerpen'") === null, true, 'the same port under another name is not added twice');
+
+echo "Upgrading a site with its own edits\n";
+$pdo = db();
+$pdo->exec("DELETE FROM ch_ports WHERE created_by = 'system' AND notes NOT LIKE '%Busiest%'");
+$pdo->exec("UPDATE ch_ports SET locode = NULL, notes = NULL");
+$pdo->exec("UPDATE ch_ports SET notes = 'Agent: ABC', max_draft = 16.5, agent = 'Mine', lat = 1.5 WHERE name = 'Rotterdam'");
+$pdo->exec("INSERT INTO ch_ports (name, country) VALUES ('Tuzla', 'TR'), ('Dakar', 'XX')");
+$pdo->exec("DELETE FROM ch_ports WHERE name = 'Santos'");
+$before = (int) $pdo->query('SELECT count(*) FROM ch_ports')->fetchColumn();
+$pdo->exec('PRAGMA user_version = 124');
+panel_migrate($pdo);
+$s = $port('Rotterdam');
+eq([$s['max_draft'], $s['agent'], $s['lat'], $s['locode']], [16.5, 'Mine', 1.5, 'NLRTM'], 'entered values kept, empty code filled');
+eq(str_starts_with($s['notes'], "Agent: ABC\n"), true, 'own note first, source added');
+$t = $port('Tuzla');
+eq([$t['locode'], $t['tz'], $t['lat'] !== null], ['TRTUZ', 'Europe/Istanbul', true], 'a port added by hand gets the empty fields');
+eq($port('Santos'), null, 'a deleted port stays deleted');
+eq(!!row("SELECT 1 FROM ch_ports WHERE name = 'Dakar (SN)'"), true, 'a name taken in another country gets the country');
+
 echo "Coordinates\n";
 eq(ch_port_coord('40.966', 'lat'), 40.966, 'decimal');
 eq(ch_port_coord('40,966', 'lat'), 40.966, 'decimal comma');

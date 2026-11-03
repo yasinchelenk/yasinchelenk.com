@@ -14,16 +14,22 @@ const REGION = [
     ['tr', 'Türkiye', 'cat-blue', ['TR']],
     ['bsea', 'Black Sea', 'cat-teal', ['RO', 'BG', 'UA', 'RU', 'GE', 'MD']],
     ['med', 'Mediterranean', 'cat-green', ['GR', 'EG', 'LB', 'SY', 'CY', 'IT', 'GI', 'ES', 'FR', 'MT', 'TN', 'DZ', 'MA', 'LY', 'IL', 'AL', 'HR', 'SI', 'ME', 'PT']],
-    ['eur', 'North Europe / Baltic', 'cat-purple', ['NL', 'BE', 'DE', 'PL', 'GB', 'IE', 'DK', 'SE', 'NO', 'FI', 'EE', 'LV', 'LT']],
-    ['me', 'Middle East', 'cat-orange', ['AE', 'SA', 'QA', 'OM', 'KW', 'BH', 'IQ', 'IR']],
-    ['asia', 'Asia / Far East', 'cat-indigo', ['CN', 'HK', 'TW', 'JP', 'KR', 'SG', 'MY', 'ID', 'VN', 'TH', 'PH', 'IN', 'PK', 'BD', 'LK']],
-    ['amer', 'Americas', 'cat-brown', ['US', 'CA', 'MX', 'PA', 'BR', 'AR', 'CL', 'CO', 'PE', 'UY']],
+    ['eur', 'North Europe / Baltic', 'cat-purple', ['NL', 'BE', 'DE', 'PL', 'GB', 'IE', 'DK', 'SE', 'NO', 'FI', 'EE', 'LV', 'LT', 'IS', 'FO', 'GG', 'JE', 'IM', 'SJ', 'GL']],
+    ['me', 'Middle East', 'cat-orange', ['AE', 'SA', 'QA', 'OM', 'KW', 'BH', 'IQ', 'IR', 'YE', 'JO']],
+    ['asia', 'Asia / Far East', 'cat-indigo', ['CN', 'HK', 'MO', 'TW', 'JP', 'KR', 'KP', 'SG', 'MY', 'ID', 'BN', 'TL', 'VN', 'KH', 'TH', 'MM', 'PH', 'IN', 'PK', 'BD', 'LK', 'MV']],
+    ['amer', 'Americas', 'cat-brown', ['US', 'CA', 'MX', 'PA', 'BR', 'AR', 'CL', 'CO', 'PE', 'UY', 'PY', 'EC', 'VE', 'GY', 'SR', 'GF', 'FK', 'BZ', 'GT', 'HN', 'SV', 'NI', 'CR', 'CU', 'DO', 'HT', 'JM', 'PR', 'BS', 'BB', 'TT', 'AG', 'AW', 'BM', 'BQ', 'CW', 'DM', 'GD', 'GP', 'KN', 'KY', 'LC', 'MQ', 'PM', 'SX', 'TC', 'VC', 'VG', 'VI']],
     ['africa', 'Africa', 'cat-yellow', ['ZA', 'NG', 'GH', 'CI', 'SN', 'AO', 'CM', 'GA', 'CG', 'CD', 'TG', 'BJ', 'GN', 'SL', 'LR', 'GM', 'GW', 'MR', 'CV', 'ST', 'GQ', 'NA', 'MZ', 'TZ', 'KE', 'SO', 'DJ', 'ER', 'SD', 'MG', 'MU', 'SC', 'KM', 'RE', 'YT']],
     ['oceania', 'Oceania', 'cat-teal', ['AU', 'NZ', 'PG', 'FJ', 'NC', 'PF', 'SB', 'VU', 'WS', 'TO', 'KI', 'GU', 'MP', 'FM', 'MH', 'PW']],
     ['other', 'Rest of world', 'cat-gray', null],
 ];
 // With a long list the regions start closed, so the tab opens at once; a search always shows its matches
 const COLLAPSE_ABOVE = 300;
+// A country's region, except where a long coast lies elsewhere: Russia outside the Black Sea, France on the Atlantic
+const regionOf = (r) => {
+    if (r.country === 'RU' && !(r.lat < 48 && r.lon < 42)) return 'other';
+    if (r.country === 'FR' && r.lat > 44) return 'eur';
+    return REGION.find(([, , , cc]) => cc?.includes(r.country))?.[0] ?? 'other';
+};
 const ZONES = (() => { try { return Intl.supportedValuesOf('timeZone'); } catch { return []; } })();
 
 const FORM = [
@@ -65,7 +71,8 @@ export async function mount(el, ctx, param) {
         if (view === 'ports') drawPorts(); else drawDistances();
     }
 
-    const matches = (row, keys) => !search || keys.map((k) => row[k] ?? '').join(' ').toLowerCase().includes(search.toLowerCase());
+    // Turkish letters and accents do not matter: çeşme finds Cesme
+    const matches = (row, keys) => !search || normPort(keys.map((k) => row[k] ?? '').join(' ')).includes(normPort(search));
     const searchInput = (redraw) => h('input.search-input', { type: 'search', placeholder: 'Search…', value: search, style: { width: '200px' },
         on: { input: debounce((e) => { search = e.target.value; redraw(); body.querySelector('input[type=search]')?.focus(); }, 250) } });
     const byName = () => new Map(ports.map((p) => [normPort(p.name), p]));
@@ -94,9 +101,8 @@ export async function mount(el, ctx, param) {
             ],
         });
         const rows = ports.filter((r) => matches(r, ['name', 'country', 'locode', 'agent', 'berths', 'notes']));
-        const known = REGION.flatMap(([, , , cc]) => cc ?? []);
-        grid.setSections(REGION.map(([key, label, cls, cc]) => {
-            const list = rows.filter((r) => (cc ? cc.includes(r.country) : !known.includes(r.country)));
+        grid.setSections(REGION.map(([key, label, cls]) => {
+            const list = rows.filter((r) => regionOf(r) === key);
             const closable = !search && ports.length > COLLAPSE_ABOVE;
             const collapsed = closable && !openRegions.has(key);
             const name = closable
