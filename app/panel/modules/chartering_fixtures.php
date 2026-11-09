@@ -243,6 +243,12 @@ function ch_deadlines(int $days = 60): array
                 }
             }
         }
+        // New hire agreed in a CP addendum (e.g. on an extension)
+        foreach (rows("SELECT a.fleet_id, a.add_no, a.effective_date, a.hire_rate, f.vessel FROM ch_fleet_addenda a JOIN ch_fleet f ON f.id = a.fleet_id WHERE a.hire_rate IS NOT NULL AND a.effective_date IS NOT NULL") as $a) {
+            if ($in($a['effective_date'])) {
+                $items[] = ['kind' => 'hire', 'date' => $a['effective_date'], 'title' => 'New hire starts (addendum)', 'detail' => trim("{$a['vessel']} · USD " . number_format((float) $a['hire_rate'], 0) . "/day · {$a['add_no']}"), 'tab' => 'ch-fleet', 'id' => (int) $a['fleet_id']];
+            }
+        }
     }
     usort($items, fn($a, $b) => strcmp($a['date'], $b['date']));
 

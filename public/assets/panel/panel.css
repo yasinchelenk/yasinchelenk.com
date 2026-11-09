@@ -1389,3 +1389,28 @@ tr.fl-charter-line td { font-style: italic; color: var(--dim); }
 @media (max-width: 1100px) { .fl-detail { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 700px) { .fl-legend { display: none; } .fl .ch-grid { --cols: 2 !important; } }
 @media (max-width: 700px) { .fl-hint { display: none; } }
+/* Fleet · CP addenda (extension / new hire from a date) */
+.fl-addbadge { display: inline-block; margin-left: 6px; font-size: 10.5px; font-weight: 600; line-height: 15px; padding: 0 5px; border-radius: 8px; background: #dff3f1; color: #17675f; vertical-align: 1px; }
+.fl-rate { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fl-rate__next { color: #17675f; font-weight: 600; }
+.fl-addtable { width: 100%; }
+.fl-addtable td { vertical-align: top; }
+.fl-addtable__cp td { background: var(--chip-bg); }
+.fl-addtable__notes { max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-chg { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fl-chg s { text-decoration-thickness: 1px; }
+.fl-addhint { margin: 8px 0 0; max-width: 900px; line-height: 1.5; }
+.fl-periods { margin-top: 12px; max-width: 760px; }
+.fl-periods__title { font-weight: 700; color: var(--thead-text); margin-bottom: 4px; }
+.fl-periods tr.is-now td { background: #eef8ee; }
+.fl-periods tfoot td { border-top: 1px solid var(--line); }
+.fl-addform { display: grid; gap: 10px; }
+.fl-addform > p { margin: 0; }
+.fl-addprev { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--cat-teal); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.fl-addprev ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
+.fl-addprev p { margin: 0; }
+.fl-addprev .red { color: var(--red); }
+.fl-tl__rate { fill: #17675f; stroke: #fff; stroke-width: 1; cursor: pointer; }
+.fl-tl__orig { stroke: var(--text); stroke-width: 1.5; stroke-dasharray: 3 2; opacity: .55; }
+.fl-legend i.is-rate { width: 0; height: 0; border-radius: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #17675f; }
+.fl-legend i.is-orig { width: 0; height: 12px; border-left: 2px dashed var(--text); opacity: .55; border-radius: 0; }
