@@ -25,6 +25,19 @@ const CH_FLEET_VOYAGE_FIELDS = [
     'disch_port' => 'upper', 'disch_arr' => 'text', 'disch_dep' => 'text', 'remarks' => 'text', 'sort' => 'int',
 ];
 
+/**
+ * Charter party addenda (extension, new redelivery, new hire from a given date). An addendum's new redelivery dates
+ * are written onto the vessel (so alerts, timeline, deadlines all follow), and the dates they replaced are kept on the
+ * addendum (prev_*). The hire stays as agreed in the CP on the vessel; an addendum's hire_rate applies from its
+ * effective_date onwards, and the browser works out today's rate and the hire per period from that schedule.
+ */
+const CH_FLEET_ADDENDUM_FIELDS = [
+    'fleet_id' => 'int', 'add_no' => 'text', 'add_date' => 'date', 'kind' => 'enum:extension|hire|redelivery|other',
+    'effective_date' => 'date', 'hire_rate' => 'num', 'redel_min' => 'date', 'redel_max' => 'date', 'redel_place' => 'text',
+    'notes' => 'text', 'prev_redel_min' => 'date', 'prev_redel_max' => 'date', 'prev_redel_place' => 'text', 'sort' => 'int',
+];
+const CH_FLEET_REDEL = ['redel_min', 'redel_max', 'redel_place'];
+
 /** Times of the voyage log: 'YYYY-MM-DD HH:MM' (UTC) or 'YYYY-MM-DD' when only the date is known. */
 const CH_FLEET_TIMES = ['load_arr', 'load_dep', 'disch_arr', 'disch_dep'];
 
@@ -36,6 +49,55 @@ function chartering_migrate_122(PDO $pdo): void
     $pdo->exec("CREATE TABLE ch_fleet_voyages (id INTEGER PRIMARY KEY, fleet_id INTEGER NOT NULL REFERENCES ch_fleet(id) ON DELETE CASCADE,\n"
         . $cols(CH_FLEET_VOYAGE_FIELDS, ['fleet_id']) . ",\ncreated_at TEXT, created_by TEXT, updated_at TEXT, updated_by TEXT)");
     $pdo->exec('CREATE INDEX idx_ch_fleet_voyages_fleet ON ch_fleet_voyages(fleet_id)');
+}
+
+function chartering_migrate_126(PDO $pdo): void
+{
+    $type = fn(string $t) => $t === 'num' ? 'REAL' : ($t === 'int' ? 'INTEGER' : 'TEXT');
+    $cols = implode(",\n", array_map(fn($k, $t) => "{$k} " . $type($t), array_keys(CH_FLEET_ADDENDUM_FIELDS), CH_FLEET_ADDENDUM_FIELDS));
+    $pdo->exec("CREATE TABLE ch_fleet_addenda (id INTEGER PRIMARY KEY,\n" . str_replace('fleet_id INTEGER', 'fleet_id INTEGER NOT NULL REFERENCES ch_fleet(id) ON DELETE CASCADE', $cols)
+        . ",\ncreated_at TEXT, created_by TEXT, updated_at TEXT, updated_by TEXT)");
+    $pdo->exec('CREATE INDEX idx_ch_fleet_addenda_fleet ON ch_fleet_addenda(fleet_id)');
+}
+
+/** Order in which addenda were agreed: signing date, else the date they take effect, else when they were entered. */
+const CH_FLEET_ADDENDA_ORDER = 'COALESCE(add_date, effective_date, substr(created_at, 1, 10)), sort, id';
+
+/**
+ * Puts the vessel's redelivery (min / max / place) in line with its addenda: for each field, the latest addendum that
+ * sets it wins; when none does any more (deleted / cleared), the value from before the first addendum comes back.
+ */
+function ch_fleet_addenda_sync(int $fleetId, ?array $deleted = null): void
+{
+    if (($GLOBALS['ch_fleet_deleting'] ?? null) === $fleetId) {
+        return;
+    }
+    $fleet = row('SELECT * FROM ch_fleet WHERE id = ?', [$fleetId]);
+    if (!$fleet) {
+        return;
+    }
+    $left = rows('SELECT * FROM ch_fleet_addenda WHERE fleet_id = ? ORDER BY ' . CH_FLEET_ADDENDA_ORDER, [$fleetId]);
+    $all = $deleted ? [...$left, $deleted] : $left;
+    $key = fn(array $a) => ($a['add_date'] ?? $a['effective_date'] ?? substr((string) $a['created_at'], 0, 10)) . sprintf('|%09d|%09d', (int) $a['sort'], (int) $a['id']);
+    usort($all, fn($a, $b) => strcmp($key($a), $key($b)));
+    $want = [];
+    foreach (CH_FLEET_REDEL as $k) {
+        $setters = array_values(array_filter($left, fn($a) => ($a[$k] ?? null) !== null && $a[$k] !== ''));
+        if ($setters) {
+            $want[$k] = end($setters)[$k];
+        } elseif ($all) {
+            $want[$k] = $all[0]['prev_' . $k] ?? null;
+        }
+    }
+    $changes = array_filter($want, fn($v, $k) => !values_equal($fleet[$k] ?? null, $v), ARRAY_FILTER_USE_BOTH);
+    if (!$changes) {
+        return;
+    }
+    // min ≤ max is checked on the vessel; write both together so a move in either direction passes
+    if (array_key_exists('redel_min', $changes) || array_key_exists('redel_max', $changes)) {
+        $changes += ['redel_min' => $want['redel_min'] ?? $fleet['redel_min'], 'redel_max' => $want['redel_max'] ?? $fleet['redel_max']];
+    }
+    ent_update('ch_fleet', $fleetId, $changes);
 }
 
 /**
@@ -92,11 +154,68 @@ entity_define('ch_fleet', [
         }
         return $d;
     },
-    // Voyages go first, one by one, so History can bring each of them back
+    // Voyages and addenda go first, one by one, so History can bring each of them back
     'before_delete' => function (array $row): void {
         foreach (rows('SELECT id FROM ch_fleet_voyages WHERE fleet_id = ?', [$row['id']]) as $v) {
             ent_delete('ch_fleet_voyage', (int) $v['id']);
         }
+        $GLOBALS['ch_fleet_deleting'] = (int) $row['id'];
+        foreach (rows('SELECT id FROM ch_fleet_addenda WHERE fleet_id = ?', [$row['id']]) as $a) {
+            ent_delete('ch_fleet_addendum', (int) $a['id']);
+        }
+        $GLOBALS['ch_fleet_deleting'] = null;
+    },
+]);
+
+entity_define('ch_fleet_addendum', [
+    'table'  => 'ch_fleet_addenda',
+    'page'   => 'ch-fleet',
+    'undo'   => true,
+    'label'  => fn($r) => trim(((string) scalar('SELECT vessel FROM ch_fleet WHERE id = ?', [$r['fleet_id']])) . ' · ' . ($r['add_no'] ?: 'Addendum')),
+    'fields' => CH_FLEET_ADDENDUM_FIELDS,
+    'prepare' => function (array $d, ?array $before): array {
+        $m = array_merge($before ?? [], $d);
+        $fleet = empty($m['fleet_id']) ? null : row('SELECT * FROM ch_fleet WHERE id = ?', [$m['fleet_id']]);
+        $fleet || api_error('Gemi bulunamadı.');
+        if ($before && array_key_exists('fleet_id', $d) && (int) $d['fleet_id'] !== (int) $before['fleet_id']) {
+            api_error('Addendum başka bir gemiye taşınamaz.');
+        }
+        $has = fn(string $k) => ($m[$k] ?? null) !== null && $m[$k] !== '';
+        if (!$has('redel_min') && !$has('redel_max') && !$has('redel_place') && !$has('hire_rate') && !$has('notes')) {
+            api_error('Addendum’da değişen bir şey yok: yeni redelivery, yeni hire ya da bir not girin.');
+        }
+        if ($has('hire_rate') && (float) $m['hire_rate'] <= 0) {
+            api_error('Hire sıfırdan büyük olmalı.');
+        }
+        if ($has('hire_rate') && !$has('effective_date')) {
+            api_error('Yeni hire’ın hangi tarihten itibaren geçerli olduğunu girin.');
+        }
+        if ($has('hire_rate') && $fleet['delivery_date'] && $m['effective_date'] < $fleet['delivery_date']) {
+            api_error('Yeni hire delivery tarihinden önce başlayamaz.');
+        }
+        // The redelivery this addendum leaves the vessel with must still have min ≤ max
+        $min = $has('redel_min') ? $m['redel_min'] : ($before ? ($before['prev_redel_min'] ?? $fleet['redel_min']) : $fleet['redel_min']);
+        $max = $has('redel_max') ? $m['redel_max'] : ($before ? ($before['prev_redel_max'] ?? $fleet['redel_max']) : $fleet['redel_max']);
+        if ($min && $max && $min > $max) {
+            api_error('Min redelivery, max redelivery’den sonra olamaz.');
+        }
+        // What the addendum replaced is taken from the vessel when it is entered, never from the client
+        unset($d['prev_redel_min'], $d['prev_redel_max'], $d['prev_redel_place']);
+        if (!$before) {
+            foreach (CH_FLEET_REDEL as $k) {
+                $d['prev_' . $k] = $fleet[$k] ?? null;
+            }
+            if (!isset($d['sort'])) {
+                $d['sort'] = (int) scalar('SELECT COALESCE(MAX(sort), 0) FROM ch_fleet_addenda WHERE fleet_id = ?', [$m['fleet_id']]) + 1;
+            }
+            if (empty($d['add_no'])) {
+                $d['add_no'] = 'Addendum No. ' . ((int) scalar('SELECT COUNT(*) FROM ch_fleet_addenda WHERE fleet_id = ?', [$m['fleet_id']]) + 1);
+            }
+        }
+        return $d;
+    },
+    'after' => function (string $action, array $row, ?array $before, array $changed): void {
+        ch_fleet_addenda_sync((int) $row['fleet_id'], $action === 'delete' ? $row : null);
     },
 ]);
 
@@ -140,6 +259,7 @@ function module_routes_chartering_fleet(): void
     route('GET', '/api/chartering/fleet/{id}', 'ch_fleet_get', 'ch-fleet');
     crud_routes('ch_fleet', '/api/chartering/fleet');
     crud_routes('ch_fleet_voyage', '/api/chartering/fleet-voyages');
+    crud_routes('ch_fleet_addendum', '/api/chartering/fleet-addenda');
 }
 
 function ch_fleet_list(): never
@@ -149,7 +269,10 @@ function ch_fleet_list(): never
         (SELECT COALESCE(SUM(v.qty), 0) FROM ch_fleet_voyages v WHERE v.fleet_id = f.id) AS qty_total,
         (SELECT json_object('id', v.id, 'voy_no', v.voy_no, 'load_port', v.load_port, 'disch_port', v.disch_port, 'cargo', v.cargo, 'qty', v.qty,
             'load_arr', v.load_arr, 'load_dep', v.load_dep, 'disch_arr', v.disch_arr, 'disch_dep', v.disch_dep)
-            FROM ch_fleet_voyages v WHERE v.fleet_id = f.id AND v.load_port IS NOT NULL ORDER BY v.voy_year DESC, v.sort DESC, v.id DESC LIMIT 1) AS last_voyage
+            FROM ch_fleet_voyages v WHERE v.fleet_id = f.id AND v.load_port IS NOT NULL ORDER BY v.voy_year DESC, v.sort DESC, v.id DESC LIMIT 1) AS last_voyage,
+        (SELECT json_group_array(json_object('id', a.id, 'add_no', a.add_no, 'add_date', a.add_date, 'kind', a.kind, 'effective_date', a.effective_date, 'hire_rate', a.hire_rate,
+            'redel_min', a.redel_min, 'redel_max', a.redel_max, 'prev_redel_min', a.prev_redel_min, 'prev_redel_max', a.prev_redel_max))
+            FROM (SELECT * FROM ch_fleet_addenda WHERE fleet_id = f.id ORDER BY " . CH_FLEET_ADDENDA_ORDER . ") a) AS addenda
         FROM ch_fleet f ORDER BY f.sort, f.vessel"));
 }
 
@@ -157,10 +280,26 @@ function ch_fleet_get(array $p): never
 {
     $f = row('SELECT * FROM ch_fleet WHERE id = ?', [$p['id']]) ?? api_error('Gemi bulunamadı.', 404);
     $f['voyages_list'] = rows('SELECT * FROM ch_fleet_voyages WHERE fleet_id = ? ORDER BY voy_year, sort, id', [$p['id']]);
+    $f['addenda'] = rows('SELECT * FROM ch_fleet_addenda WHERE fleet_id = ? ORDER BY ' . CH_FLEET_ADDENDA_ORDER, [$p['id']]);
     json_response($f);
 }
 
 // ---------------------------------------------------------------- Excel export (same layout as the workbook)
+
+/** Hire in effect on the day before an addendum's new rate starts (the CP rate, or an earlier addendum's). */
+function ch_fleet_rate_before(array $a, array $all): ?float
+{
+    $rate = $a['cp_rate'] === null ? null : (float) $a['cp_rate'];
+    $best = null;
+    foreach ($all as $o) {
+        if ((int) $o['fleet_id'] === (int) $a['fleet_id'] && (int) $o['id'] !== (int) $a['id'] && $o['hire_rate'] !== null && $o['effective_date'] && $a['effective_date']
+            && $o['effective_date'] < $a['effective_date'] && ($best === null || $o['effective_date'] >= $best['effective_date'])) {
+            $best = $o;
+        }
+    }
+
+    return $best ? (float) $best['hire_rate'] : $rate;
+}
 
 function ch_fleet_export(): never
 {
@@ -197,6 +336,19 @@ function ch_fleet_export(): never
                 $v['cargo'] ?? '', $v['qty'] === null ? '' : ['v' => (float) $v['qty'], 's' => 'money'], $v['disch_port'] ?? '', $t($v['disch_arr']), $t($v['disch_dep']), $v['remarks'] ?? ''];
         }
         $sheets[] = ['name' => $f['vessel'], 'rows' => $rows, 'cols' => [9, 38, 10, 12, 30, 16, 16, 26, 12, 28, 16, 16, 30]];
+    }
+
+    // Addenda: one row per addendum, what changed (old → new); the import skips this sheet
+    $addenda = rows('SELECT a.*, f.vessel, f.hire_rate AS cp_rate FROM (SELECT * FROM ch_fleet_addenda ORDER BY ' . CH_FLEET_ADDENDA_ORDER . ') a JOIN ch_fleet f ON f.id = a.fleet_id ORDER BY f.sort, f.vessel');
+    if ($addenda) {
+        $rows = [[['v' => 'CHARTER PARTY ADDENDA', 's' => 'title']], [], $head(['VESSEL', 'ADDENDUM', 'SIGNED', 'TYPE', 'MIN REDEL (OLD)', 'MAX REDEL (OLD)', 'MIN REDEL (NEW)', 'MAX REDEL (NEW)', 'REDEL PLACE', 'HIRE BEFORE', 'NEW HIRE (USD/DAY)', 'NEW HIRE FROM', 'NOTES'])];
+        foreach ($addenda as $a) {
+            $prev = ch_fleet_rate_before($a, $addenda);
+            $rows[] = [['v' => $a['vessel'], 's' => 'bold'], $a['add_no'] ?? '', $d($a['add_date']), ucfirst((string) ($a['kind'] ?? '')), $d($a['prev_redel_min']), $d($a['prev_redel_max']),
+                $d($a['redel_min']), $d($a['redel_max']), $a['redel_place'] ?? '', $a['hire_rate'] === null || $prev === null ? '' : ['v' => $prev, 's' => 'money'],
+                $a['hire_rate'] === null ? '' : ['v' => (float) $a['hire_rate'], 's' => 'money'], $d($a['effective_date']), $a['notes'] ?? ''];
+        }
+        array_splice($sheets, 1, 0, [['name' => 'ADDENDA', 'rows' => $rows, 'cols' => [28, 18, 11, 12, 13, 13, 13, 13, 22, 13, 16, 13, 40]]]);
     }
 
     $tmp = tempnam(sys_get_temp_dir(), 'chf');
@@ -257,6 +409,9 @@ function ch_fleet_parse_book(array $book): array
                 $headerAt = ['log', $i, $cells];
                 break;
             }
+        }
+        if (!$headerAt && $norm($sheet['name']) === 'ADDENDA') {
+            continue; // our own export; addenda are entered on the vessel page
         }
         if (!$headerAt) {
             $warnings[] = "“{$sheet['name']}” sayfası atlandı: VESSEL / VOY NO başlığı bulunamadı.";

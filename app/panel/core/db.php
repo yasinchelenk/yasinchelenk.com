@@ -129,6 +129,8 @@ function panel_migrations(): array
         124 => 'chartering_migrate_124',
         // Chartering · Ports: World Port Index 2019 + bölge için UN/LOCODE (app/panel/data/ports_seed.csv); mevcut kayıtların yalnızca boş alanları dolar
         125 => 'chartering_migrate_125',
+        // Chartering · Fleet: charter party addendum'ları (extension, yeni min/max redelivery, belirli tarihten itibaren yeni hire)
+        126 => 'chartering_migrate_126',
     ];
 }
 

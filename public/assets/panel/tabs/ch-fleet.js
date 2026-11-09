@@ -16,14 +16,81 @@ const STATE = {
 const FORM = [
     ['vessel', 'Vessel', 'text'], ['ex_name', 'Ex name / alias', 'text'], ['teu', 'TEU', 'int'], ['dwt', 'DWT', 'int'],
     ['imo', 'IMO', 'text'], ['vessel_type', 'Type', 'text'], ['status', 'Status (empty = automatic)', 'select', { '': 'Automatic', ...Object.fromEntries(STATUS_OPTS) }], ['next_dd', 'Next dry dock', 'date'],
-    ['charterers', 'Charterers', 'text', { span: 2 }], ['cp_date', 'CP date', 'date'], ['hire_rate', 'Hire (USD/day)', 'num'],
+    ['charterers', 'Charterers', 'text', { span: 2 }], ['cp_date', 'CP date', 'date'], ['hire_rate', 'CP hire (USD/day)', 'num'],
     ['delivery_date', 'Delivery', 'date'], ['delivery_place', 'Delivery place', 'text'], ['period', 'Period', 'text', { span: 2 }],
     ['redel_min', 'Min redelivery', 'date'], ['redel_max', 'Max redelivery', 'date'], ['redel_place', 'Redelivery range', 'text', { span: 2 }],
     ['notes', 'Notes', 'textarea', { span: 4 }],
 ];
 const TIMELINE_SPANS = { 6: '6 mo', 12: '12 mo', 24: '24 mo' };
+const ADD_KINDS = { extension: 'Extension', hire: 'Hire change', redelivery: 'Redelivery change', other: 'Other' };
+const ADD_FORM = [
+    ['add_no', 'Addendum no', 'text'], ['add_date', 'Signed on', 'date'], ['kind', 'Type', 'select', ADD_KINDS], ['log_line', 'Note it in the voyage log', 'bool'],
+    ['redel_min', 'New min redelivery', 'date'], ['redel_max', 'New max redelivery', 'date'], ['redel_place', 'New redelivery range (if changed)', 'text', { span: 2 }],
+    ['hire_rate', 'New hire (USD/day)', 'num'], ['effective_date', 'New hire from', 'date'], ['notes', 'Notes / clause', 'textarea', { span: 4 }],
+];
 
 const left = (d) => (d ? daysBetween(today(), d) : null);
+const dmax = (a, b) => (a > b ? a : b);
+
+/** A vessel's CP addenda, oldest first (the list API sends them as a JSON string). */
+export function addendaOf(f) {
+    const a = typeof f.addenda === 'string' ? JSON.parse(f.addenda) : f.addenda;
+    return Array.isArray(a) ? a.filter((x) => x && x.id !== null) : [];
+}
+
+/** Hire schedule: the CP hire from delivery, then each addendum's new hire from its effective date → [{ from, rate, src }] */
+export function hireSchedule(f) {
+    const out = f.hire_rate ? [{ from: f.delivery_date ?? '0000-01-01', rate: Number(f.hire_rate), src: 'CP' }] : [];
+    addendaOf(f).filter((a) => a.hire_rate && a.effective_date).sort((a, b) => a.effective_date.localeCompare(b.effective_date))
+        .forEach((a) => {
+            if (out.length && out[out.length - 1].from === a.effective_date) out.pop();
+            out.push({ from: a.effective_date, rate: Number(a.hire_rate), src: a.add_no || 'Addendum', addendum: a });
+        });
+    return out;
+}
+
+/** Hire in effect on a day (null before the first known rate). */
+export function rateOn(f, d = today()) {
+    let r = null;
+    for (const s of hireSchedule(f)) if (s.from <= d) r = s.rate;
+    return r;
+}
+
+/** Today's hire; for a vessel not yet delivered, the rate it will start on. */
+export const currentRate = (f, t = today()) => rateOn(f, t) ?? hireSchedule(f)[0]?.rate ?? null;
+
+/** The next agreed hire change after today, if any. */
+export const nextRateChange = (f, t = today()) => hireSchedule(f).find((s) => s.src !== 'CP' && s.from > t) ?? null;
+
+/** Hire for the days from a up to b (each day at the rate in effect that day; simple days × rate). */
+export function hireBetween(f, a, b) {
+    if (!a || !b || b <= a) return 0;
+    const sch = hireSchedule(f);
+    return sch.reduce((sum, s, i) => {
+        const from = dmax(s.from, a);
+        const to = sch[i + 1] && sch[i + 1].from < b ? sch[i + 1].from : b;
+        return to > from ? sum + daysBetween(from, to) * s.rate : sum;
+    }, 0);
+}
+
+/** Hire periods from delivery to max redelivery (or today): [{ from, to, days, rate, amount, src }] */
+export function hirePeriods(f, t = today()) {
+    if (!f.delivery_date) return [];
+    const end = f.redel_max ?? dmax(t, f.delivery_date);
+    const sch = hireSchedule(f);
+    return sch.map((s, i) => {
+        const from = dmax(s.from, f.delivery_date);
+        const to = sch[i + 1] && sch[i + 1].from < end ? sch[i + 1].from : end;
+        return to > from ? { from, to, days: daysBetween(from, to), rate: s.rate, amount: daysBetween(from, to) * s.rate, src: s.src, addendum: s.addendum } : null;
+    }).filter(Boolean);
+}
+
+/** Redelivery agreed in the CP itself (before the first addendum that changed it). */
+export function cpRedelivery(f) {
+    const first = (k) => addendaOf(f).find((a) => a[k]);
+    const a = first('redel_min') ?? first('redel_max');
+    return a ? { min: a.prev_redel_min, max: a.prev_redel_max, by: a } : { min: f.redel_min, max: f.redel_max, by: null };
+}
 
 /** Employment state of a vessel today (a manual status wins). */
 export function fleetState(f, t = today()) {
@@ -46,6 +113,8 @@ export function fleetAlerts(f, t = today()) {
     if (st === 'fixed') out.push({ level: 'blue', text: `Delivery to ${f.charterers} on ${fmtDate(f.delivery_date)}`, date: f.delivery_date });
     if (f.next_dd && n(f.next_dd) < 0 && st !== 'drydock') out.push({ level: 'red', text: `Dry dock date passed ${-n(f.next_dd)} d ago (${fmtDate(f.next_dd)})`, date: f.next_dd });
     else if (f.next_dd && n(f.next_dd) <= 90) out.push({ level: 'amber', text: `Dry dock due in ${n(f.next_dd)} d (${fmtDate(f.next_dd)})`, date: f.next_dd });
+    const nx = nextRateChange(f, t);
+    if (nx && n(nx.from) <= 30 && st !== 'open') out.push({ level: 'blue', text: `Hire changes to $${fmt(nx.rate, 0)}/day on ${fmtDate(nx.from)} (${nx.src}) — in ${n(nx.from)} d`, date: nx.from });
     if (st === 'open') out.push({ level: 'gray', text: 'Open — no employment recorded', date: null });
     return out;
 }
@@ -67,14 +136,15 @@ export function spanDays(a, b) {
 }
 
 /** Hire earned so far and still to come on the current charter (simple days × rate, before commissions / off-hire). */
+// Each day counts at the hire in effect that day (CP rate, then any addendum's new rate from its effective date).
 export function hireFigures(f, t = today()) {
-    if (!f.hire_rate || !f.delivery_date) return null;
-    const end = (d) => (d ? Math.max(0, daysBetween(f.delivery_date, d)) : null);
-    const elapsed = f.delivery_date > t ? 0 : Math.min(end(t), end(f.redel_max) ?? Infinity);
+    if (!f.delivery_date || !hireSchedule(f).length) return null;
+    const stop = f.redel_max && f.redel_max < t ? f.redel_max : t;
+    const start = dmax(f.delivery_date, t);
     return {
-        elapsed, earned: elapsed * f.hire_rate,
-        toMin: f.redel_min && f.redel_min > t ? daysBetween(f.delivery_date > t ? f.delivery_date : t, f.redel_min) * f.hire_rate : 0,
-        toMax: f.redel_max && f.redel_max > t ? daysBetween(f.delivery_date > t ? f.delivery_date : t, f.redel_max) * f.hire_rate : 0,
+        elapsed: Math.max(0, daysBetween(f.delivery_date, stop)), earned: hireBetween(f, f.delivery_date, stop),
+        toMin: f.redel_min && f.redel_min > t ? hireBetween(f, start, f.redel_min) : 0,
+        toMax: f.redel_max && f.redel_max > t ? hireBetween(f, start, f.redel_max) : 0,
     };
 }
 
@@ -99,7 +169,7 @@ export async function mount(el, ctx, param) {
     const body = h('div.fl');
 
     async function load() {
-        list = (await get('chartering/fleet')).map((f) => ({ ...f, last_voyage: typeof f.last_voyage === 'string' ? JSON.parse(f.last_voyage) : f.last_voyage }));
+        list = (await get('chartering/fleet')).map((f) => ({ ...f, last_voyage: typeof f.last_voyage === 'string' ? JSON.parse(f.last_voyage) : f.last_voyage, addenda: addendaOf(f) }));
         if (current) await openVessel(current.fleet.id, { keep: true });
         else drawOverview();
     }
@@ -107,7 +177,7 @@ export async function mount(el, ctx, param) {
     const save = async (row, field, value) => {
         const upd = await put(`chartering/fleet/${row.id}`, { [field]: value });
         const i = list.findIndex((x) => x.id === row.id);
-        if (i >= 0) list[i] = { ...list[i], ...upd };
+        if (i >= 0) list[i] = { ...list[i], ...upd, addenda: list[i].addenda };
         drawOverview({ keepGrid: true, row: list[i] });
         return null;
     };
@@ -116,8 +186,8 @@ export async function mount(el, ctx, param) {
 
     function stats() {
         const states = list.map((f) => fleetState(f));
-        const employed = list.filter((f, i) => ['on_hire', 'window', 'overdue'].includes(states[i]) && f.hire_rate);
-        const daily = employed.reduce((s, f) => s + Number(f.hire_rate), 0);
+        const employed = list.filter((f, i) => ['on_hire', 'window', 'overdue'].includes(states[i]) && currentRate(f));
+        const daily = employed.reduce((s, f) => s + currentRate(f), 0);
         const next = list.filter((f) => f.redel_min && f.redel_min >= today() && ['on_hire', 'window'].includes(fleetState(f))).sort((a, b) => a.redel_min.localeCompare(b.redel_min))[0];
         const stat = (label, value, sub, cls = '') => h('div.ch-stat' + cls, h('span.ch-stat__label', label), h('span.ch-stat__value', value), h('span.ch-stat__sub', sub ?? ''));
         return h('div.ch-stats',
@@ -142,7 +212,8 @@ export async function mount(el, ctx, param) {
         return [
             { key: 'vessel', label: 'Vessel', width: 210, sortable: true, render: (r) => h('span.fl-vessel',
                 h('button.ch-link', { type: 'button', title: 'Open the vessel: charter details and voyage log', on: { click: (e) => { e.stopPropagation(); openVessel(r.id); } } }, h('b', r.vessel)),
-                r.teu ? h('small.dim', ` ${r.teu} teu`) : null, r.ex_name ? h('small.dim', ` (${r.ex_name})`) : null) },
+                r.teu ? h('small.dim', ` ${r.teu} teu`) : null, r.ex_name ? h('small.dim', ` (${r.ex_name})`) : null,
+                addendaOf(r).length ? h('span.fl-addbadge', { title: addendaOf(r).map((a) => `${a.add_no ?? 'Addendum'}${a.add_date ? ' · ' + fmtDate(a.add_date) : ''}`).join('\n') }, addendaOf(r).length > 1 ? `${addendaOf(r).length} add.` : 'add.') : null) },
             { key: 'status', label: 'Status', width: 150, sortable: true, sortValue: (r) => fleetState(r), render: stateBadge, edit: { type: 'select', options: Object.fromEntries(STATUS_OPTS), optionLabel: () => 'Automatic' } },
             { key: 'charterers', label: 'Charterers', width: 150, sortable: true, edit: { type: 'text', suzulen: () => [...new Set(list.map((x) => x.charterers).filter(Boolean))] } },
             { key: 'delivery_date', label: 'Delivery', width: 100, sortable: true, edit: { type: 'date' } },
@@ -151,7 +222,16 @@ export async function mount(el, ctx, param) {
                 // Once the window is open a passed min date is expected, not overdue
                 render: (r) => (r.redel_min && r.redel_min < today() && r.redel_max && r.redel_max >= today() ? h('span.fl-date', fmtDate(r.redel_min), ' ', h('span.fl-days.amber', { title: 'Redelivery window is open' }, 'window')) : dateCell('redel_min', 30)(r)) },
             { key: 'redel_max', label: 'Max redel', width: 150, sortable: true, render: dateCell('redel_max', 30), edit: { type: 'date' } },
-            { key: 'hire_rate', label: 'Hire/day', width: 92, align: 'r', sortable: true, render: (r) => (r.hire_rate ? fmt(r.hire_rate, 0) : ''), edit: { type: 'number', decimals: 0 } },
+            { key: 'hire_rate', label: 'Hire/day', width: 150, align: 'r', sortable: true, sortValue: (r) => currentRate(r) ?? 0, edit: { type: 'number', decimals: 0 },
+                title: 'Hire today. Editing the cell changes the CP hire; later rates come from the vessel’s addenda.',
+                render: (r) => {
+                    const cur = currentRate(r);
+                    if (!cur) return '';
+                    const nx = nextRateChange(r);
+                    const changed = r.hire_rate && Number(r.hire_rate) !== cur;
+                    return h('span.fl-rate', { title: hireSchedule(r).map((s) => `${s.src}: $${fmt(s.rate, 0)}/day from ${fmtDate(s.from)}`).join('\n') },
+                        fmt(cur, 0), nx ? h('small.fl-rate__next', ` → ${fmt(nx.rate, 0)} from ${fmtDate(nx.from).slice(0, 5)}`) : changed ? h('small.dim', ' add.') : null);
+                } },
             { key: 'next_dd', label: 'Next DD', width: 150, sortable: true, render: dateCell('next_dd', 90), edit: { type: 'date' } },
             { key: 'last_voyage', label: 'Last voyage', width: 230, render: (r) => { const v = r.last_voyage; return v ? h('span', { title: [v.voy_no, v.cargo, v.qty && fmt(v.qty, 0) + ' mt'].filter(Boolean).join(' · ') }, `${v.load_port ?? '?'} → ${v.disch_port ?? '?'}`, v.cargo ? h('small.dim', ` · ${v.cargo}`) : null) : h('span.dim', r.voyages ? '' : '—'); } },
             { key: 'notes', label: 'Notes', width: 200, popover: true, edit: { type: 'text' } },
@@ -193,7 +273,7 @@ export async function mount(el, ctx, param) {
                     const t = today();
                     const inWindow = f.redel_min && f.redel_max && f.redel_min < t && f.redel_max >= t;
                     const b = inWindow ? t : f.redel_min ?? f.redel_max;
-                    const tip = esc(`${f.vessel} · ${f.charterers}${f.hire_rate ? ' · $' + fmt(f.hire_rate, 0) + '/day' : ''}\nDelivery ${fmtDate(f.delivery_date)} · redelivery ${fmtDate(f.redel_min)} – ${fmtDate(f.redel_max)}`
+                    const tip = esc(`${f.vessel} · ${f.charterers}${currentRate(f) ? ' · $' + fmt(currentRate(f), 0) + '/day' : ''}\nDelivery ${fmtDate(f.delivery_date)} · redelivery ${fmtDate(f.redel_min)} – ${fmtDate(f.redel_max)}`
                         + (inWindow ? `\nIn the redelivery window since ${fmtDate(f.redel_min)} · ${daysBetween(t, f.redel_max)} d left to max` : ''));
                     if (b && b >= t0 && a <= t1) {
                         const X1 = x(a); const X2 = x(b);
@@ -207,6 +287,16 @@ export async function mount(el, ctx, param) {
                         s += `<rect class="fl-tl__win" x="${X1}" y="${y + 4}" width="${Math.max(2, X2 - X1)}" height="16" rx="3"><title>${inWindow ? `Remaining redelivery window: today – ${fmtDate(f.redel_max)} (${daysBetween(t, f.redel_max)} d)` : `Redelivery window ${fmtDate(f.redel_min)} – ${fmtDate(f.redel_max)}`}</title></rect>`;
                     }
                 }
+                // Addenda: where the CP redelivery used to be, and where the hire changes
+                const cp = cpRedelivery(f);
+                if (cp.by && cp.max && cp.max !== f.redel_max && cp.max >= t0 && cp.max <= t1) {
+                    const X = x(cp.max);
+                    s += `<line class="fl-tl__orig" x1="${X}" x2="${X}" y1="${y + 1}" y2="${y + 23}"><title>${esc(`CP max redelivery ${fmtDate(cp.max)} — extended by ${cp.by.add_no ?? 'addendum'} to ${fmtDate(f.redel_min)} – ${fmtDate(f.redel_max)}`)}</title></line>`;
+                }
+                hireSchedule(f).filter((h0) => h0.src !== 'CP' && h0.from >= t0 && h0.from <= t1).forEach((h0) => {
+                    const X = x(h0.from);
+                    s += `<path class="fl-tl__rate" d="M${X - 5} ${y} l10 0 l-5 6 z"><title>${esc(`Hire $${fmt(h0.rate, 0)}/day from ${fmtDate(h0.from)} (${h0.src})`)}</title></path>`;
+                });
                 if (f.next_dd && f.next_dd >= t0 && f.next_dd <= t1) {
                     const X = x(f.next_dd);
                     s += `<path class="fl-tl__dd${f.next_dd < today() ? ' is-late' : ''}" d="M${X} ${y + 5} l6 7 l-6 7 l-6 -7 z"><title>Dry dock ${fmtDate(f.next_dd)}</title></path>`;
@@ -226,12 +316,12 @@ export async function mount(el, ctx, param) {
         box.dispose = () => ro.disconnect();
         return h('section.ch-sec.cat-teal',
             h('header.ch-sec__head.is-static', h('span.ch-sec__title', 'Timeline'),
-                h('span.fl-legend', h('i.is-on_hire'), 'on hire', h('i.is-win'), 'redelivery window (still ahead)', h('i.is-dd'), 'dry dock', h('i.is-today'), 'today'),
+                h('span.fl-legend', h('i.is-on_hire'), 'on hire', h('i.is-win'), 'redelivery window (still ahead)', h('i.is-dd'), 'dry dock', h('i.is-rate'), 'new hire (addendum)', h('i.is-orig'), 'CP redelivery before extension', h('i.is-today'), 'today'),
                 h('span.spacer'), segmented(Object.entries(TIMELINE_SPANS).map(([value, label]) => ({ value, label })), String(span), (v) => { span = Number(v); store.set('ch_fleet_span', span); draw(); })),
             h('div.ch-sec__body', h('div.ch-scroll', box)));
     }
 
-    const matchesSearch = (f) => [f.vessel, f.ex_name, f.charterers, f.period, f.notes, f.last_voyage?.load_port, f.last_voyage?.disch_port].join(' ').toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = (f) => [f.vessel, f.ex_name, f.charterers, f.period, f.notes, f.last_voyage?.load_port, f.last_voyage?.disch_port, ...addendaOf(f).map((a) => a.add_no)].join(' ').toLowerCase().includes(search.toLowerCase());
 
     let tlEl = null;
     function drawOverview({ keepGrid = false, row = null } = {}) {
@@ -350,6 +440,8 @@ export async function mount(el, ctx, param) {
         const scroll = keep ? window.scrollY : 0;
         const w = { ...f };
         const hf = hireFigures(f);
+        const cp = cpRedelivery(f);
+        const nx = nextRateChange(f);
         const legs = voyages.filter((v) => v.load_port || v.disch_port);
         const avg = (fn) => { const xs = legs.map(fn).filter((x) => x !== null); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null; };
         const qty = legs.reduce((s, v) => s + (Number(v.qty) || 0), 0);
@@ -366,13 +458,18 @@ export async function mount(el, ctx, param) {
                     kvList([
                         ['Min redelivery', f.redel_min ? h('span', fmtDate(f.redel_min), ' ', daysBadge(f.redel_min)) : '—'],
                         ['Max redelivery', f.redel_max ? h('span', fmtDate(f.redel_max), ' ', daysBadge(f.redel_max)) : '—'],
+                        cp.by ? ['CP redelivery', `${fmtDate(cp.min) || '—'} – ${fmtDate(cp.max) || '—'}`, { hint: `As agreed in the CP, before ${cp.by.add_no ?? 'the addendum'} extended it`, cls: 'dim' }] : null,
+                        currentRate(f) ? ['Hire today', `${usd(currentRate(f))}/day`, { strong: true, hint: rateOn(f) === null ? 'Not delivered yet — the rate it starts on' : 'Rate in effect today (CP or the latest addendum in force)' }] : null,
+                        nx ? [`From ${fmtDate(nx.from)}`, h('span', `${usd(nx.rate)}/day `, h('small.dim', nx.src), ' ', daysBadge(nx.from))] : null,
                         ['Next dry dock', f.next_dd ? h('span', fmtDate(f.next_dd), ' ', daysBadge(f.next_dd, { warn: 90 })) : '—'],
                         hf ? ['Days on hire', fmt(hf.elapsed, 0)] : null,
                         hf ? ['Hire earned so far', usd(hf.earned), { strong: true, hint: 'Days since delivery × daily hire; before commissions and off-hire' }] : null,
                         hf ? ['Still to earn → min / max', `${usd(hf.toMin)} / ${usd(hf.toMax)}`, { hint: 'From today (or delivery) to min / max redelivery × daily hire' }] : null,
                     ]),
                     fleetAlerts(f).length ? h('ul.fl-detail__alerts', fleetAlerts(f).map((a) => h('li.fl-alert.' + a.level, a.text))) : null,
-                    h('p.ch-disclaimer', 'Hire figures are simple days × rate, before commissions and off-hire — use TC Desk for the hire statement.')))));
+                    h('p.ch-disclaimer', 'Hire figures count each day at the rate in effect that day (CP hire, then any addendum’s new rate), before commissions and off-hire — use TC Desk for the hire statement.')))));
+
+        const addenda = addendaSection(f);
 
         vgrid?.destroy?.();
         vgrid = voyageGrid(f, voyages);
@@ -409,8 +506,99 @@ export async function mount(el, ctx, param) {
                     current = null;
                     await load();
                 } }) } }, 'Delete vessel')),
-            charter, log);
+            charter, addenda, log);
         if (keep) window.scrollTo(0, scroll);
+    }
+
+    // ------------------------------------------------------------ CP addenda: extension, new redelivery, new hire from a date
+
+    function addendaSection(f) {
+        const list0 = addendaOf(f);
+        const cp = cpRedelivery(f);
+        const sch = hireSchedule(f);
+        const range = (a, b) => (a || b ? `${fmtDate(a) || '—'} – ${fmtDate(b) || '—'}` : '—');
+        const rateBefore = (a) => { const i = sch.findIndex((s) => s.addendum?.id === a.id); return i > 0 ? sch[i - 1].rate : (f.hire_rate ? Number(f.hire_rate) : null); };
+        const change = (oldV, newV) => (newV ? h('span.fl-chg', oldV ? h('s.dim', oldV) : null, oldV ? ' → ' : null, h('b', newV)) : h('span.dim', 'unchanged'));
+        const periods = hirePeriods(f);
+        const total = periods.reduce((s, p) => s + p.amount, 0);
+
+        const table = h('table.ch-table.fl-addtable',
+            h('thead', h('tr', ['', 'Signed', 'Type', 'Redelivery (min – max)', 'Hire USD/day', 'From', 'Notes', ''].map((x) => h('th', x)))),
+            h('tbody',
+                h('tr.fl-addtable__cp',
+                    h('td', h('b', 'Charter party')), h('td', fmtDate(f.cp_date)), h('td', h('span.dim', f.period ?? '')),
+                    h('td', range(cp.min, cp.max)), h('td.r', f.hire_rate ? fmt(f.hire_rate, 0) : '—'), h('td', fmtDate(f.delivery_date)), h('td', h('span.dim', f.charterers ?? '')), h('td')),
+                list0.map((a) => h('tr',
+                    h('td', h('b', a.add_no ?? 'Addendum')), h('td', fmtDate(a.add_date)), h('td', ADD_KINDS[a.kind] ?? ''),
+                    h('td', a.redel_min || a.redel_max ? change(range(a.prev_redel_min, a.prev_redel_max), range(a.redel_min ?? a.prev_redel_min, a.redel_max ?? a.prev_redel_max)) : h('span.dim', 'unchanged'),
+                        a.redel_place ? h('div.dim', a.redel_place) : null),
+                    h('td.r', a.hire_rate ? change(rateBefore(a) ? fmt(rateBefore(a), 0) : null, fmt(a.hire_rate, 0)) : h('span.dim', 'unchanged')),
+                    h('td', a.hire_rate ? h('span', fmtDate(a.effective_date), ' ', a.effective_date > today() ? daysBadge(a.effective_date) : null) : ''),
+                    h('td.fl-addtable__notes', { title: a.notes ?? '' }, a.notes ?? ''),
+                    h('td.nowrap',
+                        h('button.tiny', { type: 'button', on: { click: () => editAddendum(f, a) } }, 'Edit'), ' ',
+                        h('button.tiny.ghost', { type: 'button', title: 'Delete addendum — the redelivery it set goes back to what it was', on: { click: (e) => confirmPop(e.currentTarget, { text: `Delete ${a.add_no ?? 'this addendum'}? Redelivery goes back to the previous dates; History can bring it back.`, onYes: async () => {
+                            await del(`chartering/fleet-addenda/${a.id}`);
+                            toast(`${a.add_no ?? 'Addendum'} silindi.`);
+                            await load();
+                        } }) } }, '✕'))))));
+
+        const periodTable = periods.length > 1 || list0.some((a) => a.hire_rate) ? h('div.fl-periods',
+            h('div.fl-periods__title', 'Hire by period', h('small.dim', ` · delivery → ${f.redel_max ? 'max redelivery' : 'today'}, days × rate, gross`)),
+            h('table.ch-table',
+                h('thead', h('tr', ['From', 'Until', 'Days', 'USD/day', 'Hire', 'Rate per'].map((x, i) => h(i >= 2 && i <= 4 ? 'th.r' : 'th', x)))),
+                h('tbody', periods.map((p) => h('tr' + (p.from <= today() && p.to > today() ? '.is-now' : ''),
+                    h('td', fmtDate(p.from)), h('td', fmtDate(p.to)), h('td.r', fmt(p.days, 0)), h('td.r', fmt(p.rate, 0)), h('td.r', usd(p.amount)), h('td.dim', p.src)))),
+                h('tfoot', h('tr', h('td', { colSpan: 2 }, 'Total to max redelivery'), h('td.r', fmt(periods.reduce((s, p) => s + p.days, 0), 0)), h('td'), h('td.r', h('b', usd(total))), h('td')),
+                    f.redel_min && f.delivery_date ? h('tr.dim', h('td', { colSpan: 2 }, 'Total to min redelivery'), h('td.r', fmt(Math.max(0, daysBetween(f.delivery_date, f.redel_min)), 0)), h('td'), h('td.r', usd(hireBetween(f, f.delivery_date, f.redel_min))), h('td')) : null))) : null;
+
+        return h('section.ch-sec.cat-teal',
+            h('header.ch-sec__head.is-static', h('span.ch-sec__title', 'CP & addenda'), h('span.ch-sec__badge', String(list0.length)),
+                h('span.dim.fl-hint', 'Extension or new hire: an addendum’s redelivery replaces the dates above, its hire applies from the date you give'), h('span.spacer'),
+                h('button.primary', { type: 'button', disabled: !f.charterers, title: f.charterers ? '' : 'Enter the current charter first', on: { click: () => editAddendum(f) } }, '+ Addendum / extension')),
+            h('div.ch-sec__body',
+                list0.length || f.charterers ? table : h('p.dim', 'No charter recorded yet.'),
+                !list0.length && f.charterers ? h('p.dim.fl-addhint', 'No addenda yet. When the charter is extended or the hire changes, add the addendum here: the vessel’s min / max redelivery move to the new dates (the CP dates stay on record), and the new hire counts from its start date — days before it stay at the old rate.') : null,
+                periodTable));
+    }
+
+    function editAddendum(f, a = null) {
+        const others = addendaOf(f).filter((x) => x.id !== a?.id);
+        const w = a ? { ...a } : { add_no: `Addendum No. ${others.length + 1}`, kind: 'extension', add_date: today(), effective_date: f.redel_max ?? null, log_line: 1 };
+        const preview = h('div.fl-addprev');
+        const draw = () => {
+            // Before: the vessel as it stands without this addendum; after: with it
+            const base = { ...f, addenda: others, redel_min: a ? (a.redel_min ? a.prev_redel_min : f.redel_min) : f.redel_min, redel_max: a ? (a.redel_max ? a.prev_redel_max : f.redel_max) : f.redel_max };
+            const next = { ...base, redel_min: w.redel_min ?? base.redel_min, redel_max: w.redel_max ?? base.redel_max, addenda: [...others, { ...w, id: a?.id ?? -1 }] };
+            const lines = [];
+            if (w.redel_min || w.redel_max) lines.push(h('li', 'Redelivery ', h('s.dim', `${fmtDate(base.redel_min) || '—'} – ${fmtDate(base.redel_max) || '—'}`), ' → ', h('b', `${fmtDate(next.redel_min) || '—'} – ${fmtDate(next.redel_max) || '—'}`),
+                base.redel_max && next.redel_max ? h('span.dim', ` (${daysBetween(base.redel_max, next.redel_max) >= 0 ? '+' : ''}${daysBetween(base.redel_max, next.redel_max)} d on max)`) : null));
+            if (w.hire_rate) lines.push(h('li', 'Hire ', h('s.dim', rateOn(base, w.effective_date ?? today()) ? `$${fmt(rateOn(base, w.effective_date ?? today()), 0)}` : '—'), ' → ', h('b', `$${fmt(w.hire_rate, 0)}/day`), w.effective_date ? ` from ${fmtDate(w.effective_date)}` : h('span.red', ' — enter the date it starts')));
+            if (f.delivery_date && base.redel_max && next.redel_max && (w.hire_rate || w.redel_max)) {
+                const before = hireBetween(base, f.delivery_date, base.redel_max);
+                const after = hireBetween(next, f.delivery_date, next.redel_max);
+                lines.push(h('li', 'Hire to max redelivery ', h('s.dim', usd(before)), ' → ', h('b', usd(after)), h('span.dim', ` (${after >= before ? '+' : '−'}${usd(Math.abs(after - before))})`)));
+            }
+            fill(preview, lines.length ? h('ul', lines) : h('p.dim', 'Enter the new redelivery and / or the new hire to see what changes.'));
+        };
+        const form = specForm(w, a ? ADD_FORM.filter(([k]) => k !== 'log_line') : ADD_FORM, { cols: 4, onChange: draw });
+        draw();
+        modal({ title: `${a ? 'Edit' : 'New'} addendum · ${f.vessel}`, width: 880,
+            body: h('div.fl-addform',
+                h('p.dim', `Current charter: ${f.charterers ?? '—'} · redelivery ${fmtDate(f.redel_min) || '—'} – ${fmtDate(f.redel_max) || '—'} · hire ${currentRate(f) ? usd(currentRate(f)) + '/day' : '—'}. Leave a field empty if the addendum does not change it.`),
+                form, preview),
+            actions: [{ label: 'Cancel' }, { label: a ? 'Save' : 'Add addendum', primary: true, onClick: async () => {
+                const data = Object.fromEntries(ADD_FORM.filter(([k]) => k !== 'log_line').map(([k]) => [k, w[k] === undefined || w[k] === '' ? null : w[k]]));
+                const row = a ? await put(`chartering/fleet-addenda/${a.id}`, data) : await post('chartering/fleet-addenda', { ...data, fleet_id: f.id });
+                if (!a && w.log_line) {
+                    const bits = [row.redel_min || row.redel_max ? `redelivery ${fmtDate(row.redel_min ?? f.redel_min)} – ${fmtDate(row.redel_max ?? f.redel_max)}` : null,
+                        row.hire_rate ? `hire USD ${fmt(row.hire_rate, 0)}/day from ${fmtDate(row.effective_date)}` : null];
+                    await post('chartering/fleet-voyages', { fleet_id: f.id, voy_year: Number(String(row.add_date ?? row.effective_date ?? today()).slice(0, 4)), charterers: f.charterers, cp_date: row.add_date ?? null,
+                        remarks: `${row.add_no}: ${(ADD_KINDS[row.kind] ?? 'addendum').toLowerCase()}${bits.filter(Boolean).length ? ' · ' + bits.filter(Boolean).join(' · ') : ''}` });
+                }
+                toast(`${row.add_no} kaydedildi.`);
+                await load();
+            } }] });
     }
 
     function voyageGrid(f, voyages) {
@@ -481,6 +669,7 @@ export async function mount(el, ctx, param) {
             }
             reload();
         }),
+        live.on('ch_fleet_addendum', (c) => { if (!c.mine) reload(); }),
         live.on('ch_fleet_voyage', (c) => {
             if (c.mine) return;
             if (current && c.row && Number(c.row.fleet_id) === Number(current.fleet.id)) {
