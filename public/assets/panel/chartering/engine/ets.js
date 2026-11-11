@@ -42,3 +42,16 @@ export const WHO_PAYS = {
     VC: 'Voyage charter: owners pay and price it into the freight.',
     BB: 'Bareboat: the bareboat charterer as ship operator.',
 };
+
+/** EU + EEA countries (ISO 3166 alpha-2; Greece also as EL) — EU ETS and FuelEU apply to their ports. */
+export const EEA_COUNTRIES = new Set(['AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'EL', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL',
+    'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE', 'IS', 'NO', 'LI']);
+
+export const isEeaCountry = (cc) => EEA_COUNTRIES.has(String(cc ?? '').trim().toUpperCase());
+
+/** Scope of a sea leg between two ports: both in the EU/EEA 100%, one of them 50%, none 0. */
+export function legScope(fromCountry, toCountry) {
+    const a = isEeaCountry(fromCountry);
+    const b = isEeaCountry(toCountry);
+    return a && b ? 100 : a || b ? 50 : 0;
+}

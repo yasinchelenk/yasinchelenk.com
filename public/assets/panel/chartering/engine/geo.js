@@ -133,3 +133,41 @@ export function aisEtaIso(eta, ref = new Date()) {
     if (t < ref.getTime() - 30 * 86400000) t = Date.UTC(++y, eta.Month - 1, eta.Day, Math.min(23, eta.Hour ?? 0), Math.min(59, eta.Minute ?? 0));
     return new Date(t).toISOString().slice(0, 16).replace('T', ' ');
 }
+
+/**
+ * A typed position → [lon, lat], or null. Accepts "41.02, 28.97" (lat, lon), "41.02N 28.97E",
+ * "41°01'N 028°58'E", "41 01.2 N 028 58.3 E" and "S 33.9 E 18.4".
+ */
+export function parsePosition(text) {
+    const s = String(text ?? '').trim().toUpperCase().replace(/[°º'’′"”″]/g, ' ').replace(/,/g, ' , ');
+    const hemi = [...s.matchAll(/[NSEW]/g)].map((m) => m[0]);
+    const nums = (part) => part.trim().split(/\s+/).filter(Boolean).map(Number);
+    const dms = (arr) => (arr.length && arr.every(Number.isFinite) ? arr[0] + (arr[1] ?? 0) / 60 + (arr[2] ?? 0) / 3600 : NaN);
+    let lat;
+    let lon;
+    if (hemi.length === 2) {
+        // Split on the hemisphere letters, whether they come before or after the numbers
+        const parts = s.split(/[NSEW]/).map((p) => p.replace(/,/g, ' ').trim());
+        const before = !parts[0];
+        const a = before ? parts[1] : parts[0];
+        const b = before ? parts[2] : parts[1];
+        const v1 = dms(nums(a));
+        const v2 = dms(nums(b));
+        const [h1, h2] = hemi;
+        const val = { [h1]: v1, [h2]: v2 };
+        lat = 'N' in val ? val.N : -val.S;
+        lon = 'E' in val ? val.E : -val.W;
+    } else if (!hemi.length) {
+        const [a, b] = s.split(',').map((p) => nums(p));
+        if (!a || !b) {
+            const all = nums(s.replace(/,/g, ' '));
+            if (all.length !== 2) return null;
+            [lat, lon] = all;
+        } else {
+            lat = a.length === 1 ? a[0] : Math.sign(a[0] || 1) * dms(a.map(Math.abs));
+            lon = b.length === 1 ? b[0] : Math.sign(b[0] || 1) * dms(b.map(Math.abs));
+        }
+    } else return null;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+    return [lon, lat];
+}

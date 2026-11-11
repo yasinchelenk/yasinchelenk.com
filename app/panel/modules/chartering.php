@@ -170,6 +170,12 @@ entity_define('ch_vessel_profile', [
     },
 ]);
 
+/** Estimate kinds: voyage estimate, TC relet (Head CP / Sub CP hire) and cargo relet (Head CP / Sub CP freight). */
+function chartering_migrate_127(PDO $pdo): void
+{
+    $pdo->exec("ALTER TABLE ch_estimates ADD COLUMN kind TEXT NOT NULL DEFAULT 'voyage'");
+}
+
 entity_define('ch_estimate', [
     'table'  => 'ch_estimates',
     'page'   => 'ch-voyage',
@@ -178,6 +184,7 @@ entity_define('ch_estimate', [
     'fields' => [
         'name' => 'text', 'vessel_id' => 'int', 'vessel_name' => 'upper', 'cargo' => 'text', 'load_port' => 'text', 'disch_port' => 'text',
         'intake' => 'num', 'days' => 'num3', 'tce' => 'num', 'result' => 'num', 'status' => 'enum:draft|archived', 'data' => 'json',
+        'kind' => 'enum:voyage|tc-relet|cargo-relet',
     ],
     'prepare' => function (array $d, ?array $before): array {
         if ((array_key_exists('name', $d) || !$before) && trim((string) ($d['name'] ?? '')) === '') {
@@ -225,8 +232,9 @@ function ch_laytime_get(array $p): never
 function ch_estimates_list(array $p, array $in): never
 {
     $status = ($in['status'] ?? 'draft') === 'archived' ? 'archived' : 'draft';
-    json_response(rows('SELECT id, name, vessel_id, vessel_name, cargo, load_port, disch_port, intake, days, tce, result, status, updated_at, updated_by
-        FROM ch_estimates WHERE status = ? ORDER BY updated_at DESC, id DESC', [$status]));
+    $kind = in_array($in['kind'] ?? 'voyage', ['voyage', 'tc-relet', 'cargo-relet'], true) ? ($in['kind'] ?? 'voyage') : 'voyage';
+    json_response(rows('SELECT id, name, kind, vessel_id, vessel_name, cargo, load_port, disch_port, intake, days, tce, result, status, updated_at, updated_by
+        FROM ch_estimates WHERE status = ? AND kind = ? ORDER BY updated_at DESC, id DESC', [$status, $kind]));
 }
 
 function ch_estimates_get(array $p): never

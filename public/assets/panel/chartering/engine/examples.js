@@ -67,3 +67,28 @@ export function apollon() {
     Object.assign(e.settings, { safetyPct: 15, opexPerDay: 4500, robAtLoad: 625.13 });
     return e;
 }
+
+/**
+ * Same voyage as checked on Netpas Tramper Single: 56,000 dwt, 13 / 12 kn, 26 / 28 t ballast / laden,
+ * ULSFO in the Med ECA (586 of the 1,191 laden miles and the Alexandria port days). Netpas: 16.87 days,
+ * C/Base $65,843.86, profit after $12,000/day hire $918,255.78 — the acceptance test checks these.
+ */
+export function tramperDemo() {
+    const e = blankEstimate();
+    e.name = 'Demo — Istanbul (ballast) / Novorossiysk / Alexandria wheat (Netpas Tramper check)';
+    Object.assign(e.vessel, { name: 'DEMO SUPRA', dwt: 56000, summerDraft: 12.8, tpc: 57, ecaFuel: 'ulsfo' });
+    e.vessel.speeds.ballast = { kn: 13, ifo: 26, mgo: 0.1 };
+    e.vessel.speeds.laden = { kn: 12, ifo: 28, mgo: 0.1 };
+    e.vessel.port = { idleIfo: 3, idleMgo: 0.1, workIfo: 4.5, workMgo: 0.1 };
+    Object.assign(e.cargo, { account: 'DEMO CHRTR', name: 'Wheat', qty: 50000, freightType: 'pt', rate: 28, addressPct: 3.75, brokeragePct: 1.25 });
+    e.route = [
+        { type: 'sea', from: 'Istanbul', to: 'Novorossiysk', nm: 462, mode: 'ballast', ecaNm: 0, eu: 0 },
+        { type: 'load', name: 'Novorossiysk', rate: 10000, terms: 'SHINC', cost: 45000, eu: false, eca: false },
+        { type: 'sea', from: 'Novorossiysk', to: 'Alexandria', nm: 1191, mode: 'laden', ecaNm: 586, eu: 0 },
+        { type: 'disch', name: 'Alexandria', rate: 8000, terms: 'SHINC', cost: 55000, eu: false, eca: true },
+    ];
+    Object.assign(e.prices, { ifo: 560, mgo: 780, ulsfo: 600 });
+    // Netpas C/Base has no TC commission gross-up; the ship is chartered in at $12,000/day less 5%
+    Object.assign(e.settings, { robAtLoad: 0, tcCommPct: 0, hirePerDay: 12000, hireCommPct: 5, startDate: '2026-11-15T08:00' });
+    return e;
+}
