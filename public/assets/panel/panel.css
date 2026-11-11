@@ -1063,6 +1063,35 @@ table.ch-sens td.is-up { color: var(--green); } table.ch-sens td.is-down { color
 table.ch-compare td.is-best { color: var(--green); font-weight: 700; }
 table.ch-compare thead th { white-space: normal; min-width: 150px; max-width: 240px; vertical-align: bottom; }
 .ch-disclaimer { font-size: 11.5px; color: var(--dim); margin: 0; }
+/* Voyage Estimator · Tramper-style additions: mode bar, routing, parcels, supplies, schedule, map, relets */
+.ch-modebar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ch-mode-pane[hidden] { display: none !important; }
+.ch-routing { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 8px; border: 1px dashed var(--line); border-radius: 7px; background: var(--soft); font-size: 12.5px; }
+.ch-routing .check { min-height: 0; }
+.ch-routing select { width: auto; padding: 3px 6px; font-size: 12.5px; }
+.ch-route-status { font-size: 12px; }
+.ch-row-times { font-size: 11.5px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-route-row .ch-field .check + .check { min-height: 0; }
+.ch-supply { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--row-line); font-size: 12px; }
+.ch-supply .ch-inline { align-items: center; }
+.ch-supply input { padding: 3px 6px; font-size: 12.5px; }
+.ch-parcels { display: grid; gap: 6px; }
+.ch-subhead { font-size: 12.5px; }
+table.ch-parcel-table input, table.ch-parcel-table select { min-width: 58px; padding: 3px 5px; font-size: 12.5px; }
+table.ch-parcel-table td.c { text-align: center; }
+table.ch-parcel-table input:not(.ch-num):not([type="checkbox"]) { min-width: 104px; }
+table.ch-relet-table th.ch-head, table.ch-relet-table td.ch-head { background: color-mix(in srgb, var(--orange, #ea580c) 7%, transparent); }
+table.ch-relet-table th.ch-sub, table.ch-relet-table td.ch-sub { background: color-mix(in srgb, var(--green) 7%, transparent); }
+table.ch-relet-table thead tr:first-child th { text-align: center; font-size: 11px; }
+.ch-note { font-size: 11.5px; margin: 0; }
+.ch-sim-controls { flex-wrap: wrap; align-items: center; }
+.ch-sim-controls input { width: 110px; }
+table.ch-table td.nowrap { white-space: nowrap; }
+table.ch-table th.c { text-align: center; }
+table.ch-table td.neg { color: var(--red); }
+table.ch-plan th, table.ch-plan td { padding: 3px 5px; font-size: 12px; }
+.ch-voy-map { height: 340px; border-radius: 6px; overflow: hidden; }
+.ch-card[hidden] { display: none; }
 .ch-saved-pop { width: min(460px, calc(100vw - 16px)); padding: 8px; }
 .ch-saved { display: grid; gap: 6px; }
 .ch-saved__list { max-height: 60vh; overflow: auto; display: grid; gap: 2px; }
