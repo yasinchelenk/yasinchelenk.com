@@ -617,15 +617,14 @@ export class Grid {
             } else if (e.key === 'Tab' && ed.nav !== false) {
                 e.preventDefault();
                 finish(true, () => this.navigate(rowId, field, e.shiftKey ? -1 : 1));
-            } else if (type === 'datetime' && (e.key === 'Backspace' || e.key === 'Delete')) {
-                e.preventDefault();
-                editor.value = '';
             }
         });
         editor.addEventListener('blur', () => setTimeout(() => {
             if (!done && document.hasFocus() && document.activeElement !== editor && !document.querySelector('.ctx-menu')) finish(true);
         }, 120));
         if (type === 'select') editor.addEventListener('change', () => finish(true));
+        // Takvimden gün seçmek hücreyi kaydeder (tarih-saatte saat yazılsın diye beklenir)
+        if (type === 'date') editor.addEventListener('change', () => finish(true));
 
         if (ed.suzulen) {
             suggest = attachSuggest(editor, { items: (q) => ed.suzulen(row, q), onPick: () => finish(true) });
@@ -649,7 +648,7 @@ export class Grid {
             td.append(editor);
         }
         editor.focus();
-        if (editor.select && type !== 'select' && type !== 'date' && type !== 'datetime') editor.select();
+        if (editor.select && type !== 'select') editor.select();
         if (type === 'textarea') editor.setSelectionRange(editor.value.length, editor.value.length);
         live.setCursor({ tab: this.opts.tab, rowId: String(rowId), field });
 

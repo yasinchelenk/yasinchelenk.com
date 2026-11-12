@@ -314,7 +314,7 @@ function ch_sof_checklist(array $sof): void
     $side = ($sof['port_call'] ?? 'load') === 'disch' ? '%disch%' : '%load%';
     $tasks = rows("SELECT id FROM ch_fixture_tasks WHERE fixture_id = ? AND status = 'todo' AND title LIKE '%SOF%' AND title LIKE ?", [$sof['fixture_id'], $side]);
     foreach ($tasks as $t) {
-        ent_update('ch_task', (int) $t['id'], ['status' => 'done', 'note' => 'auto: ' . trim(($sof['ref'] ?? 'SOF') . ' signed ' . date('d.m.Y'))]);
+        ent_update('ch_task', (int) $t['id'], ['status' => 'done', 'note' => 'auto: ' . trim(($sof['ref'] ?? 'SOF') . ' signed ' . date('d-m-Y'))]);
     }
 }
 

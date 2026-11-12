@@ -62,22 +62,22 @@ function cast_field(string $type, mixed $v): mixed
         'num'      => parse_number($v) ?? api_error('Geçerli bir tutar girin'),
         'num3'     => parse_number($v, 3) ?? api_error('Geçerli bir sayı girin'),
         'num4'     => parse_number($v, 4) ?? api_error('Geçerli bir fiyat girin'),
-        'date'     => parse_date((string) $v) ?? api_error('Geçerli bir tarih girin (gg.aa.yyyy)'),
-        'datetime' => parse_datetime((string) $v) ?? api_error('Geçerli bir tarih-saat girin (gg.aa.yyyy ss:dd)'),
+        'date'     => parse_date((string) $v) ?? api_error('Geçerli bir tarih girin (gg-aa-yyyy)'),
+        'datetime' => parse_datetime((string) $v) ?? api_error('Geçerli bir tarih-saat girin (gg-aa-yyyy ss:dd)'),
         'json'     => is_string($v) ? $v : json_encode($v, JSON_UNESCAPED_UNICODE),
         'upper'    => tr_upper(mb_substr(trim((string) $v), 0, 10000)),
         default    => mb_substr(trim((string) $v), 0, 10000),
     };
 }
 
-/** 'YYYY-MM-DD' ya da 'gg.aa.yyyy' / 'gg/aa/yyyy' → 'YYYY-MM-DD' */
+/** 'YYYY-MM-DD' ya da 'gg-aa-yyyy' / 'gg.aa.yyyy' / 'gg/aa/yyyy' → 'YYYY-MM-DD' */
 function parse_date(string $s): ?string
 {
     $s = trim($s);
     if (preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $s, $m)) {
         return checkdate((int) $m[2], (int) $m[3], (int) $m[1]) ? "{$m[1]}-{$m[2]}-{$m[3]}" : null;
     }
-    if (preg_match('#^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$#', $s, $m)) {
+    if (preg_match('#^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$#', $s, $m)) {
         $y = strlen($m[3]) === 2 ? 2000 + (int) $m[3] : (int) $m[3];
         return checkdate((int) $m[2], (int) $m[1], $y) ? sprintf('%04d-%02d-%02d', $y, $m[2], $m[1]) : null;
     }

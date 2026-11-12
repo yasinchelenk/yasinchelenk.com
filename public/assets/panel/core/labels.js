@@ -1,5 +1,5 @@
 // Bölüm ve alan etiketleri (spec §5.7), History değer biçimleri, geri alınamayan bölümler.
-import { fmtDate, fmtDateTime, fmtNum } from './dom.js';
+import { fmtDate, fmtDateTime, fmtNum, fmtStamp } from './dom.js';
 
 export const SECTION_LABELS = {
     position: 'Positions', customs: 'Customs', cash: 'Cash', supply: 'Supply', task: 'Tasks', transit: 'Transits', vessel: 'Vessels',
@@ -139,5 +139,7 @@ export function formatValue(entity, field, value) {
     if (['paid', 'charged', 'cash_in', 'cash_out', 'cost', 'sale', 'amount_try', 'tutar', 'maliyet', 'total_usd', 'total_try'].includes(field) && !Number.isNaN(Number(v))) {
         return fmtNum(Number(v));
     }
+    // Adı ne olursa olsun tarih değeri (eta, atd, laycan_from…) DD-MM-YYYY yazılır
+    if (/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/.test(v)) return fmtStamp(v);
     return v;
 }

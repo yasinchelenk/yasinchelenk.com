@@ -1,7 +1,7 @@
 // CHARTERING · Voyage Estimator: inputs on the left, results update live on the right.
 // Engine: ../chartering/engine/voyage.js (pure functions, unit-tested in chartering/tests).
 // The same tab hosts the TC relet and cargo relet estimates (tabs/ch-relet.js), chosen in the mode bar.
-import { h, fill, debounce, toast, store, fmtDateTime, fmtDate } from '../core/dom.js';
+import { h, fill, debounce, toast, store, fmtDateTime, fmtDate, fmtStamp } from '../core/dom.js';
 import { get, post, put, del } from '../core/api.js';
 import { modal, confirmBox, popover, segmented } from '../core/ui.js';
 import {
@@ -64,9 +64,11 @@ function zonedToUtc(local, tz) {
 function fmtAt(ms, tz) {
     if (!Number.isFinite(ms)) return '';
     try {
-        return new Intl.DateTimeFormat('tr-TR', { timeZone: tz || 'UTC', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(ms) + (tz ? '' : ' UTC');
+        const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz || 'UTC', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+            .formatToParts(ms).map((x) => [x.type, x.value]));
+        return `${p.day}-${p.month} ${p.hour}:${p.minute}` + (tz ? '' : ' UTC');
     } catch {
-        return new Date(ms).toISOString().slice(5, 16).replace('T', ' ') + ' UTC';
+        return fmtStamp(new Date(ms).toISOString().slice(0, 16), { short: true }) + ' UTC';
     }
 }
 
@@ -1173,7 +1175,7 @@ function mountVoyage(el, ctx, param) {
         return {
             text,
             report: {
-                title, file: title, subtitle: `Voyage estimate · ${new Date().toLocaleDateString('tr-TR')}`, note: DISCLAIMER,
+                title, file: title, subtitle: `Voyage estimate · ${fmtDate(new Date())}`, note: DISCLAIMER,
                 blocks: [
                     { title: 'Summary', kv: summary },
                     { title: 'Itinerary', head: itinHead, rows: itinRows, align: ['L'] },

@@ -25,7 +25,7 @@ export function sourceBadge(row, { short = false } = {}) {
     const [, m, d] = asOf.split('-');
     const age = row.fetched_at ? (Date.now() - Date.parse(row.fetched_at.replace(' ', 'T'))) / 3600000 : Infinity;
     const stale = !(age <= 24);
-    return h('span.ch-badge.' + (stale ? 'amber' : 'green'), { title: `HandyBulk · as of ${asOf.split('-').reverse().join('.')} · fetched ${row.fetched_at ?? '—'}${stale ? ' (more than 24 h ago — Update from HandyBulk)' : ''}` },
+    return h('span.ch-badge.' + (stale ? 'amber' : 'green'), { title: `HandyBulk · as of ${asOf.split('-').reverse().join('-')} · fetched ${row.fetched_at ?? '—'}${stale ? ' (more than 24 h ago — Update from HandyBulk)' : ''}` },
         short ? 'HB' : `HandyBulk · as of ${+d} ${MON[+m - 1]}`);
 }
 
@@ -58,7 +58,7 @@ export async function sourcesView(box, { canEdit, onManual, onChanged }) {
         return h('tr',
             h('td', h('b', a.label), h('div.dim', a.targets)),
             h('td', h('a', { href: a.url, target: '_blank', rel: 'noopener noreferrer' }, a.url.replace('https://www.', ''))),
-            h('td', a.last_ok ? fmtDateTime(a.last_ok.finished_at, true) : h('span.dim', '—'), a.last_ok?.as_of ? h('div.dim', `as of ${a.last_ok.as_of.split('-').reverse().join('.')}`) : null),
+            h('td', a.last_ok ? fmtDateTime(a.last_ok.finished_at, true) : h('span.dim', '—'), a.last_ok?.as_of ? h('div.dim', `as of ${a.last_ok.as_of.split('-').reverse().join('-')}`) : null),
             h('td', a.implemented ? (last ? badge(last.status) : h('span.dim', a.on_demand ? 'on demand' : 'never')) : h('span.ch-badge', `phase ${a.phase}`)),
             h('td.r', last && a.implemented ? `${last.added} / ${last.updated}` : ''),
             h('td', a.on_demand ? h('small.dim', 'Knowledge Base → lessons → “Suggest SF”') : canEdit && a.implemented ? h('button.tiny', { type: 'button', on: { click: async (e) => { e.target.disabled = true; await runAdapter(a.key, { onManual }); done(); } } }, 'Fetch now') : null,

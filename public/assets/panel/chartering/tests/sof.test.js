@@ -190,11 +190,11 @@ test('SOF outputs — print model and e-mail text', () => {
     });
     const m = printModel(doc, analyse(doc, dict), dict, { ref: 'SOF-2026-009', version: 4 });
     eq([m.tzNote, m.events.rows.length, m.events.rows[1][0], m.events.rows[1][3], m.events.rows[1][4]],
-        ['Times are Local Time (UTC+3, Europe/Istanbul)', 4, '', '02.11 0140', '3h 25m'], 'events: date only when it changes, end on the next day, duration');
-    eq([m.header[0].items[0], m.header.find((g) => g.group === 'Charter party').items[0]], [['Vessel', 'SEA ONE'], ['CP date', '28.10.2026']], 'header values formatted');
-    eq([m.remarks[0].lop, m.signatures[0].qualifier, m.log.rows.length], ['Letter of protest 02.11.2026', 'Signed under protest', 2], 'remarks, signatures, daily log');
+        ['Times are Local Time (UTC+3, Europe/Istanbul)', 4, '', '02-11 0140', '3h 25m'], 'events: date only when it changes, end on the next day, duration');
+    eq([m.header[0].items[0], m.header.find((g) => g.group === 'Charter party').items[0]], [['Vessel', 'SEA ONE'], ['CP date', '28-10-2026']], 'header values formatted');
+    eq([m.remarks[0].lop, m.signatures[0].qualifier, m.log.rows.length], ['Letter of protest 02-11-2026', 'Signed under protest', 2], 'remarks, signatures, daily log');
     const text = emailText(m);
-    eq([text.includes('01.11.2026 0830       NOR tendered'), text.includes('01.11.2026 2215-0140  Rain — work stopped (3h 25m) — heavy')], [true, true], 'aligned DD.MM.YYYY HHMM  Event lines');
+    eq([text.includes('01-11-2026 0830       NOR tendered'), text.includes('01-11-2026 2215-0140  Rain — work stopped (3h 25m) — heavy')], [true, true], 'aligned DD-MM-YYYY HHMM  Event lines');
 });
 
 test('SOF — AIS suggestions from the track', () => {

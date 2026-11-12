@@ -9,7 +9,7 @@ import { local, fmtMin, normTime } from './engine/sof/time.js';
 import { fmt } from './ui.js';
 
 const MATCH = { exact: ['green', 'matched'], guess: ['amber', 'check'], none: ['amber', 'custom'] };
-const ddmm = (d) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}` : '');
+const ddmm = (d) => (d ? `${d.slice(8, 10)}-${d.slice(5, 7)}-${d.slice(0, 4)}` : '');
 
 // ================================================================ Import
 

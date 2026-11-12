@@ -1,6 +1,6 @@
 // CHARTERING · Calculators (spec §7): small tools, each a card with inputs on the left and live results
 // on the right. Inputs are remembered per browser; every card can be copied, or exported to PDF/Excel.
-import { h, fill, store, toast } from '../core/dom.js';
+import { h, fill, store, toast, fmtStamp } from '../core/dom.js';
 import { get } from '../core/api.js';
 import { popover } from '../core/ui.js';
 import { kbTables } from '../chartering/kb.js';
@@ -133,17 +133,17 @@ const CARDS = [
         id: 'eta', needs: ['nm', 'kn'], title: 'Distance, time & ETA', cat: 'indigo', links: [LESSONS.voyageTime, LESSONS.voyagePortDays],
         desc: 'Seyir süresi = mesafe ÷ (hız × 24). ETA, kalkış limanının yerel saatinden hesaplanır ve varış limanının yerel saatiyle + UTC gösterilir. Laycan’a yetişmek için gereken hız da bulunur.',
         fields: [['nm', 'Distance (nm)'], ['kn', 'Speed (kn)', { small: true }], ['weather', 'Weather allowance %', { small: true }], ['extraH', 'Extra hours (canal, waiting)', { small: true }],
-            ['depart', 'Departure (YYYY-MM-DD HH:mm)', { type: 'text', sub: 'ETA', hint: 'kalkış limanı yerel saati' }],
+            ['depart', 'Departure', { type: 'datetime', sub: 'ETA', hint: 'kalkış limanı yerel saati' }],
             ['departTz', 'Departure timezone', { type: 'select', options: ZONES, def: 'Europe/Istanbul' }],
             ['arriveTz', 'Arrival timezone', { type: 'select', options: ZONES, def: 'UTC' }],
-            ['deadline', 'Arrive by (YYYY-MM-DD HH:mm)', { type: 'text', sub: 'Required speed', hint: 'ör. cancelling, varış limanı saati' }]],
+            ['deadline', 'Arrive by', { type: 'datetime', sub: 'Required speed', hint: 'ör. cancelling, varış limanı saati' }]],
         compute(v) {
             const r = eta({ depart: v.depart, departTz: v.departTz, nm: v.nm, kn: v.kn, weatherPct: v.weather, extraHours: v.extraH, arriveTz: v.arriveTz });
             const need = v.deadline ? requiredSpeed({ depart: v.depart, departTz: v.departTz, deadline: v.deadline, deadlineTz: v.arriveTz, nm: v.nm, weatherPct: v.weather }) : null;
             return [
                 ['Steaming time', `${fmt(r.days, 2)} days = ${fmt(r.hours, 1)} h`, { strong: true }],
-                r.arrivalUtc ? [`ETA (${v.arriveTz}, ${offsetLabel(r.arrivalUtc, v.arriveTz)})`, r.arrivalLocal, { strong: true }] : null,
-                r.arrivalUtc ? ['ETA (UTC)', r.arrivalUtcText] : null,
+                r.arrivalUtc ? [`ETA (${v.arriveTz}, ${offsetLabel(r.arrivalUtc, v.arriveTz)})`, fmtStamp(r.arrivalLocal), { strong: true }] : null,
+                r.arrivalUtc ? ['ETA (UTC)', fmtStamp(r.arrivalUtcText)] : null,
                 need ? ['Required speed', need.kn ? `${fmt(need.kn, 2)} kn (${fmt(need.hours, 1)} h available)` : 'deadline is before departure', { strong: true }] : null,
             ];
         },
@@ -374,8 +374,8 @@ function card(def) {
             if (!(String(v[k]) in opts)) v[k] = Object.keys(opts)[k === 'to' ? 1 : 0] ?? null;
             control = h('select', { on: { change: (e) => { v[k] = e.target.value; save(); if (o.rerender) drawInputs(); update(); } } },
                 Object.entries(opts).map(([val, text]) => h('option', { value: val, selected: String(v[k]) === val }, text)));
-        } else if (o.type === 'text') {
-            control = h('input', { type: 'text', value: v[k] ?? '', placeholder: '2026-11-02 08:00', on: { input: (e) => { v[k] = e.target.value.trim() || null; save(); update(); } } });
+        } else if (o.type === 'datetime') {
+            control = h('input', { type: 'datetime-local', value: v[k] ?? '', on: { input: (e) => { v[k] = e.target.value ? e.target.value.replace('T', ' ') : null; save(); update(); } } });
         } else {
             control = h('input.ch-num', {
                 type: 'text', inputmode: 'decimal', value: v[k] === null ? '' : fmt(v[k], null), autocomplete: 'off',
@@ -407,7 +407,7 @@ function card(def) {
     }
 
     const build = () => {
-        const inputRows = def.fields.filter(([k]) => v[k] !== null && v[k] !== '').map(([k, label, o = {}]) => [label, o.type ? String(v[k]) : fmt(v[k], null)]);
+        const inputRows = def.fields.filter(([k]) => v[k] !== null && v[k] !== '').map(([k, label, o = {}]) => [label, o.type === 'datetime' ? fmtStamp(v[k]) : o.type ? String(v[k]) : fmt(v[k], null)]);
         const text = [def.title, '', ...inputRows.map(([a, b]) => `${a}: ${b}`), '', ...rows.map(([a, b]) => `${a}: ${b}`), '', DISCLAIMER].join('\n');
         return { text, report: { title: def.title, file: `Calculator - ${def.title}`, subtitle: 'Chartering calculator', note: DISCLAIMER,
             blocks: [{ title: 'Inputs', kv: inputRows }, { title: 'Results', kv: rows.map(([a, b]) => [a, b]) }] } };

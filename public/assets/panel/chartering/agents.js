@@ -1,7 +1,7 @@
 // CHARTERING · Port calls & agents (shared by Fleet, Position Monitor and Contacts).
 // A port call = one of our ships at one port, with its agent, ETA / ETB / ETD (port local time), PDA / FDA and a contact log.
 // Contact buttons open the user's own mail client / phone / WhatsApp; nothing is sent from the server.
-import { h, fill, toast, store, copyText, fmtDateTime } from '../core/dom.js';
+import { h, fill, toast, store, copyText, fmtDateTime, fmtStamp } from '../core/dom.js';
 import { get, post, put, del } from '../core/api.js';
 import { modal, popover, confirmBox } from '../core/ui.js';
 import { specForm } from './ui.js';
@@ -37,7 +37,7 @@ export const statusBadge = (c) => {
 export const isActive = (c) => !['closed', 'cancelled'].includes(c.status);
 const fold = (s) => normPort(s);
 const digits = (s) => String(s ?? '').replace(/[^\d+]/g, '');
-const shortTime = (v) => (v ? String(v).slice(8, 10) + '.' + String(v).slice(5, 7) + ' ' + String(v).slice(11, 16) : '');
+const shortTime = (v) => (v ? String(v).slice(8, 10) + '-' + String(v).slice(5, 7) + ' ' + String(v).slice(11, 16) : '');
 
 /** Hours from now to a port-local time ("YYYY-MM-DD HH:MM" LT); the port's zone when known, else the browser's. */
 export function hoursTo(lt, tz) {
@@ -226,7 +226,7 @@ export async function callEditor(call, { ctx, vessels = [], onSaved, canEdit = t
         const add = (s) => { const k = fold(`${s.agent_company}|${s.agent_person ?? ''}`); if (s.agent_company && !seen.has(k)) { seen.add(k); out.push(s); } };
         contacts.filter((x) => fold(x.port).split(/[,;/]+/).map((s) => s.trim()).some((p) => p && (p === key || key.includes(p) || p.includes(key))))
             .forEach((x) => add({ src: 'Contacts', agent_contact_id: x.id, agent_company: x.company, agent_person: x.person, agent_email: x.email, agent_phone: x.phone }));
-        history.filter((x) => fold(x.port) === key && x.id !== w.id).forEach((x) => add({ src: `${x.vessel} ${(x.eta ?? x.ata ?? '').slice(0, 10)}`, ...pick(x) }));
+        history.filter((x) => fold(x.port) === key && x.id !== w.id).forEach((x) => add({ src: `${x.vessel} ${fmtStamp((x.eta ?? x.ata ?? '').slice(0, 10))}`, ...pick(x) }));
         const p = portOf(w.port);
         if (p?.agent) out.push({ src: 'Ports', note: p.agent });
         return out;

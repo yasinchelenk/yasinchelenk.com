@@ -2,7 +2,7 @@
 //  · TC relet   — Head CP (ship chartered in) vs Sub CP (ship chartered out) hire, positioning bunkers and costs.
 //  · Cargo relet — Head CP freight (cargo taken) vs Sub CP freight (cargo sub-let), dem/des under each.
 // Engine: ../chartering/engine/relet.js. Saved in the same estimates table with kind = tc-relet / cargo-relet.
-import { h, fill, debounce, toast, store, fmtDateTime } from '../core/dom.js';
+import { h, fill, debounce, toast, store, fmtDateTime, fmtDate } from '../core/dom.js';
 import { get, post, put, del } from '../core/api.js';
 import { confirmBox, popover } from '../core/ui.js';
 import { tcRelet, blankTcRelet, cargoRelet, blankCargoRelet } from '../chartering/engine/relet.js';
@@ -377,7 +377,7 @@ export function mountRelet(el, ctx, kind) {
         }
         return {
             text: [title, '', ...lines, '', DISCLAIMER].join('\n'),
-            report: { title, file: title, subtitle: `${TITLES[kind]} · ${new Date().toLocaleDateString('tr-TR')}`, note: DISCLAIMER, blocks },
+            report: { title, file: title, subtitle: `${TITLES[kind]} · ${fmtDate(new Date())}`, note: DISCLAIMER, blocks },
         };
     }
 
