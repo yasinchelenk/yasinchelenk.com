@@ -7,6 +7,8 @@ import { modal, confirmBox, confirmPop, segmented } from '../core/ui.js';
 import { Grid, resetLayoutButton } from '../core/grid.js';
 import { live } from '../core/live.js';
 import { fmt, usd, specForm, kvList } from '../chartering/ui.js';
+import { PURPOSES, PDA, FDA, statusBadge, isActive, nextTime, hoursTo, callIssues, contactButtons, agentCell, callEditor, loadPorts, agentCc } from '../chartering/agents.js';
+import { normPort } from '../chartering/engine/matching.js';
 
 const STATUS_OPTS = [['on_hire', 'On hire'], ['open', 'Open'], ['drydock', 'Dry dock'], ['idle', 'Idle / lay-up']];
 const STATE = {
@@ -166,13 +168,33 @@ export async function mount(el, ctx, param) {
     let grid = null;
     let vgrid = null;
     let span = Number(store.get('ch_fleet_span', 12));
+    let calls = [];          // active port calls of every vessel (chartering/agents.js)
+    let tzOf = () => null;   // port → time zone, once Ports has loaded
+    let onlyIssues = store.get('ch_fleet_calls_issues', false);
+    const canEdit = ctx.allowed('ch-fleet');
     const body = h('div.fl');
 
     async function load() {
-        list = (await get('chartering/fleet')).map((f) => ({ ...f, last_voyage: typeof f.last_voyage === 'string' ? JSON.parse(f.last_voyage) : f.last_voyage, addenda: addendaOf(f) }));
+        const [fleet, active] = await Promise.all([get('chartering/fleet'), get('chartering/port-calls').catch(() => [])]);
+        list = fleet.map((f) => ({ ...f, last_voyage: typeof f.last_voyage === 'string' ? JSON.parse(f.last_voyage) : f.last_voyage, addenda: addendaOf(f) }));
+        calls = active;
         if (current) await openVessel(current.fleet.id, { keep: true });
         else drawOverview();
     }
+
+    // Port local times need each port's zone: Ports loads once in the background, then the boards redraw
+    loadPorts().then((ports) => {
+        const m = new Map(ports.map((p) => [normPort(p.name), p.tz]));
+        tzOf = (name) => m.get(normPort(name)) ?? null;
+        if (current) drawDetail(true); else if (list.length) drawOverview();
+    });
+
+    const callsOf = (fleetId) => calls.filter((c) => Number(c.fleet_id) === Number(fleetId));
+    const reloadCalls = async () => {
+        calls = await get('chartering/port-calls').catch(() => calls);
+        if (current) await openVessel(current.fleet.id, { keep: true }); else drawOverview();
+    };
+    const editCall = (c) => callEditor(c, { ctx, vessels: list, onSaved: reloadCalls, canEdit });
 
     const save = async (row, field, value) => {
         const upd = await put(`chartering/fleet/${row.id}`, { [field]: value });
@@ -233,6 +255,15 @@ export async function mount(el, ctx, param) {
                         fmt(cur, 0), nx ? h('small.fl-rate__next', ` → ${fmt(nx.rate, 0)} from ${fmtDate(nx.from).slice(0, 5)}`) : changed ? h('small.dim', ' add.') : null);
                 } },
             { key: 'next_dd', label: 'Next DD', width: 150, sortable: true, render: dateCell('next_dd', 90), edit: { type: 'date' } },
+            { key: 'port_agent', label: 'Port / agent', width: 260, title: 'Sıradaki / bulunduğu liman ve acentesi (Port calls & agents)',
+                render: (r) => {
+                    const c = callsOf(r.id)[0];
+                    if (!c) return canEdit ? h('button.ch-link.dim', { type: 'button', on: { click: (e) => { e.stopPropagation(); editCall({ fleet_id: r.id, vessel: r.vessel }); } } }, '+ port call') : '';
+                    const nt = nextTime(c);
+                    return h('span.ag-cell', h('button.ch-link', { type: 'button', title: 'Liman çağrısını aç', on: { click: (e) => { e.stopPropagation(); editCall(c); } } }, c.port),
+                        nt ? h('small.dim', ` ${nt.label} ${relShort(hoursTo(nt.at, tzOf(c.port)))}`) : null, ' ',
+                        c.agent_company ? h('small', c.agent_company) : h('small.ag-missing', 'no agent'), ' ', contactButtons(c, { ctx, canEdit, onChange: reloadCalls, compact: true }));
+                } },
             { key: 'last_voyage', label: 'Last voyage', width: 230, render: (r) => { const v = r.last_voyage; return v ? h('span', { title: [v.voy_no, v.cargo, v.qty && fmt(v.qty, 0) + ' mt'].filter(Boolean).join(' · ') }, `${v.load_port ?? '?'} → ${v.disch_port ?? '?'}`, v.cargo ? h('small.dim', ` · ${v.cargo}`) : null) : h('span.dim', r.voyages ? '' : '—'); } },
             { key: 'notes', label: 'Notes', width: 200, popover: true, edit: { type: 'text' } },
         ];
@@ -332,6 +363,7 @@ export async function mount(el, ctx, param) {
             grid.updateRow(row);
             body.querySelector('.ch-stats')?.replaceWith(stats());
             body.querySelector('.fl-alerts')?.replaceWith(alertsBox());
+            body.querySelector('.ag-board')?.replaceWith(callsBoard());
             const tl = timeline();
             tlEl?.querySelector('.fl-tl')?.dispose?.();
             tlEl?.replaceWith(tl);
@@ -352,6 +384,7 @@ export async function mount(el, ctx, param) {
             toolbar(),
             list.length ? stats() : welcome(),
             list.length ? alertsBox() : null,
+            list.length ? callsBoard() : null,
             list.length ? h('section.ch-sec.cat-blue', h('header.ch-sec__head.is-static', h('span.ch-sec__title', 'Employment'), h('span.ch-sec__badge', String(rows.length)),
                 h('span.dim.fl-hint', 'Click a cell to edit · days are counted from today'), h('span.spacer'), resetLayoutButton(grid, '↺ columns')), h('div.ch-sec__body', grid.el)) : null,
             tlEl);
@@ -506,8 +539,73 @@ export async function mount(el, ctx, param) {
                     current = null;
                     await load();
                 } }) } }, 'Delete vessel')),
-            charter, addenda, log);
+            charter, vesselCalls(f), addenda, log);
         if (keep) window.scrollTo(0, scroll);
+    }
+
+    // ------------------------------------------------------------ Port calls & agents (chartering/agents.js)
+
+    const relShort = (hrs) => (hrs === null ? '' : Math.abs(hrs) < 48 ? `${hrs >= 0 ? 'in ' : ''}${Math.round(Math.abs(hrs))} h${hrs < 0 ? ' ago' : ''}` : `${hrs >= 0 ? 'in ' : ''}${Math.round(Math.abs(hrs) / 24)} d${hrs < 0 ? ' ago' : ''}`);
+    const lastContact = (c) => {
+        if (!c.last_contact_at) return h('span.dim', '—');
+        const ago = -hoursTo(c.last_contact_at, null);
+        return h('span', { title: `${c.last_contact_at} · ${c.last_contact_note ?? ''}` }, ago < 1 ? 'just now' : relShort(-ago), h('small.dim', ` ${(c.last_contact_note ?? '').slice(0, 40)}`));
+    };
+    const pdaText = (c) => [c.pda_status && c.pda_status !== 'none' ? `PDA ${PDA[c.pda_status]}` : null, c.fda_status && c.fda_status !== 'none' ? `FDA ${FDA[c.fda_status]}` : null].filter(Boolean).join(' · ');
+
+    function callRow(c, { withVessel = true } = {}) {
+        const nt = nextTime(c);
+        const issues = isActive(c) ? callIssues(c, tzOf(c.port)) : [];
+        return h('tr', { class: 'ag-row is-' + (c.status ?? 'planned'), on: { click: (e) => { if (!e.target.closest('a, button')) editCall(c); } } },
+            withVessel ? h('td', h('button.ch-link', { type: 'button', on: { click: () => openVessel(c.fleet_id) } }, h('b', c.vessel))) : null,
+            h('td', h('b', c.port), h('small.dim', ` ${PURPOSES[c.purpose] ?? ''}${c.cargo ? ' · ' + c.cargo : ''}`)),
+            h('td', statusBadge(c)),
+            h('td.nowrap', nt ? h('span', `${nt.label} ${String(nt.at).slice(8, 10)}.${String(nt.at).slice(5, 7)} ${String(nt.at).slice(11, 16)}`, h('small.dim', ` LT · ${relShort(hoursTo(nt.at, tzOf(c.port)))}`)) : h('span.dim', '—')),
+            h('td', agentCell(c)),
+            h('td', contactButtons(c, { ctx, canEdit, onChange: reloadCalls })),
+            h('td', h('small', pdaText(c))),
+            h('td', lastContact(c)),
+            h('td', issues.map((x) => h('span.ch-badge.' + x.level, x.text))));
+    }
+
+    function callsTable(rows, opts) {
+        return h('div.ch-scroll', h('table.ch-table.ag-table',
+            h('thead', h('tr', [opts.withVessel ? 'Vessel' : null, 'Port', 'Status', 'Next (port LT)', 'Agent', 'Contact', 'PDA / FDA', 'Last contact', 'To do'].filter(Boolean).map((x) => h('th', x)))),
+            h('tbody', rows.map((c) => callRow(c, opts)))));
+    }
+
+    /** Overview: every vessel's active port calls with their agents — one click to e-mail / call / WhatsApp. */
+    function callsBoard() {
+        const rows = calls.filter((c) => !onlyIssues || callIssues(c, tzOf(c.port)).length)
+            .filter((c) => !search || [c.vessel, c.ex_name, c.port, c.agent_company, c.agent_person].join(' ').toLowerCase().includes(search.toLowerCase()));
+        const issues = calls.reduce((s, c) => s + (callIssues(c, tzOf(c.port)).length ? 1 : 0), 0);
+        const ccIn = h('input', { type: 'text', value: agentCc(), placeholder: 'e.g. operation@…', size: 26, title: 'Acentelere giden e-postalarda otomatik CC (bu tarayıcıda saklanır)',
+            on: { change: (e) => { store.set('ch_agent_cc', e.target.value.trim()); drawOverview(); } } });
+        return h('section.ch-sec.cat-orange.ag-board',
+            h('header.ch-sec__head.is-static', h('span.ch-sec__title', 'Port calls & agents'), h('span.ch-sec__badge', String(calls.length)),
+                issues ? h('span.ch-badge.amber', `${issues} need action`) : null,
+                h('span.dim.fl-hint', 'Times are the port’s local time · ✉ opens your mail client with a template'), h('span.spacer'),
+                h('label.check', h('input', { type: 'checkbox', checked: onlyIssues, on: { change: (e) => { onlyIssues = e.target.checked; store.set('ch_fleet_calls_issues', onlyIssues); drawOverview(); } } }), 'only to do'),
+                h('span.dim', 'CC:'), ccIn,
+                canEdit ? h('button.primary', { type: 'button', on: { click: () => editCall({}) } }, '+ Port call') : null),
+            h('div.ch-sec__body', rows.length ? callsTable(rows, { withVessel: true })
+                : h('p.dim', calls.length ? 'Filtreye uyan liman çağrısı yok.' : 'Henüz liman çağrısı yok. “+ Port call” ile geminin sıradaki limanını ve acentesini girin; Contacts’taki acentelerden ya da daha önce aynı limanda çalıştığınız acentelerden seçebilirsiniz.')));
+    }
+
+    /** Vessel page: this vessel's calls — active ones first, then history (closed / cancelled). */
+    function vesselCalls(f) {
+        const box = h('div.ch-sec__body', h('p.dim', 'Loading…'));
+        get('chartering/port-calls', { fleet_id: f.id }).then((all) => {
+            const act = all.filter(isActive).sort((a, b) => String(a.eta ?? a.ata ?? '').localeCompare(String(b.eta ?? b.ata ?? '')));
+            const past = all.filter((c) => !isActive(c));
+            fill(box,
+                act.length ? callsTable(act, { withVessel: false }) : h('p.dim', 'Aktif liman çağrısı yok.'),
+                past.length ? h('details.ag-history', h('summary', `History (${past.length})`), callsTable(past, { withVessel: false })) : null);
+        }).catch(() => fill(box, h('p.dim', 'Liman çağrıları yüklenemedi.')));
+        return h('section.ch-sec.cat-orange',
+            h('header.ch-sec__head.is-static', h('span.ch-sec__title', 'Port calls & agents'), h('span.spacer'),
+                canEdit ? h('button.primary', { type: 'button', on: { click: () => editCall({ fleet_id: f.id, vessel: f.vessel }) } }, '+ Port call') : null),
+            box);
     }
 
     // ------------------------------------------------------------ CP addenda: extension, new redelivery, new hire from a date
@@ -670,6 +768,8 @@ export async function mount(el, ctx, param) {
             reload();
         }),
         live.on('ch_fleet_addendum', (c) => { if (!c.mine) reload(); }),
+        live.on('ch_port_call', (c) => { if (!c.mine) reload(); }),
+        live.on('ch_port_call_log', (c) => { if (!c.mine) reload(); }),
         live.on('ch_fleet_voyage', (c) => {
             if (c.mine) return;
             if (current && c.row && Number(c.row.fleet_id) === Number(current.fleet.id)) {

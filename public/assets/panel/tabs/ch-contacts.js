@@ -8,6 +8,7 @@ import { live } from '../core/live.js';
 import { specForm } from '../chartering/ui.js';
 import { CONTACT_KINDS } from '../chartering/kb.js';
 import { FIXTURE_STATUS } from '../chartering/engine/fixtures.js';
+import { PURPOSES, STATUSES } from '../chartering/agents.js';
 
 const CAT = { owner: 'cat-blue', operator: 'cat-teal', charterer: 'cat-green', broker: 'cat-purple', agent: 'cat-orange', surveyor: 'cat-yellow', bunker: 'cat-brown', other: 'cat-gray' };
 const FORM = [
@@ -69,11 +70,19 @@ export async function mount(el, ctx, param) {
     function editor(row) {
         const w = { ...row };
         const fx = row.id ? related(row) : [];
-        modal({ title: row.id ? [row.company, row.person].filter(Boolean).join(' · ') : 'New contact', width: 920,
+        // An agent's port calls for our Fleet ships (Fleet → Port calls & agents)
+        const callsBox = h('div');
+        if (row.id && row.kind === 'agent') {
+            get(`chartering/contacts/${row.id}/port-calls`).then((cs) => fill(callsBox, cs.length ? h('section', h('h4', `Port calls (${cs.length})`), h('ul.ch-news', cs.map((c) => h('li',
+                ctx.allowed('ch-fleet') ? h('button.ch-link', { type: 'button', on: { click: () => { m?.close(); ctx.open('ch-fleet', { openId: c.fleet_id }); } } }, `${c.vessel} · ${c.port}`) : h('b', `${c.vessel} · ${c.port}`),
+                h('small.dim', ` ${[PURPOSES[c.purpose], (STATUSES[c.status] ?? [c.status])[0], (c.eta ?? c.ata ?? '').slice(0, 10)].filter(Boolean).join(' · ')}`))))) : null)).catch(() => {});
+        }
+        let m = null;
+        m = modal({ title: row.id ? [row.company, row.person].filter(Boolean).join(' · ') : 'New contact', width: 920,
             body: h('div.ch-fx', specForm(w, FORM, { cols: 4 }),
                 fx.length ? h('section', h('h4', `Fixtures (${fx.length})`), h('ul.ch-news', fx.map((f) => h('li',
                     h('button.ch-link', { type: 'button', on: { click: () => ctx.open('ch-fixtures', { openId: f.id }) } }, `${f.ref} ${f.vessel ?? ''}`),
-                    h('small.dim', ` ${[f.cargo, f.load_port && `${f.load_port} → ${f.disch_port ?? '?'}`, f.laycan_from && fmtDate(f.laycan_from), FIXTURE_STATUS[f.status]].filter(Boolean).join(' · ')}`))))) : null),
+                    h('small.dim', ` ${[f.cargo, f.load_port && `${f.load_port} → ${f.disch_port ?? '?'}`, f.laycan_from && fmtDate(f.laycan_from), FIXTURE_STATUS[f.status]].filter(Boolean).join(' · ')}`))))) : null, callsBox),
             actions: [
                 canEdit && row.id ? { label: 'Delete', danger: true, onClick: async () => {
                     if (!(await confirmBox('Kişi silinsin mi? History’den geri alınabilir.', { yes: 'Sil' }))) return false;

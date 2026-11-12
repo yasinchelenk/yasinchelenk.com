@@ -133,6 +133,8 @@ function panel_migrations(): array
         126 => 'chartering_migrate_126',
         // Chartering · Voyage Estimator: estimate türü (voyage / TC relet / cargo relet)
         127 => 'chartering_migrate_127',
+        // Chartering · Fleet: liman çağrıları, acenteler ve iletişim kaydı
+        128 => 'chartering_migrate_128',
     ];
 }
 

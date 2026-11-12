@@ -9,6 +9,8 @@ import { gcNm, seaArea, NAV_STATUS, shipType, shipCategory, SHIP_CATEGORIES, fre
 import { PORTS, ANCHORAGES } from '../chartering/engine/ports.js';
 import { blankEstimate } from '../chartering/engine/voyage.js';
 import { parseNum, fmt } from '../chartering/ui.js';
+import { normPort } from '../chartering/engine/matching.js';
+import { statusBadge, nextTime, contactButtons, agentText, callIssues } from '../chartering/agents.js';
 
 const GROUPS = {
     fixed: ['Fixed / On voyage', 'cat-purple', '#7d4fd6'], open: ['Open / Prompt', 'cat-green', '#18996c'], ballast: ['Ballasting', 'cat-blue', '#2f6fdd'],
@@ -59,6 +61,7 @@ export async function mount(el, ctx) {
     const admin = ctx.user.role === 'yonetici';
     let rows = [];
     let status = null;
+    let agents = [];   // active port calls of our Fleet ships (Fleet → Port calls & agents)
     let view = store.get('ch_mon_view', 'list');
     let tonnage = null;
     let grid;
@@ -74,6 +77,7 @@ export async function mount(el, ctx) {
         const r = await get('chartering/monitor');
         rows = r.rows;
         status = r.status;
+        agents = r.agents ?? [];
         // On the map keep the user's zoom/pan: only the markers are redrawn
         if (view === 'map' && map && window.L) {
             drawStatus();
@@ -117,6 +121,7 @@ export async function mount(el, ctx) {
             columns: [
                 { key: 'name', label: 'Vessel', width: 200, render: (r) => h('span', h('b', r.name), h('small.dim', ` ${[r.imo && 'IMO ' + r.imo, r.mmsi && 'MMSI ' + r.mmsi].filter(Boolean).join(' · ')}`)) },
                 { key: 'grp', label: 'Group', width: 150, render: (r) => groupSelect(r) },
+                { key: 'agent', label: 'Port call / agent (Fleet)', width: 270, render: (r) => agentCellFor(r) },
                 { key: 'type', label: 'Type / DWT', width: 130, render: (r) => h('span', categoryDot(categoryOf(r)), [r.type || shipType(r.ais_type), r.dwt ? fmt(r.dwt, 0) + ' dwt' : '', r.draft ? fmt(r.draft, 1) + ' m' : ''].filter(Boolean).join(' · ')) },
                 { key: 'pos', label: 'Position', width: 230, render: (r) => (Number.isFinite(r.last_lat) ? h('span', latLonText(r.last_lat, r.last_lon), h('small.dim', ` ${seaArea(r.last_lat, r.last_lon)}`)) : h('span.dim', '—')) },
                 { key: 'sog', label: 'SOG / COG', width: 95, align: 'r', render: (r) => (r.last_sog !== null && r.last_sog !== undefined ? `${fmt(r.last_sog, 1)} kn${r.last_cog !== null ? ' / ' + Math.round(r.last_cog) + '°' : ''}` : '') },
@@ -146,6 +151,26 @@ export async function mount(el, ctx) {
         const f = freshness(r.last_time);
         const src = r.last_source === 'manual' ? badge('amber', 'manual', r.last_note || 'Manual override') : r.last_source === 'demo' ? badge('amber', 'DEMO') : r.last_note ? badge('amber', 'check', r.last_note) : null;
         return h('span.ch-cell-gap', r.last_time ? badge(f.level, f.text, fmtUtc(utcMs(r.last_time))) : h('span.dim', 'no position'), src);
+    }
+
+    // A watchlist ship that is also in Fleet: its next / current port call and the agent there
+    const tzByPort = new Map(dbPorts.map((p) => [normPort(p.name), p.tz]));
+    function callFor(r) {
+        const imo = String(r.imo || r.ais_imo || '').replace(/\D/g, '');
+        const names = [r.name, r.ais_name].filter(Boolean).map(normPort);
+        return agents.find((c) => (imo && String(c.imo ?? '').replace(/\D/g, '') === imo) || names.includes(normPort(c.vessel)) || (c.ex_name && names.includes(normPort(c.ex_name)))) ?? null;
+    }
+    function agentCellFor(r) {
+        const c = callFor(r);
+        if (!c) return '';
+        const nt = nextTime(c);
+        const issues = callIssues(c, tzByPort.get(normPort(c.port)));
+        return h('span.ch-cell-gap.ag-cell', { title: agentText(c) },
+            h('button.ch-link', { type: 'button', title: 'Fleet’te aç', on: { click: (e) => { e.stopPropagation(); ctx.allowed('ch-fleet') ? ctx.open('ch-fleet', { openId: c.fleet_id }) : null; } } }, c.port),
+            statusBadge(c), nt ? h('small.dim', `${nt.label} ${String(nt.at).slice(8, 10)}.${String(nt.at).slice(5, 7)} ${String(nt.at).slice(11, 16)} LT`) : null,
+            c.agent_company ? h('small', c.agent_company) : badge('amber', 'no agent'),
+            issues.length ? badge(issues[0].level, issues[0].text, issues.map((x) => x.text).join('\n')) : null,
+            contactButtons(c, { ctx, canEdit: ctx.allowed('ch-fleet'), compact: true, onChange: () => load() }));
     }
 
     function etaCell(r) {

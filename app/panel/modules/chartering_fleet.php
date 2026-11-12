@@ -164,6 +164,10 @@ entity_define('ch_fleet', [
             ent_delete('ch_fleet_addendum', (int) $a['id']);
         }
         $GLOBALS['ch_fleet_deleting'] = null;
+        // Port calls (and their contact logs) too — chartering_agents.php
+        foreach (rows('SELECT id FROM ch_port_calls WHERE fleet_id = ?', [$row['id']]) as $c) {
+            ent_delete('ch_port_call', (int) $c['id']);
+        }
     },
 ]);
 
