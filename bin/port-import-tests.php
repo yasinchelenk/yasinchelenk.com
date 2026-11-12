@@ -49,8 +49,10 @@ $pdo->exec("UPDATE ch_ports SET notes = 'Agent: ABC', max_draft = 16.5, agent = 
 $pdo->exec("INSERT INTO ch_ports (name, country) VALUES ('Tuzla', 'TR'), ('Dakar', 'XX')");
 $pdo->exec("DELETE FROM ch_ports WHERE name = 'Santos'");
 $before = (int) $pdo->query('SELECT count(*) FROM ch_ports')->fetchColumn();
-$pdo->exec('PRAGMA user_version = 124');
-panel_migrate($pdo);
+// Only the port list upgrade (migration 125) runs again; later migrations create tables that already exist
+$pdo->beginTransaction();
+chartering_migrate_125($pdo);
+$pdo->commit();
 $s = $port('Rotterdam');
 eq([$s['max_draft'], $s['agent'], $s['lat'], $s['locode']], [16.5, 'Mine', 1.5, 'NLRTM'], 'entered values kept, empty code filled');
 eq(str_starts_with($s['notes'], "Agent: ABC\n"), true, 'own note first, source added');

@@ -122,7 +122,8 @@ function ch_monitor_status(): array
 
 function ch_monitor_bundle(): never
 {
-    json_response(['rows' => rows('SELECT * FROM ch_watchlist ORDER BY name'), 'status' => ch_monitor_status()]);
+    // Agents of our own (Fleet) ships at their current / next ports, matched to the watchlist in the browser
+    json_response(['rows' => rows('SELECT * FROM ch_watchlist ORDER BY name'), 'status' => ch_monitor_status(), 'agents' => ch_port_calls_for_monitor()]);
 }
 
 function ch_monitor_refresh(): never

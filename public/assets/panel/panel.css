@@ -1443,3 +1443,29 @@ tr.fl-charter-line td { font-style: italic; color: var(--dim); }
 .fl-tl__orig { stroke: var(--text); stroke-width: 1.5; stroke-dasharray: 3 2; opacity: .55; }
 .fl-legend i.is-rate { width: 0; height: 0; border-radius: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #17675f; }
 .fl-legend i.is-orig { width: 0; height: 12px; border-left: 2px dashed var(--text); opacity: .55; border-radius: 0; }
+
+/* Chartering · Port calls & agents (chartering/agents.js — Fleet, Position Monitor, Contacts) */
+.ag-actions { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.ag-actions a.btn-link { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 24px; padding: 0 6px; border-radius: 6px; color: var(--ink); text-decoration: none; font-size: 12.5px; }
+.ag-actions a.btn-link:hover { background: var(--soft); }
+.ag-actions a.ag-wa { color: #128c4b; font-weight: 600; font-size: 11.5px; }
+.ag-cell { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.ag-missing { color: var(--red); }
+table.ag-table td { vertical-align: middle; }
+table.ag-table tr.ag-row { cursor: pointer; }
+table.ag-table tr.ag-row:hover td { background: var(--soft); }
+table.ag-table tr.is-closed td, table.ag-table tr.is-cancelled td { opacity: .65; }
+table.ag-table td .ch-badge + .ch-badge { margin-left: 4px; }
+.ag-board .ch-sec__head input[type=text] { padding: 3px 6px; font-size: 12.5px; }
+.ag-history { margin-top: 8px; }
+.ag-history summary { cursor: pointer; font-size: 12.5px; color: var(--dim); }
+.ag-editor { display: grid; gap: 10px; }
+.ag-suggest { display: grid; gap: 6px; }
+.ag-suggest__list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; }
+.ag-suggest select { max-width: 420px; }
+.ag-log { border-top: 1px solid var(--line); padding-top: 8px; }
+.ag-log__head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.ag-log__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 260px; overflow: auto; font-size: 13px; }
+.ag-log__when { font-variant-numeric: tabular-nums; color: var(--dim); }
+.toast .ch-link { color: #fff; text-decoration: underline; }
+.ch-saved a.ch-saved__open { text-decoration: none; color: inherit; }
