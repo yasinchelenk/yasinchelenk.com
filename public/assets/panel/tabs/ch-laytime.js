@@ -1,6 +1,6 @@
 // CHARTERING · Laytime & Demurrage: CP terms + SOF per port on the left, time sheets and amounts on the right.
 // Engine: ../chartering/engine/laytime.js (unit-tested in chartering/tests/laytime.test.js).
-import { h, fill, debounce, toast, store, fmtDateTime, fmtDate } from '../core/dom.js';
+import { h, fill, debounce, toast, store, fmtDateTime, fmtDate, fmtStamp } from '../core/dom.js';
 import { api, get, post, put, del } from '../core/api.js';
 import { holidayInfo, clearHolidayCache, HOLIDAY_SOURCES } from '../chartering/holidays.js';
 import { modal, confirmBox, popover } from '../core/ui.js';
@@ -23,12 +23,6 @@ function merge(base, data) {
         return out;
     }
     return data === undefined ? base : data;
-}
-
-/** "01.06.2026 08:00", "2026-06-01 0800", "1/6/26 8:00" → "2026-06-01 08:00" (null if not a date-time) */
-function normalizeDt(s) {
-    const r = parseSofText(`${String(s ?? '').trim()} x`).events[0];
-    return r ? r.at : null;
 }
 
 /** Time-bar badge: red when passed, amber within 15 days. */
@@ -109,7 +103,7 @@ export async function mount(el, ctx, param) {
         return section('lay-cp', 'Voyage & charter party', 'blue', [
             h('div.ch-grid', { style: { '--cols': 4 } },
                 h('label.ch-field.span-2', h('span.ch-field__label', 'Vessel'), picker),
-                fld('CP date', textInput(c, 'cpDate', changed, { placeholder: 'YYYY-MM-DD' })), fld('CP form', textInput(c, 'form', changed)),
+                fld('CP date', h('input', { type: 'date', value: c.cpDate ?? '', on: { input: (e) => { c.cpDate = e.target.value || ''; changed(); } } })), fld('CP form', textInput(c, 'form', changed)),
                 fld('Owners', textInput(c, 'owners', changed)), fld('Charterers', textInput(c, 'charterers', changed)),
                 h('label.ch-field.span-2', h('span.ch-field__label', 'Cargo'), textInput(c, 'cargo', changed, { placeholder: 'e.g. 20,000 mt wheat 10% MOLOO' })),
                 fld('Demurrage (USD/day)', numInput(c, 'demRate', changed)),
@@ -145,9 +139,8 @@ export async function mount(el, ctx, param) {
             const eventRow = (e, j) => {
                 const def = EVENTS[e.type] ?? {};
                 const dt = (key) => {
-                    const inp = h('input.ch-dt', { type: 'text', value: e[key] ?? '', placeholder: 'YYYY-MM-DD HH:mm', class: e[key] && parseTime(e[key]) === null ? 'is-invalid' : '',
-                        on: { input: () => { e[key] = inp.value.trim(); inp.classList.toggle('is-invalid', !!e[key] && parseTime(e[key]) === null); changed(); },
-                            blur: () => { const nrm = normalizeDt(inp.value); if (nrm) { e[key] = nrm; inp.value = nrm; inp.classList.remove('is-invalid'); changed(); } } } });
+                    const inp = h('input.ch-dt', { type: 'datetime-local', value: e[key] ?? '',
+                        on: { input: () => { e[key] = inp.value.replace('T', ' '); changed(); } } });
                     return inp;
                 };
                 return h('tr',
@@ -281,11 +274,11 @@ export async function mount(el, ctx, param) {
             kvList([
                 ['Laytime allowed', Number.isFinite(pr.allowed) ? `${fmtDur(pr.allowed)} (${days(pr.allowed)} d)` : 'CQD'],
                 pr.poolAllowed !== undefined ? ['Reversible pool at this port', fmtDur(pr.poolAllowed)] : null,
-                ['Laytime commenced', pr.start !== null ? `${fmtTime(pr.start)} ${dayName(pr.start)}` : '—', { hint: pr.startReason }],
+                ['Laytime commenced', pr.start !== null ? `${fmtStamp(fmtTime(pr.start))} ${dayName(pr.start)}` : '—', { hint: pr.startReason }],
                 pr.startReason ? ['', h('small.dim', pr.startReason)] : null,
-                ['Completed', pr.end !== null ? `${fmtTime(pr.end)} ${dayName(pr.end)}` : '—'],
+                ['Completed', pr.end !== null ? `${fmtStamp(fmtTime(pr.end))} ${dayName(pr.end)}` : '—'],
                 ['Laytime used', `${fmtDur(pr.used)} (${days(pr.used)} d)`, { strong: true }],
-                pr.expiry !== null ? ['Laytime expired', `${fmtTime(pr.expiry)} ${dayName(pr.expiry)}`] : null,
+                pr.expiry !== null ? ['Laytime expired', `${fmtStamp(fmtTime(pr.expiry))} ${dayName(pr.expiry)}`] : null,
                 pr.demurrage ? ['Time on demurrage', `${fmtDur(pr.demurrage)} (${days(pr.demurrage)} d)`, { strong: true, cls: 'neg' }] : null,
                 !pr.onDemAtEnd && pr.remaining > 0 ? ['Time saved', `ATS ${fmtDur(pr.savedAts)} · WTS ${fmtDur(pr.savedWts)}`, { cls: 'pos' }] : null,
             ]),
@@ -538,7 +531,7 @@ export async function mount(el, ctx, param) {
         r.ports.forEach((pr) => {
             const rows = pr.segments.map((s) => [fmtDate(fmtTime(s.from).slice(0, 10)), dayName(s.from), fmtTime(s.from).slice(11), toLabel(s), s.desc,
                 `${Math.round(s.factor * 100)}%`, fmtDur(s.counted), fmtDur(s.usedAfter), s.demAfter ? fmtDur(s.demAfter) : '']);
-            blocks.push({ title: `${pr.kind === 'load' ? 'Loading' : 'Discharging'} · ${pr.name} — allowed ${fmtDur(pr.allowed)}, commenced ${pr.start !== null ? fmtTime(pr.start) : '—'}`, head, rows, align: ['L', 'L', 'L', 'L', 'L'] });
+            blocks.push({ title: `${pr.kind === 'load' ? 'Loading' : 'Discharging'} · ${pr.name} — allowed ${fmtDur(pr.allowed)}, commenced ${pr.start !== null ? fmtStamp(fmtTime(pr.start)) : '—'}`, head, rows, align: ['L', 'L', 'L', 'L', 'L'] });
             textParts.push('', `${pr.name} — allowed ${fmtDur(pr.allowed)}, used ${fmtDur(pr.used)}, demurrage ${fmtDur(pr.demurrage)}`, textTable(head, rows));
         });
         textParts.push('', DISCLAIMER);

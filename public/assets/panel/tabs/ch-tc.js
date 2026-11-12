@@ -1,5 +1,5 @@
 // CHARTERING · TC Desk (spec §10): hire statement with interim schedule, off-hire calculator, speed & consumption claim.
-import { h, fill, debounce, toast, store, fmtDate, fmtDateTime } from '../core/dom.js';
+import { h, fill, debounce, toast, store, fmtDate, fmtDateTime, fmtStamp } from '../core/dom.js';
 import { get, post, put, del } from '../core/api.js';
 import { confirmBox, popover, segmented } from '../core/ui.js';
 import { hireStatement, hireSchedule, offHire, performanceClaim, fmtDays, BEAUFORT_DEFAULT, DOUGLAS_DEFAULT } from '../chartering/engine/hire.js';
@@ -53,6 +53,10 @@ export async function mount(el, ctx, param) {
     const persist = debounce(() => { drafts[kind] = calc; store.set('ch_tc_drafts', drafts); store.set('ch_tc_ids', ids); store.set('ch_tc_kind', kind); }, 300);
     const recalc = debounce(drawResults, 120);
     function changed() { persist(); recalc(); }
+    /** UTC date-time, stored 'YYYY-MM-DD HH:mm' (shown DD-MM-YYYY HH:MM with a calendar) */
+    function dtInput(obj, key) {
+        return h('input', { type: 'datetime-local', value: obj[key] ?? '', on: { input: (e) => { obj[key] = e.target.value ? e.target.value.replace('T', ' ') : ''; changed(); } } });
+    }
 
     // ------------------------------------------------------------ Inputs
 
@@ -65,7 +69,8 @@ export async function mount(el, ctx, param) {
                 h('tbody', list.map((r) => h('tr', cols.map(([k, , t, w]) => h('td',
                     t === 'num' || t === 'small' ? numInput(r, k, changed, { small: t === 'small', width: w ?? '80px' })
                         : t === 'date' ? h('input', { type: 'date', value: r[k] ?? '', on: { input: (e) => { r[k] = e.target.value; changed(); } } })
-                            : textInput(r, k, changed, { width: w ?? (t === 'dt' ? '135px' : '140px'), placeholder: t === 'dt' ? 'YYYY-MM-DD HH:mm' : '' }))),
+                            : t === 'dt' ? dtInput(r, k)
+                                : textInput(r, k, changed, { width: w ?? '140px' }))),
                 h('td', h('button.tiny.ghost', { type: 'button', title: 'Delete', on: { click: () => { list.splice(list.indexOf(r), 1); draw(); changed(); } } }, '✕'))))))) : null,
             h('button.tiny', { type: 'button', on: { click: () => { list.push(make()); draw(); changed(); } } }, addLabel));
         draw();
@@ -73,7 +78,7 @@ export async function mount(el, ctx, param) {
     }
 
     const grid = (...fields) => h('div.ch-grid', { style: { '--cols': 2 } }, fields);
-    const dt = (obj, key) => textInput(obj, key, changed, { placeholder: 'YYYY-MM-DD HH:mm' });
+    const dt = (obj, key) => dtInput(obj, key);
 
     function drawInputs() {
         nameIn.value = calc.name ?? '';
@@ -171,7 +176,7 @@ export async function mount(el, ctx, param) {
                 sched.length ? h('details', { open: sched.length <= 12 }, h('summary', `Hire schedule (${sched.length} instalments, every ${c.periodDays} days, net of address + C/V/E)`),
                     h('div.ch-scroll', h('table.ch-table',
                         h('thead', h('tr', ['#', 'Due', 'Period', 'Days', 'Amount'].map((x) => h('th', x)))),
-                        h('tbody', sched.map((s) => h('tr', { class: next && s.no < next.no ? 'is-done' : '' }, h('td', s.no), h('td', fmtDate(s.due)), h('td', `${s.from} → ${s.to}`), h('td', fmt(s.days, 4)), h('td.r', fmt(s.amount, 2)))))))) : null,
+                        h('tbody', sched.map((s) => h('tr', { class: next && s.no < next.no ? 'is-done' : '' }, h('td', s.no), h('td', fmtDate(s.due)), h('td', `${fmtStamp(s.from)} → ${fmtStamp(s.to)}`), h('td', fmt(s.days, 4)), h('td.r', fmt(s.amount, 2)))))))) : null,
                 h('p.dim', DISCLAIMER));
         } else if (kind === 'offhire') {
             res = offHire(c);
@@ -210,7 +215,7 @@ export async function mount(el, ctx, param) {
         const c = calc;
         const r = res;
         const en = (x) => Number(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        return [`M/V ${c.vessel || '—'} — off-hire${c.reason ? ': ' + c.reason : ''}`, `From ${c.from || '—'} to ${c.to || '—'} UTC = ${fmtDays(r.days)}${Number(c.pct) !== 100 ? ` at ${c.pct}%` : ''}`,
+        return [`M/V ${c.vessel || '—'} — off-hire${c.reason ? ': ' + c.reason : ''}`, `From ${fmtStamp(c.from) || '—'} to ${fmtStamp(c.to) || '—'} UTC = ${fmtDays(r.days)}${Number(c.pct) !== 100 ? ` at ${c.pct}%` : ''}`,
             `Hire: ${fmt(r.effectiveDays, 4)} days × USD ${en(c.rate || 0)} = USD ${en(r.hire)}`,
             r.bunkers ? `Bunkers: IFO ${fmt(c.ifo || 0, 2)} t × ${en(c.ifoPrice || 0)} + MGO ${fmt(c.mgo || 0, 2)} t × ${en(c.mgoPrice || 0)} = USD ${en(r.bunkers)}` : null,
             `Total deduction: USD ${en(r.total)}`].filter(Boolean).join('\n');
@@ -222,7 +227,7 @@ export async function mount(el, ctx, param) {
         if (kind === 'hire') {
             const blocks = [{ head: ['Item', 'Owners', 'Charterers'], align: ['L', 'R', 'R'], rows: [...res.lines.map((l) => [l.label, l.owners ? fmt(l.owners, 2) : '', l.charterers ? fmt(l.charterers, 2) : '']),
                 ['Totals', fmt(res.ownersTotal, 2), fmt(res.chartsTotal, 2)], [res.balance >= 0 ? 'Balance due to owners' : 'Balance due to charterers', res.balance >= 0 ? fmt(res.balance, 2) : '', res.balance < 0 ? fmt(-res.balance, 2) : '']] }];
-            if (res.schedule.length) blocks.push({ title: 'Hire schedule', head: ['#', 'Due', 'Period', 'Amount'], align: ['L', 'L', 'L', 'R'], rows: res.schedule.map((s) => [s.no, s.due, `${s.from} → ${s.to}`, fmt(s.amount, 2)]) });
+            if (res.schedule.length) blocks.push({ title: 'Hire schedule', head: ['#', 'Due', 'Period', 'Amount'], align: ['L', 'L', 'L', 'R'], rows: res.schedule.map((s) => [s.no, fmtStamp(s.due), `${fmtStamp(s.from)} → ${fmtStamp(s.to)}`, fmt(s.amount, 2)]) });
             const text = [title, `Delivery ${c.delivery || '—'} · Redelivery ${c.redelivery || '—'} (UTC)`, '', textTable(['Item', 'Owners', 'Charterers'], blocks[0].rows), '', `Brokerage ${fmt(c.brokeragePct, 2)}% (owners → broker): ${usd(res.brokerage, 2)}`, '', DISCLAIMER].join('\n');
             return { text, report: { title, file: title, subtitle: `Hire statement · USD ${fmt(c.rate, 2)}/day · times UTC`, note: DISCLAIMER, blocks } };
         }

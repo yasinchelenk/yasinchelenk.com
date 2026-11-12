@@ -1,7 +1,7 @@
 // CHARTERING · Fleet: the owners' view of their own / managed vessels — current time charter, min / max redelivery,
 // hire, next dry dock — and each vessel's voyage log. Replaces the "GEMİLERİN SEFER ÖZETİ" workbook (summary sheet +
 // one sheet per vessel). Days left, alerts and the timeline are computed from today's date here, so they never go stale.
-import { h, fill, toast, debounce, fmtDate, today, daysBetween, addDays, esc, download, store } from '../core/dom.js';
+import { h, fill, toast, debounce, fmtDate, today, daysBetween, addDays, esc, download, store, fmtStamp } from '../core/dom.js';
 import { api, get, post, put, del } from '../core/api.js';
 import { modal, confirmBox, confirmPop, segmented } from '../core/ui.js';
 import { Grid, resetLayoutButton } from '../core/grid.js';
@@ -121,12 +121,12 @@ export function fleetAlerts(f, t = today()) {
     return out;
 }
 
-/** "01.06.26 16:00" (UTC) or "01.06.26" for date-only voyage times */
+/** "01-06-2026 16:00" (UTC) or "01-06-2026" for date-only voyage times */
 export function fmtTime(v) {
     if (!v) return '';
     const [d, tm] = String(v).split(' ');
     const [y, m, dd] = d.split('-');
-    return `${dd}.${m}.${y.slice(2)}${tm ? ' ' + tm : ''}`;
+    return `${dd}-${m}-${y}${tm ? ' ' + tm : ''}`;
 }
 
 /** Days between two voyage times (fractional; null when one is missing or the order is wrong). */
@@ -549,7 +549,7 @@ export async function mount(el, ctx, param) {
     const lastContact = (c) => {
         if (!c.last_contact_at) return h('span.dim', '—');
         const ago = -hoursTo(c.last_contact_at, null);
-        return h('span', { title: `${c.last_contact_at} · ${c.last_contact_note ?? ''}` }, ago < 1 ? 'just now' : relShort(-ago), h('small.dim', ` ${(c.last_contact_note ?? '').slice(0, 40)}`));
+        return h('span', { title: `${fmtStamp(c.last_contact_at)} · ${c.last_contact_note ?? ''}` }, ago < 1 ? 'just now' : relShort(-ago), h('small.dim', ` ${(c.last_contact_note ?? '').slice(0, 40)}`));
     };
     const pdaText = (c) => [c.pda_status && c.pda_status !== 'none' ? `PDA ${PDA[c.pda_status]}` : null, c.fda_status && c.fda_status !== 'none' ? `FDA ${FDA[c.fda_status]}` : null].filter(Boolean).join(' · ');
 
@@ -560,7 +560,7 @@ export async function mount(el, ctx, param) {
             withVessel ? h('td', h('button.ch-link', { type: 'button', on: { click: () => openVessel(c.fleet_id) } }, h('b', c.vessel))) : null,
             h('td', h('b', c.port), h('small.dim', ` ${PURPOSES[c.purpose] ?? ''}${c.cargo ? ' · ' + c.cargo : ''}`)),
             h('td', statusBadge(c)),
-            h('td.nowrap', nt ? h('span', `${nt.label} ${String(nt.at).slice(8, 10)}.${String(nt.at).slice(5, 7)} ${String(nt.at).slice(11, 16)}`, h('small.dim', ` LT · ${relShort(hoursTo(nt.at, tzOf(c.port)))}`)) : h('span.dim', '—')),
+            h('td.nowrap', nt ? h('span', `${nt.label} ${String(nt.at).slice(8, 10)}-${String(nt.at).slice(5, 7)} ${String(nt.at).slice(11, 16)}`, h('small.dim', ` LT · ${relShort(hoursTo(nt.at, tzOf(c.port)))}`)) : h('span.dim', '—')),
             h('td', agentCell(c)),
             h('td', contactButtons(c, { ctx, canEdit, onChange: reloadCalls })),
             h('td', h('small', pdaText(c))),
@@ -701,7 +701,7 @@ export async function mount(el, ctx, param) {
 
     function voyageGrid(f, voyages) {
         const uniq = (k) => () => [...new Set(voyages.map((v) => v[k]).filter(Boolean))];
-        const time = (k, label) => ({ key: k, label, width: 116, render: (r) => fmtTime(r[k]), edit: { type: 'text', value: (r) => fmtTime(r[k]), placeholder: 'dd.mm.yy hh:mm' } });
+        const time = (k, label) => ({ key: k, label, width: 116, render: (r) => fmtTime(r[k]), edit: { type: 'text', value: (r) => fmtTime(r[k]), placeholder: 'dd-mm-yyyy hh:mm' } });
         const days = (k, label, a, b, title) => ({ key: k, label, width: 70, align: 'r', title, render: (r) => { const d = spanDays(r[a], r[b]); return d === null ? '' : fmt(d, 1); } });
         return new Grid({
             key: 'ch_fleet_voy', tab: 'ch-fleet', entity: 'ch_fleet_voyage', rowHeights: { min: 28 },

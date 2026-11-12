@@ -25,7 +25,7 @@ const STATUS_BADGE = { draft: '', in_progress: 'amber', ready: 'amber', signed: 
 const CALLS = { load: 'Load port', disch: 'Discharge port', other: 'Other call' };
 const SOURCES = ['', 'Master', 'Agent', 'Terminal', 'Surveyor', 'AIS'];
 const ZONES = (() => { try { return ['UTC', ...Intl.supportedValuesOf('timeZone')]; } catch { return ['UTC', 'Europe/Istanbul']; } })();
-const ddmm = (d) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}` : '');
+const ddmm = (d) => (d ? `${d.slice(8, 10)}-${d.slice(5, 7)}-${d.slice(0, 4)}` : '');
 
 export async function mount(el, ctx, param) {
     el.lang = 'en';
@@ -592,7 +592,7 @@ export async function mount(el, ctx, param) {
         pop = popover(anchor, h('div',
             item('PDF', 'A4, letterhead, page numbers', () => file('pdf')),
             item('Excel', 'one sheet per section', () => file('xlsx')),
-            item('Copy e-mail text', 'DD.MM.YYYY HHMM  Event', async () => { await copyText(emailText(model())); toast('SOF metni panoya kopyalandı.'); }),
+            item('Copy e-mail text', 'DD-MM-YYYY HHMM  Event', async () => { await copyText(emailText(model())); toast('SOF metni panoya kopyalandı.'); }),
             h('div.ctx-menu__sep'),
             item('Audit log', 'row changes, who, when', () => auditLog())), { align: 'right' });
     }

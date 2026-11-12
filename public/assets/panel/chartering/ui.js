@@ -84,8 +84,10 @@ export function specForm(obj, spec, { guessed = [], cols = 4, onChange } = {}) {
             control = h('label.check', h('input', { type: 'checkbox', checked: !!+obj[k], on: { change: (e) => { obj[k] = e.target.checked ? 1 : 0; changed(); } } }), 'yes');
         } else if (type === 'date') {
             control = h('input', { type: 'date', value: obj[k] ?? '', on: { input: (e) => { obj[k] = e.target.value || null; changed(); } } });
-        } else if (type === 'text' || type === 'datetime') {
-            control = h('input', { type: 'text', value: obj[k] ?? '', placeholder: type === 'datetime' ? 'YYYY-MM-DD HH:mm' : '', on: { input: (e) => { obj[k] = e.target.value || null; changed(); } } });
+        } else if (type === 'datetime') {
+            control = h('input', { type: 'datetime-local', value: obj[k] ?? '', on: { input: (e) => { obj[k] = e.target.value ? e.target.value.replace('T', ' ') : null; changed(); } } });
+        } else if (type === 'text') {
+            control = h('input', { type: 'text', value: obj[k] ?? '', on: { input: (e) => { obj[k] = e.target.value || null; changed(); } } });
         } else if (type === 'textarea') {
             control = h('textarea', { rows: 3, on: { input: (e) => { obj[k] = e.target.value || null; changed(); } } }, obj[k] ?? '');
         } else {

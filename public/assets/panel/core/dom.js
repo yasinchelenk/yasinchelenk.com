@@ -1,4 +1,5 @@
 // DOM, ikonlar, biçimlendirme ve küçük yardımcılar. Tüm panel bunları kullanır.
+import { dateField } from './datefield.js';
 
 /** h('div.a.b#id', {attrs, on:{click}, style:{}, html}, ...çocuklar) */
 export function h(tag, attrs = {}, ...children) {
@@ -9,8 +10,12 @@ export function h(tag, attrs = {}, ...children) {
     const [, name = 'div', rest = ''] = tag.match(/^([a-z0-9-]*)(.*)$/i);
     const el = document.createElement(name || 'div');
     rest.replace(/([.#])([\w-]+)/g, (_, type, value) => (type === '.' ? el.classList.add(value) : (el.id = value)));
+    // Tarih alanları DD-MM-YYYY yazılır ve takvim açar; .value yine 'YYYY-MM-DD' döner (core/datefield.js)
+    const dateKind = el.tagName === 'INPUT' && (attrs.type === 'date' || attrs.type === 'datetime-local') ? attrs.type : null;
+    if (dateKind) dateField(el, dateKind);
     for (const [key, value] of Object.entries(attrs)) {
         if (value === undefined || value === null || value === false) continue;
+        if (dateKind && key === 'type') continue;
         if (key === 'on') Object.entries(value).forEach(([ev, fn]) => fn && el.addEventListener(ev, fn));
         else if (key === 'class' || key === 'className') el.classList.add(...String(value).split(/\s+/).filter(Boolean));
         else if (key === 'style' && typeof value === 'object') {
@@ -169,17 +174,24 @@ export function toDate(v) {
     return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** dd.mm.yyyy */
+/** DD-MM-YYYY (sitenin her yerinde tarih böyle yazılır) */
 export function fmtDate(v) {
     const d = toDate(v);
-    return d ? `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}` : (v ? String(v) : '');
+    return d ? `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}` : (v ? String(v) : '');
 }
 
-/** dd.mm HH:MM */
+/** DD-MM HH:MM (withYear: DD-MM-YYYY HH:MM) */
 export function fmtDateTime(v, withYear = false) {
     const d = toDate(v);
     if (!d) return v ? String(v) : '';
-    return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}${withYear ? '.' + d.getFullYear() : ''} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}${withYear ? '-' + d.getFullYear() : ''} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Saat dilimi çevirmeden metni yeniden yazar: 'YYYY-MM-DD' → 'DD-MM-YYYY', 'YYYY-MM-DD HH:MM' → 'DD-MM-YYYY HH:MM' (short: yılsız). */
+export function fmtStamp(v, { short = false } = {}) {
+    const m = String(v ?? '').match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+    if (!m) return v ? String(v) : '';
+    return `${m[3]}-${m[2]}${short ? '' : '-' + m[1]}${m[4] ? ' ' + m[4] : ''}`;
 }
 
 export function isoDate(d = new Date()) {

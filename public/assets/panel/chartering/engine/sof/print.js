@@ -6,7 +6,7 @@ import { dailyLog, applyLogOverrides } from './events.js';
 import { HEADER_FIELDS, HEADER_GROUPS, REMARK_TYPES, QUALIFIERS, SECTIONS } from './templates.js';
 import { firstNumber } from './to-laytime.js';
 
-const ddmmyyyy = (d) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}` : '');
+const ddmmyyyy = (d) => (d ? `${d.slice(8, 10)}-${d.slice(5, 7)}-${d.slice(0, 4)}` : '');
 const hhmm = (t) => (t ? t.replace(':', '') : '');
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const dowOf = (d) => DOW[new Date(Date.parse(d + 'T00:00:00Z')).getUTCDay()];
@@ -103,7 +103,7 @@ export function printModel(doc, a, dict, meta = {}) {
 }
 
 /**
- * Plain-text e-mail version: aligned "DD.MM.YYYY HHMM  Event" lines (ranges as HHMM-HHMM), then totals and remarks.
+ * Plain-text e-mail version: aligned "DD-MM-YYYY HHMM  Event" lines (ranges as HHMM-HHMM), then totals and remarks.
  */
 export function emailText(m) {
     const out = [`${m.title} — ${m.vessel || 'M/V'} — ${m.port}`, [m.ref && `Ref ${m.ref}${m.version ? ` v${m.version}` : ''}`, m.callLabel, m.tzNote].filter(Boolean).join(' · '), ''];
@@ -115,7 +115,7 @@ export function emailText(m) {
         let date = '';
         for (const r of m.events.rows) {
             if (r[0]) date = r[0];
-            const time = r[3] ? `${r[2]}-${r[3].replace(/^\d\d\.\d\d /, '')}` : r[2];
+            const time = r[3] ? `${r[2]}-${r[3].replace(/^\d\d[.-]\d\d /, '')}` : r[2];
             out.push(`${date} ${time.padEnd(9)}  ${r[5]}${r[4] ? ` (${r[4]})` : ''}${r[6] ? ` — ${r[6]}` : ''}`);
         }
     }

@@ -310,7 +310,7 @@ function ch_report_pdf(array $r): string
         $pdf->text($L, $y, $r['subtitle'], 9.5, false, 'L', $grey);
         $y += 13;
     }
-    $pdf->text($R, 40, 'Printed ' . date('d.m.Y H:i'), 8, false, 'R', $grey);
+    $pdf->text($R, 40, 'Printed ' . date('d-m-Y H:i'), 8, false, 'R', $grey);
     $pdf->line($L, $y, $R, $y, 1, $navy);
     $y += 16;
 

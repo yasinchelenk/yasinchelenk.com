@@ -1,6 +1,6 @@
 // CHARTERING · Position Monitor (spec §4): watchlist grouped by status, live AIS (server-side collector),
 // manual positions, Leaflet map with tracks, ports and anchorages, and a "can she make the laycan?" tool.
-import { h, fill, toast, store, fmtDate, debounce } from '../core/dom.js';
+import { h, fill, toast, store, fmtDate, fmtStamp, debounce } from '../core/dom.js';
 import { get, post, put, del } from '../core/api.js';
 import { modal, confirmBox, segmented } from '../core/ui.js';
 import { Grid, resetLayoutButton } from '../core/grid.js';
@@ -22,7 +22,7 @@ const DEFAULT_FACTOR = 1.15;
 const DEFAULT_SPEED = 12;
 const badge = (level, text, title) => h('span.ch-badge.' + level, { title: title ?? text }, text);
 const utcMs = (s) => (s ? Date.parse(String(s).replace(' ', 'T') + (String(s).length <= 16 ? ':00Z' : 'Z')) : null);
-const fmtUtc = (ms) => (ms ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '');
+const fmtUtc = (ms) => (ms ? fmtStamp(new Date(ms).toISOString().slice(0, 16)) + ' UTC' : '');
 /** 0.03 days → "1 h", 2.4 days → "2.4 days" */
 const gap = (days) => (days < 1 ? `${Math.max(1, Math.round(days * 24))} h` : `${fmt(days, 1)} days`);
 const latLonText = (lat, lon) => (Number.isFinite(lat) && Number.isFinite(lon)
@@ -167,7 +167,7 @@ export async function mount(el, ctx) {
         const issues = callIssues(c, tzByPort.get(normPort(c.port)));
         return h('span.ch-cell-gap.ag-cell', { title: agentText(c) },
             h('button.ch-link', { type: 'button', title: 'Fleet’te aç', on: { click: (e) => { e.stopPropagation(); ctx.allowed('ch-fleet') ? ctx.open('ch-fleet', { openId: c.fleet_id }) : null; } } }, c.port),
-            statusBadge(c), nt ? h('small.dim', `${nt.label} ${String(nt.at).slice(8, 10)}.${String(nt.at).slice(5, 7)} ${String(nt.at).slice(11, 16)} LT`) : null,
+            statusBadge(c), nt ? h('small.dim', `${nt.label} ${String(nt.at).slice(8, 10)}-${String(nt.at).slice(5, 7)} ${String(nt.at).slice(11, 16)} LT`) : null,
             c.agent_company ? h('small', c.agent_company) : badge('amber', 'no agent'),
             issues.length ? badge(issues[0].level, issues[0].text, issues.map((x) => x.text).join('\n')) : null,
             contactButtons(c, { ctx, canEdit: ctx.allowed('ch-fleet'), compact: true, onChange: () => load() }));
@@ -233,7 +233,7 @@ export async function mount(el, ctx) {
         ['name', 'Vessel', 'text'], ['mmsi', 'MMSI (for AIS)', 'text'], ['imo', 'IMO', 'text'], ['grp', 'Group', 'grp'],
         ['type', 'Type', 'text'], ['flag', 'Flag', 'text'], ['dwt', 'DWT', 'num'], ['draft', 'Draft (m)', 'small'],
         ['open_port', 'Open port', 'text'], ['open_date', 'Open date', 'date'], ['laycan_from', 'Laycan from', 'date'], ['laycan_to', 'Laycan to', 'date'],
-        ['next_job', 'Next job', 'text'], ['service_speed', 'Service speed (kn)', 'small'], ['manual_eta', 'Manual ETA (UTC)', 'text'], ['notes', 'Notes', 'text'],
+        ['next_job', 'Next job', 'text'], ['service_speed', 'Service speed (kn)', 'small'], ['manual_eta', 'Manual ETA (UTC)', 'datetime'], ['notes', 'Notes', 'text'],
     ];
     const payload = (w) => Object.fromEntries([...FORM.map(([k]) => k), 'tonnage_id', 'target_name', 'target_lat', 'target_lon', 'remaining_nm', 'route_factor'].filter((k) => k in w).map((k) => [k, w[k] ?? null]));
     function form(w) {
@@ -241,7 +241,8 @@ export async function mount(el, ctx) {
             let c;
             if (type === 'grp') c = h('select', { on: { change: (e) => { w[k] = e.target.value; } } }, Object.entries(GROUPS).map(([v, [l]]) => h('option', { value: v, selected: (w[k] ?? 'watch') === v }, l)));
             else if (type === 'date') c = h('input', { type: 'date', value: w[k] ?? '', on: { input: (e) => { w[k] = e.target.value || null; } } });
-            else if (type === 'text') c = h('input', { type: 'text', value: w[k] ?? '', placeholder: k === 'manual_eta' ? 'YYYY-MM-DD HH:mm' : '', on: { input: (e) => { w[k] = e.target.value || null; } } });
+            else if (type === 'datetime') c = h('input', { type: 'datetime-local', value: w[k] ?? '', on: { input: (e) => { w[k] = e.target.value ? e.target.value.replace('T', ' ') : null; } } });
+            else if (type === 'text') c = h('input', { type: 'text', value: w[k] ?? '', on: { input: (e) => { w[k] = e.target.value || null; } } });
             else c = h('input.ch-num', { type: 'text', value: w[k] ?? '', on: { input: (e) => { w[k] = parseNum(e.target.value, type === 'small'); } } });
             return h('label.ch-field', h('span.ch-field__label', label), c);
         }));
@@ -264,7 +265,7 @@ export async function mount(el, ctx) {
                 h('div.ch-grid', { style: { '--cols': 2 } },
                     h('label.ch-field.span-2', h('span.ch-field__label', 'Position (decimal lat, lon)'), inp('pos', '41.0123, 29.0456')),
                     h('label.ch-field', h('span.ch-field__label', 'SOG (kn)'), inp('sog')), h('label.ch-field', h('span.ch-field__label', 'COG (°)'), inp('cog')),
-                    h('label.ch-field', h('span.ch-field__label', 'Time (UTC)'), inp('at', 'YYYY-MM-DD HH:mm')), h('label.ch-field', h('span.ch-field__label', 'Source / note'), inp('note', 'e.g. master’s noon report'))),
+                    h('label.ch-field', h('span.ch-field__label', 'Time (UTC)'), h('input', { type: 'datetime-local', value: m.at, on: { input: (e) => { m.at = e.target.value.replace('T', ' '); } } })), h('label.ch-field', h('span.ch-field__label', 'Source / note'), inp('note', 'e.g. master’s noon report'))),
                 h('p.dim', 'Daha yeni bir AIS konumu gelene kadar “manual” rozetiyle gösterilir. Haritada “pick on map” ile de alabilirsiniz.')),
             actions: [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: async () => {
                 const [lat, lon] = m.pos.split(/[,;\s]+/).filter(Boolean).map((x) => parseNum(x, true));

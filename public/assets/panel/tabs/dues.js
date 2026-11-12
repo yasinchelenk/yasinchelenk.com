@@ -312,7 +312,7 @@ function pasteBox({ onKind, onSaved }) {
         modal({
             title: 'Tahakkuk ekle (elle)', wide: true,
             body: [field('Gemi', vesselSearch({ autofocus: true, onPick: (v) => { vessel = v; fill(picked, vesselSummary(v, () => { vessel = null; fill(picked); })); } })), picked,
-                h('div.form-grid', field('Tür', f.kind), field('Hizmet No', f.service_no), field('Bill No', f.bill_no), field('Boğaz', f.strait), field('Hizmet tarihi', f.service_date), field('Son ödeme', f.due_date)),
+                h('div.form-grid', field('Tür', f.kind), field('Hizmet No', f.service_no), field('Bill No', f.bill_no), field('Boğaz', f.strait), field('Hizmet tarihi', fmtDate(f.service_date)), field('Son ödeme', fmtDate(f.due_date))),
                 field('Kalemler', linesBox, { hint: 'Fener transit kalemleri T ile başlar (4 kalem = full transit). Kılavuzlukta K04 uğraklı, K05 transit.' })],
             actions: [{ label: 'Cancel' }, { label: 'Kaydet', primary: true, onClick: async () => {
                 if (!vessel) { toast('Gemiyi seçin', 'error'); return false; }

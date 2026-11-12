@@ -53,6 +53,8 @@ SMTP tanımlı değilse mail pencereleri gönderimi kapatır ve eksik ayarları 
 
 ## Panel sekmeleri
 
+**Tarihler**: panelin ve Chartering Desk’in her sekmesinde tarih **DD-MM-YYYY** (saatli: DD-MM-YYYY HH:MM) yazılır. Tarih alanları (`core/datefield.js`) elle yazılır — 12-11-2026, 12.11.26, 12/11 (bu yıl), 121126, 12-11-2026 1430 — ve odaklanınca takvim açılır (gün seçilir; saatli alanda seçilen günün saati seçili gelir, hemen yazılır; Esc yalnızca takvimi kapatır). Sunucu da DD-MM-YYYY’yi kabul eder; veritabanında tarihler `YYYY-MM-DD` kalır. Resmî Türkçe belgeler (talepname, Ek-1, geçiş maili, DA / hesap dökümü) ve Fleet’in Excel aktarımı kendi biçimlerini korur.
+
 | Sekme | İçerik |
 |---|---|
 | Positions | Canlı gemi panosu (kategori grupları, SP1/SNT/HG ışıkları, To Do, 168 saat demir sayacı, silinenler); geçiş maili, iş maili, POLICE SP1, talepname |
