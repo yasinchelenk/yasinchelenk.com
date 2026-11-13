@@ -20,6 +20,51 @@ const CH_FIXTURE_FIELDS = [
     'estimate_id' => 'int', 'order_id' => 'int', 'tonnage_id' => 'int',
 ];
 
+/**
+ * Added in migration 129 (course material: fixture steps, Check Before Fixing, FLR3692): parties, subjects deadline,
+ * payment terms, TC terms, laytime clauses from the recap, B/L check, certificates and the negotiation log.
+ */
+const CH_FIXTURE_FIELDS_129 = [
+    'disponent_owners' => 'text', 'managers' => 'text', 'freight_collectors' => 'text', 'guarantor' => 'text', 'subs_due' => 'date',
+    'bl_date' => 'date', 'freight_first_pct' => 'num', 'freight_bd' => 'int', 'freight_balance_days' => 'int', 'bank_details' => 'text',
+    'hire_days' => 'int', 'hire_bd' => 'int', 'cve_month' => 'num', 'ilohc' => 'num', 'redel_date' => 'date', 'redel_notices' => 'text',
+    'start_rule' => 'enum:turn|gencon|2pm8am', 'nor_hours' => 'text', 'nor_after_laycan' => 'bool', 'load_except' => 'text', 'disch_except' => 'text',
+    'docs_hrs' => 'num', 'detention' => 'num',
+    'negotiation' => 'json', 'bl_check' => 'json', 'certs' => 'json',
+];
+
+function chartering_migrate_129(PDO $pdo): void
+{
+    $have = array_column($pdo->query('PRAGMA table_info(ch_fixtures)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+    foreach (CH_FIXTURE_FIELDS_129 as $k => $t) {
+        if (!in_array($k, $have, true)) {
+            $pdo->exec("ALTER TABLE ch_fixtures ADD COLUMN {$k} " . (in_array($t, ['num', 'num3'], true) ? 'REAL' : (in_array($t, ['int', 'bool'], true) ? 'INTEGER' : 'TEXT')));
+        }
+    }
+}
+
+/** JSON columns of a fixture row → arrays for the browser. */
+function ch_fixture_decode(array $f): array
+{
+    foreach (['negotiation', 'bl_check', 'certs'] as $k) {
+        $f[$k] = isset($f[$k]) && $f[$k] !== '' ? json_decode((string) $f[$k], true) : null;
+    }
+    return $f;
+}
+
+/** Adds n banking days (Monday–Friday) to a date. */
+function ch_add_banking_days(string $date, int $days): string
+{
+    $t = strtotime($date);
+    while ($days > 0) {
+        $t = strtotime('+1 day', $t);
+        if ((int) date('N', $t) <= 5) {
+            $days--;
+        }
+    }
+    return date('Y-m-d', $t);
+}
+
 function chartering_migrate_111(PDO $pdo): void
 {
     $cols = implode(",\n", array_map(fn($k, $t) => "{$k} " . (in_array($t, ['num', 'num3'], true) ? 'REAL' : ($t === 'int' ? 'INTEGER' : 'TEXT')), array_keys(CH_FIXTURE_FIELDS), CH_FIXTURE_FIELDS));
@@ -48,7 +93,7 @@ entity_define('ch_fixture', [
     'page'   => 'ch-fixtures',
     'undo'   => true,
     'label'  => fn($r) => trim(($r['ref'] ?? '') . ' ' . ($r['vessel'] ?? '') . ' ' . ($r['cargo'] ?? '')),
-    'fields' => CH_FIXTURE_FIELDS,
+    'fields' => CH_FIXTURE_FIELDS + CH_FIXTURE_FIELDS_129,
     'prepare' => function (array $d, ?array $before): array {
         $m = array_merge($before ?? [], $d);
         if (trim((string) ($m['vessel'] ?? '')) === '' && trim((string) ($m['charterers'] ?? '')) === '') {
@@ -136,7 +181,7 @@ function ch_fixtures_list(): never
 
 function ch_fixture_get(array $p): never
 {
-    $f = row('SELECT * FROM ch_fixtures WHERE id = ?', [$p['id']]) ?? api_error('Fixture bulunamadı.', 404);
+    $f = ch_fixture_decode(row('SELECT * FROM ch_fixtures WHERE id = ?', [$p['id']]) ?? api_error('Fixture bulunamadı.', 404));
     $f['tasks'] = rows('SELECT * FROM ch_fixture_tasks WHERE fixture_id = ? ORDER BY sort, id', [$p['id']]);
     $f['tc'] = rows('SELECT id, kind, name, total, next_due FROM ch_tc_calcs WHERE fixture_id = ? ORDER BY updated_at DESC', [$p['id']]);
     json_response($f);
@@ -210,6 +255,28 @@ function ch_deadlines(int $days = 60): array
                 }
             }
             $add('freight', $f['freight_due'], 'Freight due');
+            if ($f['status'] === 'subs') {
+                $add('subs', $f['subs_due'] ?? null, 'Subjects to be lifted' . (!empty($f['subjects']) ? ': ' . mb_substr((string) $f['subjects'], 0, 60) : ''));
+            }
+            // Freight: first instalment N banking days after B/Ls signed and released; balance N days after completion
+            if (!empty($f['bl_date']) && !empty($f['freight_bd'])) {
+                $add('freight', ch_add_banking_days((string) $f['bl_date'], (int) $f['freight_bd']), ($f['freight_first_pct'] ? "{$f['freight_first_pct']}% freight" : 'Freight') . ' due (banking days after B/L)');
+            }
+            if (!empty($f['completed_on']) && !empty($f['freight_balance_days'])) {
+                $add('freight', date('Y-m-d', strtotime("{$f['completed_on']} +{$f['freight_balance_days']} days")), 'Balance of freight / demurrage due');
+            }
+            // TC: redelivery notices before the expected redelivery date ("21/14/10/7 approx · 5/3/2/1 definite")
+            if (!empty($f['redel_date']) && !empty($f['redel_notices'])) {
+                foreach (array_unique(array_filter(array_map('intval', preg_split('/[^\d]+/', (string) $f['redel_notices'])))) as $nd) {
+                    $add('redel_notice', date('Y-m-d', strtotime("{$f['redel_date']} -{$nd} days")), "{$nd}-day redelivery notice");
+                }
+            }
+            // Certificates expiring before the end of the employment
+            foreach ((array) (json_decode((string) ($f['certs'] ?? ''), true) ?? []) as $c) {
+                if (is_array($c) && !empty($c['expiry'])) {
+                    $add('cert', (string) $c['expiry'], 'Certificate expires: ' . mb_substr((string) ($c['name'] ?? ''), 0, 40));
+                }
+            }
             if ($f['completed_on'] && $f['time_bar_days']) {
                 $add('time_bar', date('Y-m-d', strtotime("{$f['completed_on']} +{$f['time_bar_days']} days")), 'Claim time bar');
             }

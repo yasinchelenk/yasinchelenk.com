@@ -51,7 +51,7 @@ test('Checklist, notices, templates, freight invoice', () => {
     const vc = { type: 'VC', fixture_date: '2026-10-28', laycan_from: '2026-12-10', qty: 45000, tol_pct: 10, freight: 32, freight_type: 'pt', address_pct: 2.5, brokerage_pct: 1.25 };
     const tasks = defaultTasks(vc);
     eq(tasks.find((t) => t.title.startsWith('Agent nominated — load')).due, '2026-12-03', 'load agent 7 days before laycan');
-    eq(defaultTasks({ ...vc, type: 'TCT' })[0].title.includes('Charter party'), true, 'time charter gets its own checklist');
+    eq(defaultTasks({ ...vc, type: 'TCT' }).some((t) => t.title.startsWith('Delivery notices')), true, 'time charter gets its own checklist');
     eq(noticeDates({ laycan_from: '2026-12-10' }).map((x) => x.date), ['2026-12-03', '2026-12-05', '2026-12-07', '2026-12-08', '2026-12-09'], '7/5/3/2/1-day ETA notices');
     const inv = freightInvoice({ ...vc, bl_qty: 49500 });
     near(inv.gross, 1584000, 'freight 49,500 × 32', 1e-6);
@@ -94,5 +94,29 @@ test('Speed & consumption claim', () => {
     approx(c.factor, 784 / 564, 'extrapolated by distance to the whole passage');
     approx(c.timeLostH, 784 / 564, 'time lost ≈ 1.39 h');
     approx(c.overIfo, (53 - 24 * 1.05 * 2) * 784 / 564, 'over-consumption beyond 24 t + 5%');
-    approx(c.claim, c.timeLostH / 24 * 12000 + c.overIfo * 600, 'claim = time lost × hire + over-consumption × price');
+    approx(c.lostIfo, c.timeLostH / 24 * 24 * 0.95, 'fuel burnt in the time lost: warranted 24 t/day less 5%');
+    approx(c.claim, c.timeLostH / 24 * 12000 + c.overIfo * 600 + c.lostIfo * 600, 'claim = time lost × hire + over-consumption × price + time-lost fuel');
+    const old = performanceClaim({ reports, warrantedKn: 12.5, warrantedIfo: 24, speedTol: 0.5, consTolPct: 5, hireRate: 12000, ifoPrice: 600, lostTimeFuel: false });
+    approx(old.claim, old.timeLostH / 24 * 12000 + old.overIfo * 600, 'lostTimeFuel off → time + over-consumption only');
+});
+
+test('FLR3692 Module 4 §14.2 example: about 11.5 kn / 30 t, 3,400 nm, 10 good days 2,200 nm', () => {
+    // 10 good-weather days at 220 nm/day on 31 t (within "about" 5%), the rest of the 3,400 nm in bad weather.
+    const reports = Array.from({ length: 10 }, (_, i) => ({ date: `G${i + 1}`, hours: 24, distance: 220, ifo: 31, bf: 3, dss: 2 }));
+    reports.push({ date: 'BW', hours: 120, distance: 1200, ifo: 160, bf: 7, dss: 6 });
+    const c = performanceClaim({ reports, warrantedKn: 11.5, warrantedIfo: 30, speedTol: 0.5, consTolPct: 5, hireRate: 30000, ifoPrice: 300 });
+    // Course: 3,400 / 9.16 − 3,400 / 11 = 2.587 days (rounded speed); exact 3,400 / 9.1667 − 3,400 / 11 = 2.5758
+    approx(c.timeLostH / 24, (3400 / (2200 / 240) - 3400 / 11) / 24, 'time lost ≈ 2.58 days');
+    near(c.overIfo, 0, 'no over-consumption: 31 t is within 30 t + 5%', 1e-9);
+    approx(c.lostIfo, c.timeLostH / 24 * 30 * 0.95, 'excess time × 30 t × 95% ≈ 73.4 t (course 73.73 t)');
+    approx(c.claim, 99729, 'total ≈ USD 99,729 (course; ±1% for its rounded 9.16 kn)', 1);
+});
+
+test('Performance: optional current factor', () => {
+    const reports = [{ date: 'D1', hours: 24, distance: 264, ifo: 30, bf: 3, dss: 2, cur: -1 }];
+    const off = performanceClaim({ reports, warrantedKn: 12, warrantedIfo: 30, speedTol: 0, hireRate: 10000 });
+    near(off.gwSpeed, 11, 'without current: 11 kn → time lost', 1e-9);
+    const on = performanceClaim({ reports, warrantedKn: 12, warrantedIfo: 30, speedTol: 0, hireRate: 10000, applyCurrent: true });
+    near(on.gwSpeed, 12, '1 kn adverse current added back → 12 kn', 1e-9);
+    near(on.claim, 0, 'no claim once current is applied', 1e-9);
 });

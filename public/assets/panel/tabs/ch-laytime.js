@@ -4,7 +4,7 @@ import { h, fill, debounce, toast, store, fmtDateTime, fmtDate, fmtStamp } from 
 import { api, get, post, put, del } from '../core/api.js';
 import { holidayInfo, clearHolidayCache, HOLIDAY_SOURCES } from '../chartering/holidays.js';
 import { modal, confirmBox, popover } from '../core/ui.js';
-import { laytimeCalc, blankLaytime, blankPort, TERMS, EVENTS, RULES, fmtTime, fmtDur, dayName, parseTime, parseSofText, timeBar } from '../chartering/engine/laytime.js';
+import { laytimeCalc, blankLaytime, blankPort, TERMS, EVENTS, RULES, START_RULES, fmtTime, fmtDur, dayName, parseTime, parseSofText, timeBar } from '../chartering/engine/laytime.js';
 import { laytimeExample } from '../chartering/engine/examples.js';
 import { COMMON_ZONES } from '../chartering/engine/eta.js';
 import { numInput, textInput, selectInput, checkInput, fld, section, kvList, fmt, usd, exportButtons, exportReport, copyReport, textTable, DISCLAIMER } from '../chartering/ui.js';
@@ -109,11 +109,15 @@ export async function mount(el, ctx, param) {
                 fld('Demurrage (USD/day)', numInput(c, 'demRate', changed)),
                 fld('Despatch (USD/day)', numInput(c, 'desRate', changed, { placeholder: 'half demurrage' })),
                 fld('Despatch basis', selectInput(c, 'desBasis', { ATS: 'ATS — all time saved', WTS: 'WTS — working time saved' }, changed)),
-                fld('Multiple ports', selectInput(c, 'mode', MODES, changed))),
+                fld('Multiple ports', selectInput(c, 'mode', MODES, changed)),
+                fld('Laycan from', h('input', { type: 'date', value: c.laycanFrom ?? '', on: { input: (e) => { c.laycanFrom = e.target.value || ''; changed(); } } })),
+                fld('Laycan to (cancelling)', h('input', { type: 'date', value: c.laycanTo ?? '', on: { input: (e) => { c.laycanTo = e.target.value || ''; changed(); } } })),
+                fld('Detention (USD/day)', numInput(c, 'detentionRate', changed, { placeholder: 'if agreed' }))),
             h('div.ch-checks',
                 checkInput(c, 'onceOnDem', 'once on demurrage, always on demurrage', changed),
                 checkInput(c, 'shiftingCounts', 'shifting time counts', changed),
-                checkInput(c, 'waitingCounts', 'time lost waiting for berth counts as laytime (berth charter)', changed)),
+                checkInput(c, 'waitingCounts', 'time lost waiting for berth counts as laytime (berth charter)', changed),
+                checkInput(c, 'norAfterLaycan', 'NOR not before laydays (laytime not before laycan start, load port)', changed)),
         ]);
     }
 
@@ -202,11 +206,13 @@ export async function mount(el, ctx, param) {
                     fld('Laytime', selectInput(p, 'laytimeMode', { rate: 'Quantity ÷ rate', fixed: 'Fixed days/hours', cqd: 'CQD (customary quick despatch)' }, () => { changed(); draw(); })),
                     ...laytimeFields,
                     fld('Terms', selectInput(p, 'terms', Object.fromEntries(Object.entries(TERMS).map(([k, t]) => [k, k])), changed, { title: TERMS[p.terms]?.label })),
-                    fld('Commencement', selectInput(p, 'startRule', { turn: 'NOR + turn time', gencon: 'GENCON 94 (13:00 / 06:00 next WD)' }, changed)),
+                    fld('Commencement', selectInput(p, 'startRule', Object.fromEntries(Object.entries(START_RULES).map(([k, v]) => [k, v.label])), changed)),
                     fld('Turn time (h)', numInput(p, 'turnHrs', changed, { small: true })),
                     fld('Charter', selectInput(p, 'charter', { port: 'Port charter', berth: 'Berth charter' }, changed)),
                     h('label.ch-field.span-2', h('span.ch-field__label', 'NOR office hours (port local)'), textInput(p, 'norHours', changed, { placeholder: 'Mon-Fri 0800-1700, Sat 0800-1200 (empty = any time)' })),
                     fld('Laytime ends at', selectInput(p, 'endAt', { completed: 'Completed loading / disch', docs: 'Documents on board' }, changed)),
+                    h('label.ch-field.span-2', h('span.ch-field__label', 'Excepted periods (CP, even if used)'), textInput(p, 'excepted', changed, { placeholder: 'Fri 17:00 - Mon 08:00; eve 17:00 - next WD 08:00' })),
+                    fld('Docs free time after completion (h)', numInput(p, 'docsHrs', changed, { small: true, placeholder: 'e.g. 4 → excess = detention' })),
                     h('span')),
                 holBox,
                 h('div.ch-checks',
@@ -254,7 +260,8 @@ export async function mount(el, ctx, param) {
                 tile(owners ? 'Due to owners' : 'Due to charterers', usd(Math.abs(r.net), 2), owners ? 'demurrage' : 'despatch', 'is-key'),
                 tile('Demurrage', usd(r.demurrage, 2), `${fmtDur(r.demMin)} × ${usd(r.demRate)}`),
                 tile('Despatch', usd(r.despatch, 2), `${fmtDur(r.savedMin)} ${r.desBasis} × ${usd(r.desRate)}`),
-                tile('Laytime', Number.isFinite(r.allowed) ? fmtDur(r.allowed) : 'CQD', `used ${fmtDur(r.used)}`)),
+                tile('Laytime', Number.isFinite(r.allowed) ? fmtDur(r.allowed) : 'CQD', `used ${fmtDur(r.used)}`),
+                r.detentionMin ? tile('Detention', usd(r.detention, 2), `${fmtDur(r.detentionMin)} × ${usd(calc.cp.detentionRate ?? 0)}`) : null),
             r.warnings.length ? h('div.notice.warn', r.warnings.map((w) => h('div', w))) : null,
             h('div.ch-card', kvList([
                 ['Mode', MODES[r.mode]],
@@ -399,6 +406,7 @@ export async function mount(el, ctx, param) {
             '',
             r.demurrage ? `Demurrage: ${fmtDur(r.demMin)} = ${fmt(r.demMin / DAY, 4)} days × USD ${fmt(r.demRate, 2)} per day pro rata = USD ${fmt(r.demurrage, 2)}` : null,
             r.despatch ? `Despatch (${r.desBasis}): ${fmtDur(r.savedMin)} = ${fmt(r.savedMin / DAY, 4)} days × USD ${fmt(r.desRate, 2)} per day pro rata = USD ${fmt(r.despatch, 2)}` : null,
+            r.detention ? `Detention (documents after the free time): ${fmtDur(r.detentionMin)} = ${fmt(r.detentionMin / DAY, 4)} days × USD ${fmt(calc.cp.detentionRate, 2)} per day pro rata = USD ${fmt(r.detention, 2)}` : null,
             '',
             owners ? `Balance due to Owners: USD ${fmt(r.net, 2)}` : `Balance due to Charterers: USD ${fmt(-r.net, 2)}`,
             '',
@@ -523,8 +531,9 @@ export async function mount(el, ctx, param) {
             ['Demurrage rate', `${usd(r.demRate, 2)} / day`], ['Despatch rate', `${usd(r.desRate, 2)} / day (${r.desBasis})`],
             ['Time on demurrage', fmtDur(r.demMin)], ['Time saved', fmtDur(r.savedMin)],
             ['Demurrage', usd(r.demurrage, 2)], ['Despatch', usd(r.despatch, 2)],
+            r.detention ? ['Detention', usd(r.detention, 2)] : null,
             [r.net >= 0 ? 'Due to owners' : 'Due to charterers', usd(Math.abs(r.net), 2)],
-        ];
+        ].filter(Boolean);
         const head = ['Date', 'Day', 'From', 'To', 'Description', '%', 'Counted', 'Used', 'Demurrage'];
         const blocks = [{ title: 'Summary', kv: summary }];
         const textParts = [title, '', ...summary.map(([a, b]) => `${a.padEnd(18)} ${b}`)];

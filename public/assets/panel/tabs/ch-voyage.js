@@ -23,6 +23,8 @@ import { seaRoute, routeOptions, ECA_MODES } from '../chartering/routing.js';
 import { loadLeaflet } from '../chartering/leaflet.js';
 import { mountRelet } from './ch-relet.js';
 
+const COST_LABELS = { surveys: 'Surveys', linerTerms: 'Liner-term costs', crewBonus: 'Crew bonuses', insurance: 'War risk insurance', ap: 'Overage AP', hm: 'H&M extra premium',
+    ilohc: 'ILOHC', misc: 'Misc.', other: 'Other' };
 const TYPE_CAT = { sea: 'blue', load: 'green', disch: 'orange', bunker: 'teal', canal: 'purple', strait: 'indigo', weather: 'gray', other: 'brown' };
 const TYPE_NAME = { sea: 'Sea', load: 'Load', disch: 'Disch', ...STOP_TYPES };
 const EU_LEG = { 0: '—', 50: 'EU 50%', 100: 'EU 100%' };
@@ -611,8 +613,11 @@ function mountVoyage(el, ctx, param) {
         drawPlan();
         return section('costs', 'Costs, bunker prices, EU ETS & FuelEU', 'orange', [
             h('div.ch-grid', { style: { '--cols': 4 } },
-                fld('Misc. (USD)', numInput(k, 'misc', changed)), fld('ILOHC (USD)', numInput(k, 'ilohc', changed)),
-                fld('War risk / AP (USD)', numInput(k, 'insurance', changed)), fld('Other (USD)', numInput(k, 'other', changed)),
+                fld('Surveys (USD)', numInput(k, 'surveys', changed), 'draft / hold / cargo'), fld('Liner-term costs (USD)', numInput(k, 'linerTerms', changed), 'stevedoring, lashing, dunnage if for owners'),
+                fld('Crew bonuses (USD)', numInput(k, 'crewBonus', changed), 'hold cleaning, tally …'), fld('ILOHC (USD)', numInput(k, 'ilohc', changed)),
+                fld('War risk (USD)', numInput(k, 'insurance', changed)), fld('Overage AP (USD)', numInput(k, 'ap', changed), 'eski gemi ek primi'),
+                fld('H&M extra / trading limits (USD)', numInput(k, 'hm', changed)), fld('Misc. (USD)', numInput(k, 'misc', changed)),
+                k.other ? fld('Other (USD)', numInput(k, 'other', changed)) : null,
                 fld('VLSFO / IFO (USD/mt)', numInput(p, 'ifo', changed)), fld('HSFO (USD/mt)', numInput(p, 'hsfo', changed), 'scrubber gemilerde'),
                 fld('ULSFO (USD/mt)', numInput(p, 'ulsfo', changed), 'ECA yakıtı ULSFO ise'),
                 fld('MGO (USD/mt)', numInput(p, 'mgo', changed))),
@@ -776,7 +781,7 @@ function mountVoyage(el, ctx, param) {
                     r.bunkers.ulsfo ? [`ULSFO ${fmt(r.bunkers.ulsfo, 2)} t × ${usd(r.bunkers.ulsfoPrice)}`, usd(r.bunkers.ulsfoCost)] : null,
                     [`MGO ${fmt(r.bunkers.mgo, 2)} t × ${usd(r.bunkers.mgoPrice)}`, usd(r.bunkers.mgoCost)],
                     ['Port / canal / stop costs', usd(r.expenses.ports)],
-                    r.expenses.other ? ['Misc., ILOHC, insurance, other', usd(r.expenses.other)] : null,
+                    ...Object.entries(r.expenses.otherItems ?? {}).map(([key, v]) => [COST_LABELS[key] ?? key, usd(v)]),
                     r.expenses.freightTax ? ['Freight tax', usd(r.expenses.freightTax)] : null,
                     est.ets.enabled ? [`EU ETS ${fmt(r.ets.co2Covered, 1)} t CO₂ (€${fmt(r.ets.costEur, 0)})`, usd(r.ets.cost)] : null,
                     r.expenses.fueleu ? [`FuelEU penalty (€${fmt(r.fueleu.penaltyEur, 0)})`, usd(r.expenses.fueleu)] : null,

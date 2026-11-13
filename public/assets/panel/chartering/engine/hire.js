@@ -108,18 +108,24 @@ export const DOUGLAS_DEFAULT = 3;
  * Speed & consumption claim from noon reports.
  * Good-weather days (BF ≤ maxBf and DSS ≤ maxDss) are measured against the warranted speed less the speed tolerance and the
  * warranted consumption plus the consumption tolerance; the result is extrapolated to the whole passage by distance.
- * reports: [{date, hours, distance, ifo, mgo, bf, dss}]
+ * reports: [{date, hours, distance, ifo, mgo, bf, dss, cur}]  cur = current in knots (+ favourable, − adverse)
+ *
+ * FLR3692 Module 4 §14.2: on top of the time lost, the charterers recover the fuel burnt during that extra time
+ * (time lost × warranted consumption, less the "about" allowance) — `lostTimeFuel` (default on).
+ * Module 4 §12.4: current factors are optional (`applyCurrent`); when on, each good-weather report's distance is
+ * corrected by the current (distance − cur × hours) before the speed is measured.
  */
 export function performanceClaim({ reports = [], warrantedKn, warrantedIfo, warrantedMgo = 0, speedTol = 0.5, consTolPct = 5, maxBf = BEAUFORT_DEFAULT,
-    maxDss = DOUGLAS_DEFAULT, hireRate = 0, ifoPrice = 0, mgoPrice = 0, offsetUnder = false }) {
-    const all = reports.filter((r) => n(r.hours) > 0);
+    maxDss = DOUGLAS_DEFAULT, hireRate = 0, ifoPrice = 0, mgoPrice = 0, offsetUnder = false, lostTimeFuel = true, applyCurrent = false }) {
+    const all = reports.filter((r) => n(r.hours) > 0)
+        .map((r) => (applyCurrent && has(r.cur) ? { ...r, distance: n(r.distance) - n(r.cur) * n(r.hours) } : r));
     const gw = all.filter((r) => n(r.bf) <= n(maxBf) && n(r.dss) <= n(maxDss));
     const sum = (list, k) => list.reduce((a, r) => a + n(r[k]), 0);
     const D = sum(all, 'distance');
     const Dgw = sum(gw, 'distance');
     const Tgw = sum(gw, 'hours');
     const result = { totalDistance: D, totalHours: sum(all, 'hours'), gwDistance: Dgw, gwHours: Tgw, gwReports: gw.length, reports: all.length };
-    if (!Dgw || !Tgw || !(n(warrantedKn) > n(speedTol))) return { ...result, insufficient: true, timeLostH: 0, overIfo: 0, overMgo: 0, claim: 0 };
+    if (!Dgw || !Tgw || !(n(warrantedKn) > n(speedTol))) return { ...result, insufficient: true, timeLostH: 0, overIfo: 0, overMgo: 0, lostIfo: 0, lostMgo: 0, lostFuelClaim: 0, claim: 0 };
 
     const gwSpeed = Dgw / Tgw;
     const allowedKn = n(warrantedKn) - n(speedTol);
@@ -134,10 +140,17 @@ export function performanceClaim({ reports = [], warrantedKn, warrantedIfo, warr
     const overIfo = offsetUnder ? rawIfo : Math.max(0, rawIfo);
     const overMgo = offsetUnder ? rawMgo : Math.max(0, rawMgo);
 
+    // Fuel burnt during the time lost: warranted daily consumption less the "about" allowance (Module 4 §14.2)
+    const keep = 1 - n(consTolPct) / 100;
+    const lostIfo = lostTimeFuel ? timeLostH / 24 * n(warrantedIfo) * keep : 0;
+    const lostMgo = lostTimeFuel ? timeLostH / 24 * n(warrantedMgo) * keep : 0;
+
     const timeClaim = timeLostH / 24 * n(hireRate);
     const consClaim = overIfo * n(ifoPrice) + overMgo * n(mgoPrice);
+    const lostFuelClaim = lostIfo * n(ifoPrice) + lostMgo * n(mgoPrice);
     return {
-        ...result, gwSpeed, allowedKn, timeLostGwH, factor, timeLostH, allowIfo, allowMgo,
-        gwIfo: sum(gw, 'ifo'), gwMgo: sum(gw, 'mgo'), overIfo, overMgo, timeClaim, consClaim, claim: Math.max(offsetUnder ? -Infinity : 0, timeClaim + consClaim),
+        ...result, gwSpeed, allowedKn, timeLostGwH, factor, timeLostH, allowIfo, allowMgo, lostIfo, lostMgo, lostFuelClaim,
+        gwIfo: sum(gw, 'ifo'), gwMgo: sum(gw, 'mgo'), overIfo, overMgo, timeClaim, consClaim,
+        claim: Math.max(offsetUnder ? -Infinity : 0, timeClaim + consClaim + lostFuelClaim),
     };
 }

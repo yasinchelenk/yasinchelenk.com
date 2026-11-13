@@ -1,6 +1,6 @@
 // CHARTERING · Calculators (spec §7): small tools, each a card with inputs on the left and live results
 // on the right. Inputs are remembered per browser; every card can be copied, or exported to PDF/Excel.
-import { h, fill, store, toast, fmtStamp } from '../core/dom.js';
+import { h, fill, store, toast, fmtStamp, fmtDate } from '../core/dom.js';
 import { get } from '../core/api.js';
 import { popover } from '../core/ui.js';
 import { kbTables } from '../chartering/kb.js';
@@ -15,6 +15,7 @@ import { eta, requiredSpeed, offsetLabel, COMMON_ZONES } from '../chartering/eng
 import { etsCost, CF_DEFAULTS, phaseInPct, WHO_PAYS } from '../chartering/engine/ets.js';
 import { grossToNet, netToGross } from '../chartering/engine/commission.js';
 import { layupVsTrading } from '../chartering/engine/voyage.js';
+import { MSL_PCT, lashingRuleOfThumb, coilStack, tankTopLoad, ICA_CAUSES, icaApportion } from '../chartering/engine/stowage.js';
 
 const t = (x, d = 2, unit = '') => (Number.isFinite(x) ? `${fmt(x, d)}${unit ? ' ' + unit : ''}` : '—');
 const signed = (x, d = 0) => (Number.isFinite(x) ? `${x > 0 ? '+' : ''}${usd(x, d)}` : '—');
@@ -213,6 +214,59 @@ const CARDS = [
             ];
         },
     },
+    {
+        id: 'lashing', needs: ['weight', 'perSide'], title: 'Lashing — IMO rule of thumb', cat: 'orange', links: [],
+        desc: 'CSS Code annex 13: her iki yandaki bağların MSL toplamı en az birimin ağırlığı kadar olmalı (1 kN ≈ 0,1 t). Yalnızca yatayla ≤ 60° açıdaki bağlar sayılır; bazılarının ileri-geri bileşeni olmalı. MSL = kopma yükü × malzeme oranı (Cargo Stowage & Securing, tablo 3).',
+        fields: [['weight', 'Unit weight (t)'], ['perSide', 'Lashings on each side'], ['device', 'Device', { type: 'select', options: Object.fromEntries(Object.entries(MSL_PCT).map(([k, d]) => [k, `${d.label} — ${d.pct}%`])) }],
+            ['bs', 'Breaking strength per lashing (t)', { small: true }], ['msl', 'or MSL per lashing (t)', { small: true, hint: 'girilirse kopma yükü yerine' }]],
+        compute(v) {
+            const r = lashingRuleOfThumb({ weight: v.weight, perSide: v.perSide, breakingStrength: v.bs, device: v.device, msl: v.msl });
+            return [
+                ['MSL per lashing', t(r.mslEach, 2, 't')], ['MSL each side', t(r.perSideTotal, 2, 't')], ['Required each side', t(r.required, 2, 't')],
+                ['Result', r.ok ? 'sufficient' : `short by ${fmt(r.shortfall, 2)} t`, { strong: true, cls: r.ok ? 'pos' : 'neg' }],
+                r.lashingsNeeded !== null ? ['Lashings needed each side', String(r.lashingsNeeded)] : null,
+            ];
+        },
+    },
+    {
+        id: 'tanktop', needs: [], title: 'Steel cargo: coils & tank-top load', cat: 'gray', links: [],
+        desc: 'Klas tablosu yoksa: alt sıradaki coil’in tank top’a yükü ~30–35 t’u geçmemeli (≤10 t: 3 sıra, ≤15 t: 2 sıra, daha ağır: 1 sıra). Levha / kütük / demet için yük ÷ taban alanı izin verilen t/m²’yi aşmamalı; dunnage yükü yayar (Cargo Stowage & Securing, bölüm 3).',
+        fields: [['coil', 'Coil weight (t)', { small: true, sub: 'Steel coils' }], ['tiers', 'Planned tiers', { small: true }], ['limit', 'Bottom-tier limit (t)', { small: true, def: 30 }],
+            ['weight', 'Weight on footprint (t)', { sub: 'Tank-top load' }], ['len', 'Footprint length (m)', { small: true }], ['wid', 'Footprint width (m)', { small: true }],
+            ['perm', 'Permissible tank-top load (t/m²)', { small: true }], ['dens', 'Cargo density (t/m³)', { small: true, def: 7.85, hint: 'katı çelik 7,85' }]],
+        compute(v) {
+            const c = v.coil !== null ? coilStack({ coilWeight: v.coil, tiers: v.tiers, limit: v.limit ?? 30 }) : null;
+            const tt = v.weight !== null || v.perm !== null ? tankTopLoad({ weight: v.weight, length: v.len, width: v.wid, permissible: v.perm, density: v.dens ?? 7.85 }) : null;
+            return [
+                c ? ['Max tiers for this coil', String(c.maxTiers)] : null,
+                c ? ['Bottom-tier load', t(c.bottomLoad, 1, 't'), { strong: true, cls: c.ok ? 'pos' : 'neg' }] : null,
+                c ? ['Coils', c.ok ? 'acceptable' : 'reduce tiers / ask class', { cls: c.ok ? 'pos' : 'neg' }] : null,
+                tt?.load !== null && tt ? ['Tank-top load', t(tt.load, 2, 't/m²'), { strong: true, cls: tt.ok === false ? 'neg' : tt.ok ? 'pos' : '' }] : null,
+                tt?.maxWeight ? ['Max weight on this footprint', t(tt.maxWeight, 0, 't')] : null,
+                tt?.maxSolidHeight ? ['Max height of a solid block', t(tt.maxSolidHeight, 2, 'm')] : null,
+            ];
+        },
+    },
+    {
+        id: 'ica', needs: [], title: 'ICA 1996 (2011) — cargo claim split', cat: 'purple', links: [],
+        desc: 'NYPE / ASBATIME time charter’larında yük taleplerinin armatör ve kiracı arasında paylaşımı (Inter-Club Agreement, cl. 8). Bildirim: teslimden itibaren 24 ay (Hamburg Kuralları’nda 36 ay); taraflardan biri teminat verince karşılığını isteyebilir (cl. 9).',
+        fields: [['cause', 'Cause', { type: 'select', options: ICA_CAUSES, rerender: true }],
+            ['andResp', '“and responsibility” added to NYPE cl. 8', { type: 'select', options: { no: 'No', yes: 'Yes' } }],
+            ['proof', 'Proven link', { type: 'select', options: { none: '—', handlingToUnsea: 'Owners prove unseaworthiness caused by cargo handling', unseaToHandling: 'Charterers prove handling failure caused by unseaworthiness' } }],
+            ['evidence', 'Clear evidence of act / neglect (8c, 8d)', { type: 'select', options: { '': '— none', owners: 'by owners', charterers: 'by charterers' } }],
+            ['amount', 'Claim settled (USD)'], ['delivered', 'Cargo delivered (or should have been)', { type: 'date' }],
+            ['hamburg', 'Hamburg Rules apply', { type: 'select', options: { no: 'No', yes: 'Yes' } }]],
+        compute(v) {
+            const r = icaApportion({ cause: v.cause, andResponsibility: v.andResp === 'yes', handlingCausedUnseaworthiness: v.proof === 'handlingToUnsea',
+                unseaworthinessCausedHandling: v.proof === 'unseaToHandling', evidence: v.evidence, amount: v.amount, delivered: v.delivered, hamburg: v.hamburg === 'yes' });
+            return [
+                ['Owners', `${r.ownersPct}%${v.amount !== null ? ` · ${usd(r.owners, 2)}` : ''}`, { strong: true }],
+                ['Charterers', `${r.chartsPct}%${v.amount !== null ? ` · ${usd(r.charterers, 2)}` : ''}`, { strong: true }],
+                ['Rule', r.why, { cls: 'wrap' }],
+                r.notifyBy ? ['Notify the other party by', fmtDate(r.notifyBy), { strong: true }] : null,
+            ];
+        },
+    },
 ];
 
 function unitOptions(group) {
@@ -374,6 +428,8 @@ function card(def) {
             if (!(String(v[k]) in opts)) v[k] = Object.keys(opts)[k === 'to' ? 1 : 0] ?? null;
             control = h('select', { on: { change: (e) => { v[k] = e.target.value; save(); if (o.rerender) drawInputs(); update(); } } },
                 Object.entries(opts).map(([val, text]) => h('option', { value: val, selected: String(v[k]) === val }, text)));
+        } else if (o.type === 'date') {
+            control = h('input', { type: 'date', value: v[k] ?? '', on: { input: (e) => { v[k] = e.target.value || null; save(); update(); } } });
         } else if (o.type === 'datetime') {
             control = h('input', { type: 'datetime-local', value: v[k] ?? '', on: { input: (e) => { v[k] = e.target.value ? e.target.value.replace('T', ' ') : null; save(); update(); } } });
         } else {
@@ -407,7 +463,7 @@ function card(def) {
     }
 
     const build = () => {
-        const inputRows = def.fields.filter(([k]) => v[k] !== null && v[k] !== '').map(([k, label, o = {}]) => [label, o.type === 'datetime' ? fmtStamp(v[k]) : o.type ? String(v[k]) : fmt(v[k], null)]);
+        const inputRows = def.fields.filter(([k]) => v[k] !== null && v[k] !== '').map(([k, label, o = {}]) => [label, o.type === 'datetime' ? fmtStamp(v[k]) : o.type === 'date' ? fmtDate(v[k]) : o.type ? String(v[k]) : fmt(v[k], null)]);
         const text = [def.title, '', ...inputRows.map(([a, b]) => `${a}: ${b}`), '', ...rows.map(([a, b]) => `${a}: ${b}`), '', DISCLAIMER].join('\n');
         return { text, report: { title: def.title, file: `Calculator - ${def.title}`, subtitle: 'Chartering calculator', note: DISCLAIMER,
             blocks: [{ title: 'Inputs', kv: inputRows }, { title: 'Results', kv: rows.map(([a, b]) => [a, b]) }] } };

@@ -5,7 +5,9 @@ import { get, post, put, del } from '../core/api.js';
 import { modal, confirmBox, segmented } from '../core/ui.js';
 import { Grid, resetLayoutButton } from '../core/grid.js';
 import { live } from '../core/live.js';
-import { parseRecap, defaultTasks, noticeDates, fillTemplate, fixtureVars, freightInvoice, FIXTURE_STATUS, FIXTURE_TYPES, DEFAULT_TEMPLATES, isTc } from '../chartering/engine/fixtures.js';
+import { parseRecap, defaultTasks, noticeDates, fillTemplate, fixtureVars, freightInvoice, laytimeFromFixture, freightDueDates, redeliveryNotices, FIXTURE_STATUS, FIXTURE_TYPES, DEFAULT_TEMPLATES, isTc } from '../chartering/engine/fixtures.js';
+import { START_RULES } from '../chartering/engine/laytime.js';
+import { negotiationSection, blCheckSection, certsSection } from './ch-fixture-extra.js';
 import { LAYTIME_TERMS, CP_FORMS } from '../chartering/engine/positions.js';
 import { blankLaytime, blankPort } from '../chartering/engine/laytime.js';
 import { fmt, usd, specForm, dueBadge, copyReport, exportReport } from '../chartering/ui.js';
@@ -18,7 +20,8 @@ const PIPE = [
     ['post', 'Post voyage', 'cat-purple', ['completed', 'accounts']],
     ['closed', 'Closed / failed', 'cat-gray', ['closed', 'failed']],
 ];
-const KIND = { laycan: 'Laycan', cancelling: 'Cancelling', notice: 'ETA notice', freight: 'Freight', time_bar: 'Time bar', task: 'Task', hire: 'Hire', redelivery: 'Redelivery', drydock: 'Dry dock' };
+const KIND = { laycan: 'Laycan', cancelling: 'Cancelling', notice: 'ETA notice', subs: 'Subjects', freight: 'Freight', time_bar: 'Time bar', task: 'Task', hire: 'Hire', redelivery: 'Redelivery',
+    redel_notice: 'Redelivery notice', cert: 'Certificate', drydock: 'Dry dock' };
 
 const FORM = [
     ['vessel', 'Vessel', 'text'], ['type', 'Type', 'select', FIXTURE_TYPES], ['status', 'Status', 'select', FIXTURE_STATUS], ['fixture_date', 'Fixture date', 'date'],
@@ -33,6 +36,19 @@ const FORM = [
     ['bl_qty', 'B/L quantity (t)', 'small'], ['freight_due', 'Freight due', 'date'], ['completed_on', 'Voyage completed', 'date'], ['time_bar_days', 'Claim time bar (days)', 'int'],
     ['notice_days', 'ETA notices (days before)', 'text'], ['notes', 'Notes', 'text', { span: 3 }],
 ];
+
+// Recap clauses kept on the fixture (parsed from the recap; FLR3692 / fixture-step notes / Check Before Fixing)
+const FORM2 = [
+    ['disponent_owners', 'Disponent owners', 'text'], ['managers', 'Managers', 'text'], ['freight_collectors', 'Freight collectors', 'text'], ['guarantor', 'Performance guarantor', 'text'],
+    ['subs_due', 'Subjects to be lifted by', 'date'], ['bl_date', 'B/Ls signed & released', 'date'], ['freight_first_pct', 'Freight 1st instalment %', 'small'], ['freight_bd', '… within banking days of B/L', 'int'],
+    ['freight_balance_days', 'Balance within days of completion', 'int'], ['bank_details', 'Owners’ bank details (freight)', 'text', { span: 3 }],
+    ['hire_days', 'Hire payable every (days)', 'int'], ['hire_bd', 'Hire within banking days', 'int'], ['cve_month', 'C/V/E per 30 days', 'num'], ['ilohc', 'ILOHC lumpsum', 'num'],
+    ['redel_date', 'Expected redelivery (TC)', 'date'], ['redel_notices', 'Redelivery notices', 'text', { span: 3 }],
+    ['start_rule', 'Laytime commencement', 'select', { '': '—', ...Object.fromEntries(Object.entries(START_RULES).map(([k, v]) => [k, v.label])) }], ['nor_hours', 'NOR office hours', 'text'],
+    ['nor_after_laycan', 'NOR not before laydays', 'bool'], ['docs_hrs', 'Docs free time after completion (h)', 'small'],
+    ['load_except', 'Excepted periods — load', 'text', { span: 2 }], ['disch_except', 'Excepted periods — disch', 'text', { span: 2 }], ['detention', 'Detention USD/day', 'num'],
+];
+const ALL_FORM = [...FORM, ...FORM2];
 
 export async function mount(el, ctx, param) {
     el.lang = 'en';
@@ -109,7 +125,8 @@ export async function mount(el, ctx, param) {
                     preview.replaceChildren(
                         h('div.toolbar', f._missing.length ? h('span.ch-badge.red', `missing: ${f._missing.join(', ')}`) : h('span.ch-badge.green', 'main fields found'),
                             f._guessed.length ? h('span.ch-badge.amber', `check: ${f._guessed.join(', ')}`) : null, h('span.dim', 'Sarı alanlar tahmin, kırmızılar okunamadı — kaydetmeden önce düzeltin.')),
-                        specForm(f, FORM, { guessed: [...f._guessed, ...f._missing] }));
+                        specForm(f, FORM, { guessed: [...f._guessed, ...f._missing] }),
+                        h('h4', 'Recap clauses & payment'), specForm(f, FORM2, { guessed: f._guessed }));
                 } } }, 'Parse ↓')),
                 preview),
             actions: [{ label: 'Cancel' }, { label: 'Create fixture + checklist', primary: true, onClick: async () => {
@@ -121,7 +138,7 @@ export async function mount(el, ctx, param) {
     }
 
     async function createFixture(data) {
-        const payload = Object.fromEntries(FORM.map(([k]) => [k, data[k] ?? null]).concat([['recap_text', data.recap_text ?? null], ['estimate_id', data.estimate_id ?? null]]).filter(([, v]) => v !== null));
+        const payload = Object.fromEntries(ALL_FORM.map(([k]) => [k, data[k] ?? null]).concat([['recap_text', data.recap_text ?? null], ['estimate_id', data.estimate_id ?? null]]).filter(([, v]) => v !== null));
         const row = await post('chartering/fixtures', payload);
         await post(`chartering/fixtures/${row.id}/tasks`, { tasks: defaultTasks({ ...data, ...row }) });
         await load();
@@ -162,15 +179,32 @@ export async function mount(el, ctx, param) {
         const docs = h('div.ch-chips', [...new Set([...Object.keys(DEFAULT_TEMPLATES), ...templates.map((t) => t.key)])].map((key) =>
             h('button.tiny', { type: 'button', on: { click: () => documentDialog(w, key) } }, templateOf(key).name ?? key)));
         const inv = !isTc(w) ? freightInvoice(w) : null;
+        const due = freightDueDates(w);
+        const redel = isTc(w) ? redeliveryNotices(w) : [];
+        // Section edits are saved at once (merged when several arrive together); the form below still needs "Save fixture"
+        let pending = {};
+        const flush = debounce(async () => { const patch = pending; pending = {}; await put(`chartering/fixtures/${f.id}`, patch); }, 300);
+        const persistNow = async (patch) => { Object.assign(pending, patch); flush(); };
+        const sec = (title, open, ...content) => h('details.ch-fx-sec', { open }, h('summary', h('b', title)), ...content);
         // Buttons that open another tab close the card first
         const go = (fn) => () => { card?.close(); fn(); };
         let card;
         card = modal({ title: `${f.ref} — ${f.vessel ?? ''}`, width: 1250,
             body: h('div.ch-fx',
                 h('section', h('h4', 'Fixture'), specForm(w, FORM, { cols: 4 }), f.recap_text ? h('details', h('summary', 'Recap text'), h('pre.ch-src', f.recap_text)) : null),
+                sec('Recap clauses & payment', FORM2.some(([k]) => w[k] !== null && w[k] !== undefined && w[k] !== ''), specForm(w, FORM2, { cols: 4 }),
+                    w.bank_details ? h('p.dim', 'Banka bilgisi sonradan değişirse (özellikle e-postayla) ödemeden önce telefonla teyit edin — BIMCO Check Before Fixing, “cyber fraud”.') : null),
+                sec('Negotiation — offers, counters, recap', ['negotiating', 'subs'].includes(w.status ?? 'negotiating'), negotiationSection(w, { canEdit, persist: persistNow })),
+                sec('Vessel certificates, class & P&I', false, certsSection(w, { canEdit, persist: persistNow })),
+                !isTc(w) ? sec('B/L check', ['loading', 'passage'].includes(w.status), blCheckSection(w, { canEdit, persist: persistNow })) : null,
                 h('section', h('h4', 'Post-fixture checklist'), tasksBox),
                 h('div.ch-twin',
-                    h('section', h('h4', 'Notices'), notices.length ? h('ul.ch-news', notices.map((x) => h('li', `${x.days}-day ETA notice `, h('span.dim', fmtDate(x.date)), ' ', dueBadge(x.date)))) : h('p.dim', 'ETA veya laycan girilince hesaplanır.'),
+                    h('section', h('h4', 'Notices'),
+                        w.status === 'subs' && w.subs_due ? h('p', 'Subjects to be lifted by ', h('b', fmtDate(w.subs_due)), ' ', dueBadge(w.subs_due), w.subjects ? h('small.dim', ` — ${w.subjects}`) : null) : null,
+                        due.first ? h('p', `Freight ${inv && inv.firstPct < 100 ? `${inv.firstPct}% (${usd(inv.first, 2)}) ` : ''}due `, h('b', fmtDate(due.first)), ' ', dueBadge(due.first), h('small.dim', ` (${w.freight_bd} banking days after B/L ${fmtDate(w.bl_date)})`)) : null,
+                        due.balance ? h('p', `Balance${inv && inv.firstPct < 100 ? ` (${usd(inv.balance, 2)})` : ''} / demurrage due `, h('b', fmtDate(due.balance)), ' ', dueBadge(due.balance)) : null,
+                        redel.length ? h('ul.ch-news', redel.map((x) => h('li', `${x.days}-day ${x.kind} redelivery notice `, h('span.dim', fmtDate(x.date)), ' ', dueBadge(x.date)))) : null,
+                        notices.length ? h('ul.ch-news', notices.map((x) => h('li', `${x.days}-day ETA notice `, h('span.dim', fmtDate(x.date)), ' ', dueBadge(x.date)))) : h('p.dim', 'ETA veya laycan girilince hesaplanır.'),
                         inv ? h('p', `Freight ${usd(inv.gross, 2)} − address ${usd(inv.address, 2)}${inv.deadfreight ? ` + deadfreight ${usd(inv.deadfreight, 2)}` : ''} = `, h('b', usd(inv.net, 2)), h('small.dim', ` (B/L qty ${w.bl_qty ? fmt(w.bl_qty, 0) : 'not entered — CP qty used'})`)) : null),
                     h('section', h('h4', 'Documents'), docs, h('p.dim', 'Şablonlar fixture bilgileriyle doldurulur; düzenleyip kopyalayın veya PDF alın.'),
                         h('h4', 'Linked'), h('div.ch-chips',
@@ -187,7 +221,9 @@ export async function mount(el, ctx, param) {
                 } } : null,
                 { label: 'Close' },
                 canEdit ? { label: 'Save fixture', primary: true, onClick: async () => {
-                    await put(`chartering/fixtures/${f.id}`, Object.fromEntries(FORM.map(([k]) => [k, w[k] ?? null])));
+                    if ((f.bank_details ?? '') && (w.bank_details ?? '') !== (f.bank_details ?? '')
+                        && !(await confirmBox('Owners’ bank details changed. Did you confirm the new account by phone with a known contact? (Check Before Fixing: payment fraud often starts with an e-mail asking to pay a different account.)', { yes: 'Confirmed — save' }))) return false;
+                    await put(`chartering/fixtures/${f.id}`, Object.fromEntries(ALL_FORM.map(([k]) => [k, w[k] ?? null])));
                     toast('Fixture kaydedildi.');
                     load();
                 } } : null,
@@ -200,7 +236,9 @@ export async function mount(el, ctx, param) {
         c.vessel.name = f.vessel ?? '';
         Object.assign(c.cp, { cpDate: f.cp_date ?? '', form: f.cp_form ?? '', owners: f.owners ?? '', charterers: f.charterers ?? '', cargo: [f.qty && `${fmt(f.qty, 0)} mt`, f.cargo].filter(Boolean).join(' '),
             demRate: f.dem ?? null, desRate: f.des ?? null });
-        const port = (kind, name, rate, terms) => ({ ...blankPort(kind), name: name ?? '', qty: f.bl_qty ?? f.qty ?? null, rate: rate ?? null, terms: terms || 'SHINC' });
+        const lt = laytimeFromFixture(f);
+        Object.assign(c.cp, lt.cp);
+        const port = (kind, name, rate, terms) => ({ ...blankPort(kind), name: name ?? '', qty: f.bl_qty ?? f.qty ?? null, rate: rate ?? null, terms: terms || 'SHINC', ...lt.port(kind) });
         c.ports = [port('load', f.load_port, f.load_rate, f.load_terms), port('disch', f.disch_port, f.disch_rate, f.disch_terms)];
         c.claim = { status: 'draft', timeBarDays: f.time_bar_days ?? null, notes: '' };
         ctx.open('ch-laytime', { calc: c });

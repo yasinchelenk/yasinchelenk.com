@@ -135,6 +135,9 @@ function panel_migrations(): array
         127 => 'chartering_migrate_127',
         // Chartering · Fleet: liman çağrıları, acenteler ve iletişim kaydı
         128 => 'chartering_migrate_128',
+        // Chartering · Fixtures: taraflar, subjects bitişi, navlun / hire ödeme şartları, recap'ten laytime maddeleri,
+        // B/L kontrolü, sertifikalar ve teklif–karşı teklif kaydı
+        129 => 'chartering_migrate_129',
     ];
 }
 

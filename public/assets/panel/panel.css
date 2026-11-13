@@ -1501,3 +1501,16 @@ input[data-date].is-invalid { border-color: var(--red); background-color: #fdece
 .cal-foot { display: flex; align-items: center; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--row-line); }
 .cal-link { color: var(--accent) !important; font-weight: 600; padding: 3px 6px !important; }
 .cal-hint { flex: 1; text-align: center; color: var(--dim); font-size: 11px; }
+
+/* Knowledge → Reference: stacked tables */
+.ch-ref h4 { margin: 6px 0 4px; }
+.ch-ref .ch-table td:first-child { white-space: nowrap; }
+
+/* Fixtures card: collapsible sections from the course material (negotiation log, certificates, B/L check) */
+details.ch-fx-sec { border: 1px solid var(--line, #d7dfe8); border-radius: 8px; padding: 6px 10px; margin: 8px 0; background: #fff; }
+details.ch-fx-sec > summary { cursor: pointer; padding: 2px 0; }
+details.ch-fx-sec[open] > summary { margin-bottom: 6px; }
+.ch-neg-add { display: grid; gap: 6px; margin-top: 8px; }
+.ch-neg-add textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+tr.is-current > td { background: #fff8e1; }
+dl.ch-kv dd.wrap { white-space: normal; text-align: left; font-variant-numeric: normal; grid-column: 1 / -1; padding-top: 0; }

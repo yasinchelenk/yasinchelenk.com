@@ -2,7 +2,7 @@
 //  · TC relet   — the ship is time-chartered IN (Head CP) and time-chartered OUT (Sub CP).
 //  · Cargo relet — a cargo is taken at one freight (Head CP) and sub-let to another ship at a lower freight (Sub CP).
 import { n, has, sum } from './units.js';
-import { TERMS_FACTORS } from './voyage.js';
+import { TERMS_FACTORS, normalizeTerms } from './voyage.js';
 
 // ------------------------------------------------------------------ TC relet
 
@@ -113,7 +113,7 @@ export function blankCargoRelet() {
 function allowed(qty, cp) {
     const rate = n(cp?.rate);
     if (!(rate > 0)) return null;
-    return n(qty) / rate * (TERMS_FACTORS[cp.terms] ?? 1) + n(cp.turnHrs) / 24;
+    return n(qty) / rate * (TERMS_FACTORS[normalizeTerms(cp.terms)] ?? 1) + n(cp.turnHrs) / 24;
 }
 
 /** Demurrage (+) or despatch (−) amount for time used vs allowed. */
