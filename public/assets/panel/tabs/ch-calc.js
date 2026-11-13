@@ -262,7 +262,7 @@ const CARDS = [
             return [
                 ['Owners', `${r.ownersPct}%${v.amount !== null ? ` · ${usd(r.owners, 2)}` : ''}`, { strong: true }],
                 ['Charterers', `${r.chartsPct}%${v.amount !== null ? ` · ${usd(r.charterers, 2)}` : ''}`, { strong: true }],
-                ['Why', r.why],
+                ['Rule', r.why, { cls: 'wrap' }],
                 r.notifyBy ? ['Notify the other party by', fmtDate(r.notifyBy), { strong: true }] : null,
             ];
         },

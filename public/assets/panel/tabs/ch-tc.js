@@ -41,7 +41,8 @@ export async function mount(el, ctx, param) {
         const f = param.fixture;
         kind = 'hire';
         calc = { ...blank.hire(), name: `${f.ref ?? ''} ${f.vessel ?? ''} hire`.trim(), vessel: f.vessel ?? '', fixtureId: f.id ?? null, rate: f.hire_rate ?? null,
-            addressPct: f.address_pct ?? 3.75, brokeragePct: f.brokerage_pct ?? 1.25, ballastBonus: f.ballast_bonus ?? null, delivery: f.laycan_from ? `${f.laycan_from} 00:00` : '' };
+            addressPct: f.address_pct ?? 3.75, brokeragePct: f.brokerage_pct ?? 1.25, ballastBonus: f.ballast_bonus ?? null, delivery: f.laycan_from ? `${f.laycan_from} 00:00` : '',
+            redelivery: f.redel_date ? `${f.redel_date} 00:00` : '', periodDays: f.hire_days ?? 15, cvePerMonth: f.cve_month ?? null, ilohc: f.ilohc ?? null };
         ids.hire = null;
     }
 

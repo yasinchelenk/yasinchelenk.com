@@ -175,3 +175,38 @@ test('ICA 1996 (2011) apportionment — FLR3692 Module 3 table 2', () => {
     eq([o.owners, o.charterers, o.notifyBy], [40000, 40000, '2028-03-15'], '8(d) 50/50; notify within 24 months');
     eq(icaApportion({ cause: 'other', delivered: '2026-03-15', hamburg: true }).notifyBy, '2029-03-15', '36 months under Hamburg Rules');
 });
+
+// ---------------------------------------------------------------- Negotiation log, payment terms
+import { offerValidity, offerClauses, mergeTerms, freightInvoice, freightDueDates, redeliveryNotices, addBankingDays } from '../engine/fixtures.js';
+
+test('Offer validity: local time, other time zones, "within", bank closing', () => {
+    eq(offerValidity('PLEASE FIND BELOW OUR FIRM OFFER VALID TILL 15:00 ISTANBUL TIME TODAY.', '2015-12-10 11:20')?.until, '2015-12-10 15:00', 'Istanbul time');
+    eq(offerValidity('Owner offer firm for chrtrs reply latest by 17:00 HONGKONG TIME ,TODAY', '2014-11-19 09:00')?.until, '2014-11-19 11:00', '17:00 Hong Kong = 11:00 Istanbul (Nov 2014, UTC+2)');
+    eq(offerValidity('Many thnks for the owners firm offer which we Accepted, Except as foll, to be replied within 1 hour max.', '2015-12-10 15:30')?.until, '2015-12-10 16:30', 'within 1 hour');
+    eq(offerValidity('SUB STEM APPROVAL TO BE LIFTED LATEST CLOSING OF BANK LONDON TIME TODAY. Plse reply', '2015-12-10 12:00')?.until, '2015-12-10 19:00', 'bank closing London ≈ 17:00 = 19:00 Istanbul');
+    eq(offerValidity('no deadline here', '2015-12-10 12:00'), null, 'none');
+});
+
+test('Offer / counter / counter → current main terms ("accepted except" lists only changed clauses)', () => {
+    const offer = 'FIRM OFFER VALID TILL 15:00 ISTANBUL TIME TODAY.\n7 - LAYCAN: 20-25 DEC 2015\n10 - DEMURRAGE: USD 6500 - PDPR / DESPATCH HALF DEMMURAGE BENDS\n12 - FREIGHT RATE: USD 45.00 PMT FIO\n26 - NOR TO BE TENDERED ONLY WITHIN OFFICE HOURS. EVEN BEFORE LAYDAYS.';
+    const c1 = 'Accepted, Except as foll:\n7 - LAYCAN: 22-25 DEC 2015\n10 - DEMURRAGE: USD 3000 - PDPR / DESPATCH HALF DEMMURAGE BENDS\n12 - FREIGHT RATE: USD 39.50 PMT FIO\n26 - NOR NOT TO BE TENDERED BEFORE LAYDAYS';
+    const c2 = 'Accepted, Except as foll:\n10 - DEMURRAGE: USD 6400 - PDPR / DESPATCH HALF DEMMURAGE BENDS\n12 - FREIGHT RATE: USD 44.50 PMT FIO';
+    eq([...offerClauses(offer).keys()], ['7', '10', '12', '26'], 'numbered clauses');
+    const m = mergeTerms([{ at: '2015-12-10 11:20', kind: 'offer', text: offer }, { at: '2015-12-10 14:30', kind: 'counter', text: c1 }, { at: '2015-12-10 15:10', kind: 'counter', text: c2 }]);
+    eq(m.terms.map((t) => [t.no, t.round]), [['7', 1], ['10', 2], ['12', 2], ['26', 1]], 'latest version of every clause and the round it came from');
+    eq(m.terms.find((t) => t.no === '12').text, 'FREIGHT RATE: USD 44.50 PMT FIO', 'freight as per the last counter');
+    eq(m.changes, [['7', '10', '12', '26'], ['7', '10', '12', '26'], ['10', '12']], 'clauses changed by each round');
+});
+
+test('Freight 95% / balance, banking days; redelivery notices', () => {
+    const f = { qty: 4000, bl_qty: 4000, freight: 42.5, address_pct: 2.5, freight_first_pct: 95, freight_bd: 3, bl_date: '2015-12-24', completed_on: '2016-01-04', freight_balance_days: 10 };
+    const inv = freightInvoice(f);
+    near(inv.net, 170000 * 0.975, 'net freight', 1e-6);
+    near(inv.first, inv.net * 0.95, '95% instalment', 1e-6);
+    near(inv.first + inv.balance, inv.net, 'first + balance = net', 1e-6);
+    eq(addBankingDays('2015-12-24', 3), '2015-12-29', 'Thu + 3 banking days (Fri, Mon, Tue) = Tue 29 Dec');
+    eq(freightDueDates(f), { first: '2015-12-29', balance: '2016-01-14' }, 'payment dates');
+    const r = redeliveryNotices({ redel_date: '2015-07-10', redel_notices: '21/14/10/7 approx · 5/3/2/1 definite' });
+    eq(r.map((x) => `${x.days}${x.kind[0]}`), ['21a', '14a', '10a', '7a', '5d', '3d', '2d', '1d'], 'approximate then definite notices');
+    eq(r[0].date, '2015-06-19', '21 days before');
+});

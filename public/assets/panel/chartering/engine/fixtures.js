@@ -217,8 +217,12 @@ export function defaultTasks(f) {
     const t = (title, due) => ({ title, due, responsible: '', status: 'todo', note: '' });
     if (isTc(f)) {
         return [
+            t('Counterparty checked (references, sanctions screening, BIMCO / credit)', F),
+            t(`Subjects lifted${f.subjects ? ` (${String(f.subjects).slice(0, 60)})` : ''}`, f.subs_due || F),
             t('Charter party / recap checked and countersigned', addDays(F, 2)),
+            t('Vessel certificates received and in date (Registry, Class, P&I, DOC, SMC, ISSC)', addDays(F, 1)),
             t('Delivery notices sent (approximate / definite)', addDays(L, -7)),
+            t('Owners’ bank details confirmed by phone (not only by e-mail)', addDays(L, -1)),
             t('On-hire bunker & condition survey arranged', addDays(L, -2)),
             t('Instructions to master incl. CP summary', addDays(F, 1)),
             t('First hire statement and hire payment', L),
@@ -232,7 +236,10 @@ export function defaultTasks(f) {
         ];
     }
     return [
-        t('Recap / CP checked, subjects lifted', addDays(F, 1)),
+        t('Counterparty checked (references, sanctions screening, BIMCO / credit)', F),
+        t(`Subjects lifted${f.subjects ? ` (${String(f.subjects).slice(0, 60)})` : ''}`, f.subs_due || addDays(F, 1)),
+        t('Recap / CP checked', addDays(F, 1)),
+        t('Vessel certificates sent / checked (Registry, Class, P&I, CSR, DOC, SMC, ISSC)', addDays(F, 1)),
         t('Voyage instructions sent to master', addDays(F, 1)),
         t('CP summary (laytime, NOR, cargo, bunkers) sent to master', addDays(F, 1)),
         t('Agent nominated — load port', addDays(L, -7)),
@@ -244,8 +251,10 @@ export function defaultTasks(f) {
         t('ETA notices sent per CP', addDays(L, -7)),
         t('NOR tendered / accepted at load port', L),
         t('SOF collected — load port', addDays(L, 5)),
+        t('Letter of authority to agents to sign B/Ls on master’s behalf', addDays(L, -1)),
         t('B/L draft approved', addDays(L, 3)),
-        t('B/L (or LOI) checked against CP / mate’s receipt', addDays(L, 4)),
+        t('B/L (or LOI) checked against CP / mate’s receipt — B/L check', addDays(L, 4)),
+        t('Owners’ bank details for freight confirmed by phone (not only by e-mail)', addDays(L, 3)),
         t('Freight invoice sent', addDays(L, 5)),
         t('Freight received', f.freight_due || addDays(L, 7)),
         t('NOR / SOF collected — discharge port', null),
@@ -281,7 +290,39 @@ export function freightInvoice(f) {
     const minQty = has(f.qty) ? n(f.qty) * (1 - n(f.tol_pct) / 100) : null;
     const deadfreight = f.freight_type !== 'lumpsum' && has(f.bl_qty) && minQty !== null && n(f.bl_qty) < minQty ? (minQty - n(f.bl_qty)) * n(f.freight) : 0;
     const brokerage = gross * n(f.brokerage_pct) / 100;
-    return { qty, gross, address, brokerage, deadfreight, net: gross - address + deadfreight * (1 - n(f.address_pct) / 100) };
+    const net = gross - address + deadfreight * (1 - n(f.address_pct) / 100);
+    // "95% within 3 banking days after signing and releasing B/Ls, balance after completion" (fixture steps notes)
+    const firstPct = has(f.freight_first_pct) && n(f.freight_first_pct) > 0 && n(f.freight_first_pct) < 100 ? n(f.freight_first_pct) : 100;
+    return { qty, gross, address, brokerage, deadfreight, net, firstPct, first: net * firstPct / 100, balance: net * (100 - firstPct) / 100 };
+}
+
+/** Adds banking days (Monday–Friday) to 'YYYY-MM-DD'. */
+export function addBankingDays(date, k) {
+    if (!date) return null;
+    const d = new Date(date + 'T00:00:00Z');
+    let left = Math.max(0, Math.round(n(k)));
+    while (left > 0) {
+        d.setUTCDate(d.getUTCDate() + 1);
+        if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) left--;
+    }
+    return iso(d);
+}
+
+/** Payment dates from the recap terms: first freight instalment after the B/L date, balance after completion. */
+export function freightDueDates(f) {
+    return {
+        first: f.bl_date && has(f.freight_bd) ? addBankingDays(f.bl_date, f.freight_bd) : null,
+        balance: f.completed_on && has(f.freight_balance_days) ? addDays(f.completed_on, n(f.freight_balance_days)) : null,
+    };
+}
+
+/** "21/14/10/7 approx · 5/3/2/1 definite" + expected redelivery date → notice dates. */
+export function redeliveryNotices(f) {
+    if (!f.redel_date || !f.redel_notices) return [];
+    const [approx, definite] = String(f.redel_notices).split(/approx\w*/i);
+    const list = (txt, kind) => String(txt ?? '').split(/[^\d]+/).map(Number).filter((x) => x > 0).map((d) => ({ days: d, kind, date: addDays(f.redel_date, -d) }));
+    const out = definite !== undefined ? [...list(approx, 'approx'), ...list(definite, 'definite')] : list(f.redel_notices, '');
+    return out.sort((a, b) => b.days - a.days);
 }
 
 /** Variables available in every template. */
@@ -302,6 +343,9 @@ export function fixtureVars(f, { user = '', today = new Date() } = {}) {
         brokerage: money(inv.brokerage), deadfreight: inv.deadfreight ? money(inv.deadfreight) : '0.00', net_freight: money(inv.net),
         dem: has(f.dem) ? `USD ${money(n(f.dem))} per day pro rata` : '', des: has(f.des) ? `USD ${money(n(f.des))} per day pro rata` : '',
         hire: has(f.hire_rate) ? `USD ${money(n(f.hire_rate))} per day pro rata` : '', delivery: f.delivery ?? '', redelivery: f.redelivery ?? '',
+        freight_first_pct: inv.firstPct < 100 ? `${inv.firstPct}%` : '100%', freight_first: money(inv.first), freight_balance: money(inv.balance),
+        bl_date: longDate(f.bl_date), bank_details: f.bank_details ?? '', hire_days: f.hire_days ?? 15, redel_date: longDate(f.redel_date),
+        hire_due: longDate(f.hire_due_date), hire_amount: f.hire_amount ?? '',
         today: today.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }), user,
     };
 }
@@ -398,6 +442,71 @@ Kindly arrange settlement or let us have your comments within the time stipulate
 Best regards,
 {user}`,
     },
+    anti_technicality: {
+        name: 'Anti-technicality notice (late hire)',
+        subject: 'M/V {vessel} — CP dated {cp_date} — notice under the anti-technicality clause',
+        body: `To: {charterers}
+
+M/V {vessel} — Charter party dated {cp_date} ({cp_form})
+
+Hire of USD {hire_amount} due on {hire_due} under the charter party has not been received by Owners.
+
+In accordance with the anti-technicality clause of the charter party, Owners hereby give notice that unless the
+outstanding hire is received in Owners' nominated account within ..... clear banking days of receipt of this notice,
+Owners will be entitled to withdraw the vessel from the service of Charterers without further notice, and without
+prejudice to any other claims Owners may have against Charterers.
+
+This notice is given strictly in accordance with the charter party terms; all Owners' rights are reserved.
+
+For and on behalf of Owners
+{owners}
+{user}`,
+    },
+    redelivery_notice: {
+        name: 'Redelivery notice (TC)',
+        subject: 'M/V {vessel} — CP dated {cp_date} — redelivery notice',
+        body: `To: {owners}
+
+M/V {vessel} — Charter party dated {cp_date}
+
+Charterers hereby give ..... days' (approximate / definite) notice of redelivery.
+Expected redelivery: {redel_date} at {redelivery}.
+Bunkers on redelivery will be as per charter party.
+
+Best regards,
+{charterers}
+{user}`,
+    },
+    letter_of_authority: {
+        name: 'Letter of authority — agents to sign B/Ls',
+        subject: 'M/V {vessel} — authority to sign bills of lading — {load_port}',
+        body: `To: Agents at {load_port}
+
+M/V {vessel} — voyage {load_port} / {disch_port} — cargo {cargo}
+
+I, the undersigned Master of M/V {vessel}, hereby authorise you to sign and release on my behalf bills of lading for the
+cargo loaded at {load_port}, strictly in conformity with the mate's receipts, and on the following conditions:
+1. Quantity, description, apparent order and condition and any remarks exactly as in the mate's receipts.
+2. Date of the bills of lading = the date loading of the cargo described was completed.
+3. Bills of lading on the agreed form incorporating the charter party dated {cp_date}; freight payable as per charter party.
+4. Number of originals: ..... ; one original to be placed in the ship's bag only if Owners agree.
+5. No bills of lading to be released without Owners' prior approval of the draft, and copies to be sent to Master and Owners.
+
+Master M/V {vessel}`,
+    },
+    counter_offer: {
+        name: 'Counter (“accepted / except”)',
+        subject: 'M/V {vessel} / {charterers} — counter',
+        body: `Many thanks for your offer which we accept except as follows, for reply within ..... (Istanbul time):
+
+..  - 
+..  - 
+
+All other terms / conditions as per your last.
+
+Best regards,
+{user}`,
+    },
     loi_checklist: {
         name: 'LOI request checklist',
         subject: 'M/V {vessel} — LOI request — checklist',
@@ -413,3 +522,158 @@ Best regards,
 [ ] Copy filed with fixture {ref}`,
     },
 };
+
+// ---------------------------------------------------------------- Negotiation log (offer / counter / recap)
+// FLR3692 Module 1: an offer lapses at the time stated; a counter-offer kills the previous offer; keep records of
+// every exchange (§7.3). The fixture-step notes: "accepted except as follows" counters list only the changed clauses.
+
+export const NEG_KINDS = {
+    indication: 'Firm indication', offer: 'Firm offer', counter: 'Counter (accepted / except)', recap: 'Main terms recap',
+    details: 'Details / proforma CP', lifted: 'Subjects lifted', lapsed: 'Lapsed / declined',
+};
+
+const CITY_TZ = [
+    [/istanbul|ist\b|turkish/, 'Europe/Istanbul'], [/london|ldn|uk\b|gmt|bst/, 'Europe/London'], [/hong\s*kong|hongkong|\bhk\b/, 'Asia/Hong_Kong'],
+    [/singapore|\bsing\b|\bspore\b/, 'Asia/Singapore'], [/athens|piraeus|greek|greece/, 'Europe/Athens'], [/new\s*york|\bny\b|\bedt\b|\best\b/, 'America/New_York'],
+    [/tokyo|japan|\bjst\b/, 'Asia/Tokyo'], [/shanghai|beijing|china/, 'Asia/Shanghai'], [/dubai|uae/, 'Asia/Dubai'], [/oslo|norway/, 'Europe/Oslo'],
+    [/copenhagen|denmark/, 'Europe/Copenhagen'], [/geneva|zurich|swiss/, 'Europe/Zurich'], [/hamburg|germany|\bcet\b|paris/, 'Europe/Berlin'],
+    [/moscow/, 'Europe/Moscow'], [/\butc\b/, 'UTC'],
+];
+
+const tzOffsetMin = (utcMs, tz) => {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+        .formatToParts(new Date(utcMs)).map((x) => [x.type, x.value]));
+    return (Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute) - Math.floor(utcMs / 60000) * 60000) / 60000;
+};
+/** Wall-clock 'YYYY-MM-DD HH:mm' in tz → UTC ms */
+export function zonedToUtc(stamp, tz) {
+    const m = String(stamp ?? '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})/);
+    if (!m) return null;
+    const guess = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+    let t = guess - tzOffsetMin(guess, tz) * 60000;
+    t = guess - tzOffsetMin(t, tz) * 60000;
+    return t;
+}
+/** UTC ms → wall-clock 'YYYY-MM-DD HH:mm' in tz */
+export function utcToZoned(ms, tz) {
+    const d = new Date(ms + tzOffsetMin(ms, tz) * 60000);
+    return d.toISOString().slice(0, 16).replace('T', ' ');
+}
+
+/**
+ * Reply deadline written in an offer: "valid till 15:00 Istanbul time today", "for reply latest by 17:00 HONGKONG TIME, TODAY",
+ * "to be replied within 1 hour", "reply within 30 mins", "latest closing of bank London time today" (≈ 17:00).
+ * `received` is the wall-clock time the message came in, in `localTz`. Returns { until (in localTz), label } or null.
+ */
+export function offerValidity(text, received, localTz = 'Europe/Istanbul') {
+    const s = String(text ?? '').replace(/\s+/g, ' ');
+    const at = zonedToUtc(received, localTz);
+    if (at === null) return null;
+    const rel = s.match(/\b(?:within|w\/i)\s*(\d{1,3})\s*(hours?|hrs?|h\b|minutes?|mins?)\b/i);
+    if (rel && /\b(?:repl|revert|answer|valid|counter|offer|plse|please)/i.test(s.slice(Math.max(0, rel.index - 60), rel.index + 10))) {
+        const mins = +rel[1] * (/^h/i.test(rel[2]) ? 60 : 1);
+        return { until: utcToZoned(at + mins * 60000, localTz), label: `${rel[1]} ${/^h/i.test(rel[2]) ? 'h' : 'min'} after receipt` };
+    }
+    const abs = s.match(/\b(?:valid|repl\w*|revert|answer|firm)\b[^.]{0,40}?\b(?:till|until|by|latest(?:\s+by)?)\s*(\d{1,2})[:.]?(\d{2})?\s*(?:hrs?\b|h\b)?\s*(am|pm)?\s*,?\s*([a-z][a-z .]{1,20}?)\s*time\b[\s,]*(today|tomorrow|tmrw)?/i);
+    const bank = s.match(/\bclosing\s+of\s+(?:the\s+)?banks?\s+([a-z ]{2,20}?)\s*time\b[\s,]*(today|tomorrow)?/i);
+    const m = abs ?? (bank ? [bank[0], '17', '00', null, bank[1], bank[2]] : null);
+    if (!m) return null;
+    let hh = +m[1];
+    if (m[3]?.toLowerCase() === 'pm' && hh < 12) hh += 12;
+    if (m[3]?.toLowerCase() === 'am' && hh === 12) hh = 0;
+    const tz = CITY_TZ.find(([re]) => re.test(m[4].toLowerCase()))?.[1] ?? localTz;
+    const dayThere = utcToZoned(at, tz).slice(0, 10);
+    let t = zonedToUtc(`${dayThere} ${String(hh).padStart(2, '0')}:${m[2] ?? '00'}`, tz);
+    if (/tom|tmrw/i.test(m[5] ?? '')) t += 86400000;
+    return { until: utcToZoned(t, localTz), label: `${String(hh).padStart(2, '0')}:${m[2] ?? '00'} ${m[4].trim()} time${bank && !abs ? ' (bank closing ≈ 17:00)' : ''}` };
+}
+
+/** Numbered clauses of an offer / counter / recap → Map(clause no → text). Unnumbered text is ignored. */
+export function offerClauses(text) {
+    const out = new Map();
+    let key = null;
+    for (const raw of String(text ?? '').replace(/\r/g, '').split('\n')) {
+        const m = raw.match(/^\s*(\d{1,2}(?:\.\d{1,2})?)\s*[-.)–:]+\s*(?=[A-Za-z"'(])(.*)$/);
+        if (m) {
+            key = String(Number(m[1]));
+            out.set(key, m[2].trim());
+        } else if (key && raw.trim() && !/^[+=*_-]{3,}/.test(raw.trim())) {
+            out.set(key, `${out.get(key)} ${raw.trim()}`.trim());
+        } else if (!raw.trim()) {
+            key = null;
+        }
+    }
+    return out;
+}
+
+/**
+ * Current main terms: the first offer's clauses with every later counter applied in order (a counter lists only the
+ * clauses it changes); a recap replaces everything. Returns { terms: [{no, text, round}], changes: [[no…] per round] }.
+ */
+export function mergeTerms(rounds = []) {
+    const list = [...rounds].sort((a, b) => String(a.at ?? '').localeCompare(String(b.at ?? '')));
+    const terms = new Map();
+    const changes = [];
+    list.forEach((r, i) => {
+        const cl = offerClauses(r.text);
+        if (r.kind === 'recap') terms.clear();
+        const changed = [];
+        for (const [no, text] of cl) {
+            if (terms.get(no)?.text !== text) changed.push(no);
+            terms.set(no, { no, text, round: i });
+        }
+        changes.push(changed);
+    });
+    const num = (k) => k.split('.').map(Number);
+    const sorted = [...terms.values()].sort((a, b) => { const [x1, x2 = 0] = num(a.no); const [y1, y2 = 0] = num(b.no); return x1 - y1 || x2 - y2; });
+    return { terms: sorted, changes, rounds: list };
+}
+
+// ---------------------------------------------------------------- B/L check and certificates
+// Bills of Lading (North of England P&I) "Signing bills of lading" §1–21 and BIMCO Check Before Fixing, B/L section.
+
+export const BL_CHECKS = [
+    ['mates', 'Agrees with the mate’s receipt(s): quantity, description, condition, remarks', '§3(a) — any remark on the mate’s receipt goes on the B/L'],
+    ['date', 'B/L date = date loading of this cargo was completed (no ante- or post-dating)', '§4(a) — a wrong date is fraud; refuse'],
+    ['ports', 'Load port correct; discharge port within the CP range', '§3(c)'],
+    ['qty', 'Quantity: shipper’s figures vs ship’s figures (draft survey / tally)', '§4(b) — see the difference below'],
+    ['condition', '“Apparent good order and condition” — or the damage / packaging remarks written on the face', '§4(b)(v)–(viii)'],
+    ['deck', 'Deck cargo stated on the face (“shipped on deck at shippers’ risk …”)', '§7 — liberty to carry on deck is not enough'],
+    ['freight', 'Freight: “payable as per CP” — “freight prepaid” only if paid or with owners’ consent', '§5, CBF'],
+    ['cp', 'Charter party incorporated (CP date stated on a CP form such as CONGENBILL)', '§6; FLR3692 Module 8 §2'],
+    ['consignee', 'Consignee / notify: “to order” or named (straight B/L) as agreed; sanctions screening of the parties', 'CBF; Bills of Lading “Sanctions”'],
+    ['set', 'Number of originals stated; one in the ship’s bag only if agreed', '§11, §14'],
+    ['authority', 'Agents hold the master’s written authority to sign; no blank B/Ls signed', '§19, appendix II'],
+    ['loi', 'Any LOI on the International Group standard wording, signed (and bank countersigned if agreed); club informed', '§17, appendix IV'],
+];
+
+/**
+ * Shipper's vs ship's quantity. Within the normal imprecision of a draft survey (default ±0.5%) → add ship's figures /
+ * "weight and quantity unknown"; beyond it → do not sign, refer to owners / P&I (Bills of Lading §4(b)(i)–(iv)).
+ */
+export function blQtyCheck(blQty, shipQty, tolPct = 0.5) {
+    if (!has(blQty) || !has(shipQty) || !n(shipQty)) return null;
+    const diff = n(blQty) - n(shipQty);
+    const pct = diff / n(shipQty) * 100;
+    const level = Math.abs(pct) <= tolPct ? 'ok' : Math.abs(pct) <= 2 * tolPct ? 'clause' : 'refuse';
+    const advice = { ok: 'Within the draft-survey margin — B/L can state shipper’s figures (add “shipper’s figures”).',
+        clause: 'Above the margin — write the ship’s figures alongside and / or “weight and quantity unknown”; inform owners.',
+        refuse: 'Too large to explain — master should not sign; refer to owners / P&I correspondent (no LOP instead of a correct figure).' }[level];
+    return { diff, pct, level, advice };
+}
+
+/** Certificates usually asked for in a counter-offer (fixture-step notes) and in ship operational checks (CBF). */
+export const CERT_DEFAULTS = ['Certificate of Registry', 'Class certificate', 'P&I certificate of entry', 'Continuous Synopsis Record (CSR)',
+    'ISM Document of Compliance (DOC)', 'ISM Safety Management Certificate (SMC)', 'ISSC (ISPS)', 'Load Line', 'IOPP', 'Safety Construction / Equipment / Radio', 'MLC'];
+
+/** Last day the vessel must be covered: TC redelivery, completion, or cancelling + 45 days as a rough voyage end. */
+export const employmentEnd = (f) => f.redel_date || f.completed_on || (f.laycan_to ? addDays(f.laycan_to, 45) : null);
+
+/** 'missing' | 'expired' | 'expires' (before the employment ends) | 'ok' */
+export function certStatus(c, f, today = new Date()) {
+    if (!c?.expiry) return c?.received ? 'ok' : 'missing';
+    const t = iso(today);
+    if (c.expiry < t) return 'expired';
+    const end = employmentEnd(f);
+    return end && c.expiry < end ? 'expires' : 'ok';
+}

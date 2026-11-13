@@ -269,3 +269,9 @@ export const CARGO_CONVENTIONS = [
     ['Hague-Visby Rules (1968 / 1979 SDR)', 'As Hague; B/L conclusive evidence in the hands of a third party', '666.67 SDR per package or 2 SDR per kg, whichever is higher', '1 year (extendable by agreement)'],
     ['Hamburg Rules (1978)', 'Presumed fault; no nautical-fault defence; covers deck cargo and live animals', '835 SDR per package or 2.5 SDR per kg', '2 years'],
 ];
+
+/** International Group P&I clubs (12; North and Standard merged into NorthStandard in 2023). */
+export const IG_CLUBS = ['American Club', 'Britannia', 'Gard', 'Japan P&I', 'London P&I', 'NorthStandard', 'Shipowners’ Club', 'Skuld', 'Steamship Mutual', 'The Swedish Club', 'UK P&I Club', 'West of England'];
+const IG_RE = /\bamerican\s*(?:club|steamship)|britannia|\bgard\b|japan\s*(?:p\s*&?\s*i|ship\s*owners)|london\s*(?:p\s*&?\s*i|steam)|north\s*(?:standard|of\s*england)|\bnorth\s*p\s*&?\s*i|\bstandard\s*(?:club|p\s*&?\s*i)|ship\s*owners'?\s*(?:club|mutual)|\bskuld\b|steamship\s*mutual|swedish\s*club|\buk\s*(?:p\s*&?\s*i|club|mutual)|west\s*of\s*england/i;
+/** true / false for a P&I club name (null when empty). */
+export const isIgClub = (name) => (String(name ?? '').trim() ? IG_RE.test(String(name)) : null);

@@ -51,7 +51,7 @@ test('Checklist, notices, templates, freight invoice', () => {
     const vc = { type: 'VC', fixture_date: '2026-10-28', laycan_from: '2026-12-10', qty: 45000, tol_pct: 10, freight: 32, freight_type: 'pt', address_pct: 2.5, brokerage_pct: 1.25 };
     const tasks = defaultTasks(vc);
     eq(tasks.find((t) => t.title.startsWith('Agent nominated — load')).due, '2026-12-03', 'load agent 7 days before laycan');
-    eq(defaultTasks({ ...vc, type: 'TCT' })[0].title.includes('Charter party'), true, 'time charter gets its own checklist');
+    eq(defaultTasks({ ...vc, type: 'TCT' }).some((t) => t.title.startsWith('Delivery notices')), true, 'time charter gets its own checklist');
     eq(noticeDates({ laycan_from: '2026-12-10' }).map((x) => x.date), ['2026-12-03', '2026-12-05', '2026-12-07', '2026-12-08', '2026-12-09'], '7/5/3/2/1-day ETA notices');
     const inv = freightInvoice({ ...vc, bl_qty: 49500 });
     near(inv.gross, 1584000, 'freight 49,500 × 32', 1e-6);
