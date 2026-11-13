@@ -3,6 +3,8 @@
 // (e.g. a year assumed for "23-29 Nov") are listed in `_guessed` so the UI can mark them for checking.
 // Position format reference: https://www.handybulk.com/ship-positions-example/
 
+import { normalizeTerms } from './terms.js';
+
 export const VESSEL_TYPES = ['SDBC', 'Handysize', 'Handymax', 'Supramax', 'Ultramax', 'Panamax', 'Kamsarmax', 'Post-Panamax', 'Capesize', 'Newcastlemax', 'MPP', 'General Cargo', 'OHBC', 'Log carrier', 'Tweendecker', 'Mini bulker'];
 export const TONNAGE_STATUS = { expected: 'Expected', firm: 'Firm open', scpv: 'SCPV (subject to previous)', fixed: 'Fixed', withdrawn: 'Withdrawn' };
 export const ORDER_STATUS = { open: 'Open', working: 'Working', fixed: 'Fixed', failed: 'Failed', withdrawn: 'Withdrawn' };
@@ -11,6 +13,23 @@ export const CP_FORMS = ['GENCON 94', 'NYPE 93', 'NYPE 2015', 'NYPE 46', 'ASBATI
 
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 const pad = (x) => String(x).padStart(2, '0');
+
+/**
+ * Recap / offer lines are often numbered ("4. LAY/CAN:", "02 - Delivery :", "08.1- Hire …") or bulleted ("- Blt 1985").
+ * The number and bullet are removed so "Laycan:", "Delivery:" etc. start the line again.
+ */
+export function stripClauseNumbers(text) {
+    return String(text ?? '').replace(/\r/g, '').split('\n')
+        .map((l) => l.replace(/^\s*\d{1,2}(?:\.\d{1,2})?\s*[-.)–:]+\s*(?=[A-Za-z"'(])/, '').replace(/^\s*[-•*+]+\s*(?=\S)/, ''))
+        .join('\n');
+}
+
+/** Money with European thousands ("6.500,-", "1.250,00") or English ("6,500", "6500.00"); "K" not handled here. */
+export function money(s) {
+    const t = String(s ?? '').trim().replace(/[,.\s-]+$/, (m) => (/^[.,]\d/.test(m) ? m : ''));
+    if (/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(t)) return Number(t.replace(/\./g, '').replace(',', '.'));
+    return num(t);
+}
 
 /**
  * Number from an e-mail. English thousands separators by default ("34,676", "44,020.5");
@@ -28,15 +47,24 @@ export function num(s, small = false) {
 
 /** "23-29 November 2022", "10/20 Dec", "1st-5th Jan 27", "25 Nov" → {from, to, guessedYear} */
 export function parseDateRange(text, today = new Date()) {
-    // "28 Dec - 3 Jan 2027": a month on both ends
-    const two = String(text ?? '').match(/(\d{1,2})(?:st|nd|rd|th)?\s*([A-Za-z]{3,9})\.?\s*[-–]\s*(\d{1,2})(?:st|nd|rd|th)?\s*([A-Za-z]{3,9})\.?,?\s*('?\d{2,4})?/);
-    if (two && MONTHS[two[2].slice(0, 3).toLowerCase()] && MONTHS[two[4].slice(0, 3).toLowerCase()]) {
-        const end = parseDateRange(`${two[3]} ${two[4]} ${two[5] ?? ''}`, today);
+    // Times inside a laycan ("00:01 HRS 02ND – 24:00 HRS 05TH DEC", "10 January 2015- 00.01 hrs lt - 15 January …") are dropped
+    const src = String(text ?? '')
+        .replace(/\b\d{1,2}[:.]\d{2}\s*(?:hrs?|hours|lt|utc|gmt)?\b\.?/gi, ' ')
+        .replace(/\b(?:hrs?|hours|lt|utc|gmt)\b\.?/gi, ' ')
+        .replace(/(\s*[-–]\s*)+/g, ' - ');
+    // "28 Dec - 3 Jan 2027" / "10 January 2015 - 15 January 2015": a month on both ends
+    const two = src.match(/(\d{1,2})(?:st|nd|rd|th)?\s*([A-Za-z]{3,9})\.?,?\s*('?\d{2,4})?\s*[-–]\s*(\d{1,2})(?:st|nd|rd|th)?\s*([A-Za-z]{3,9})\.?,?\s*('?\d{2,4})?/i);
+    if (two && MONTHS[two[2].slice(0, 3).toLowerCase()] && MONTHS[two[5].slice(0, 3).toLowerCase()]) {
+        const end = parseDateRange(`${two[4]} ${two[5]} ${two[6] ?? two[3] ?? ''}`, today);
         const m1 = MONTHS[two[2].slice(0, 3).toLowerCase()];
-        const y1 = +end.from.slice(0, 4) - (m1 > +end.from.slice(5, 7) ? 1 : 0);
-        return { from: `${y1}-${pad(m1)}-${pad(+two[1])}`, to: end.from, guessedYear: end.guessedYear, raw: two[0] };
+        let y1 = two[3] ? +two[3].replace("'", '') : +end.from.slice(0, 4) - (m1 > +end.from.slice(5, 7) ? 1 : 0);
+        if (y1 < 100) y1 += 2000;
+        const from = `${y1}-${pad(m1)}-${pad(+two[1])}`;
+        // A typing slip in the second year ("10 January 2015 – 15 January 2012") must not give an end before the start
+        if (end.from < from) return { from, to: `${y1}${end.from.slice(4)}`, guessedYear: true, raw: two[0] };
+        return { from, to: end.from, guessedYear: end.guessedYear && !two[3], raw: two[0] };
     }
-    const m = String(text ?? '').match(/(\d{1,2})(?:st|nd|rd|th)?(?:\s*[-–\/]\s*(\d{1,2})(?:st|nd|rd|th)?)?\s*(?:\/\s*)?([A-Za-z]{3,9})\.?,?\s*('?\d{2,4})?/);
+    const m = src.match(/(\d{1,2})(?:st|nd|rd|th)?(?:\s*[-–\/]\s*(\d{1,2})(?:st|nd|rd|th)?)?\s*(?:\/\s*)?([A-Za-z]{3,9})\.?,?\s*('?\d{2,4})?/i);
     if (!m) return null;
     const month = MONTHS[m[3].slice(0, 3).toLowerCase()];
     if (!month) return null;
@@ -87,15 +115,22 @@ function parsePosition(block, today) {
     const set = (k, v) => { if (v !== null && v !== undefined && v !== '') p[k] = v; };
 
     const first = block.split('\n').find((l) => l.trim());
-    set('name', first?.replace(/^\s*(?:M\.?\/?V\.?|vessel\s*:|name\s*:)\s*/i, '').replace(/[,;(].*$/, '').trim().toUpperCase());
+    set('name', first?.replace(/^\s*(?:M\.?\/?V\.?|vessel\s*:|name\s*:)\s*/i, '').replace(/[,;(].*$/, '')
+        .replace(/\s*(?:[-–]\s*)?\b(?:open(?:ing)?|blt|built|dwt)\b.*$/i, '').replace(/\s+[-–]\s+.*$/, '').trim().toUpperCase());
 
     const imo = s.match(/\bIMO\s*(?:no\.?|number)?\s*:?\s*(\d{7})\b/i);
     if (imo) set('imo', imo[1]);
 
     // Open port, dates and trading intention: "Open Haiphong, 23-29 November 2022. Short trip within the Far East"
-    const open = block.match(/\bopen(?:ing)?\s*(?:at|in|:)?\s+([^,\n]+?)\s*[,;]?\s*((?:\d{1,2}(?:st|nd|rd|th)?\s*[-–\/]\s*)?\d{1,2}(?:st|nd|rd|th)?\s*\/?\s*[A-Za-z]{3,9}\.?,?\s*(?:'?\d{2,4})?)\.?[ \t]*([^\n]*)/i);
+    const dateRe = String.raw`((?:\d{1,2}(?:st|nd|rd|th)?\s*[-–\/]\s*)?\d{1,2}(?:st|nd|rd|th)?\s*\/?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,?\s*(?:'?\d{2,4})?)`;
+    const open = block.match(new RegExp(String.raw`\bopen(?:ing)?\s*(?:at|in|:)?\s+([^\n]+?)\s*[,;]?\s*(?:on\s+|abt\s+|about\s+|around\s+)?${dateRe}\.?[ \t]*([^\n]*)`, 'i'));
+    if (!open) {
+        // Port without a readable date: "Open Marmara/Black Sea on 20/25 2014"
+        const port = block.match(/\bopen(?:ing)?\s*(?:at|in|:)?\s+([A-Za-z][^,\n]*?)\s*(?:\bon\b|\babt\b|\babout\b|\d|$)/im);
+        if (port) set('open_port', port[1].trim());
+    }
     if (open) {
-        set('open_port', open[1].replace(/\s+(?:on|abt|about|around)$/i, '').trim());
+        set('open_port', open[1].replace(/\s+(?:on|abt|about|around)$/i, '').replace(/\s*,\s*/g, ', ').trim());
         const range = parseDateRange(open[2], today);
         if (range) {
             set('open_from', range.from);
@@ -109,7 +144,8 @@ function parsePosition(block, today) {
     const type = s.match(new RegExp(`\\b(${VESSEL_TYPES.map((t) => t.replace(/[-\s]/g, '[-\\s]?')).join('|')}|BC|bulk carrier)\\b`, 'i'));
     if (type) set('type', VESSEL_TYPES.find((t) => t.toLowerCase().replace(/[-\s]/g, '') === type[1].toLowerCase().replace(/[-\s]/g, '')) ?? 'SDBC');
 
-    const flag = s.match(/([A-Z][A-Za-z.&' -]{1,24}?)\s+flag(?:ged)?\b/i) ?? s.match(/\bflag\s*:?\s*([A-Z][A-Za-z.&' -]{1,24}?)(?:[,;/]|$|\s{2})/i);
+    const flagLine = block.split('\n').map((l) => l.match(/([A-Z][A-Za-z.&' -]{1,24}?)\s+flag(?:ged)?\b/i)).find(Boolean);
+    const flag = flagLine ?? s.match(/([A-Z][A-Za-z.&' -]{1,24}?)\s+flag(?:ged)?\b/i) ?? s.match(/\bflag\s*:?\s*([A-Z][A-Za-z.&' -]{1,24}?)(?:[,;/]|$|\s{2})/i);
     if (flag) set('flag', flag[1].replace(/^(?:\d{4}\s+|SDBC\s+|BC\s+)+/i, '').trim());
 
     const built = s.match(/\b(?:built|blt|b\.)\s*:?\s*((?:19|20)\d{2})\b/i) ?? s.match(new RegExp(`\\b(?:${VESSEL_TYPES.join('|')}|BC)\\s+((?:19|20)\\d{2})\\b`, 'i'))
@@ -132,12 +168,15 @@ function parsePosition(block, today) {
         if (beam) set('beam', num(beam[1], true));
     }
 
-    const gtnt = s.match(/([\d][\d,.]*)\s*(?:GT|GRT)\s*\/\s*([\d][\d,.]*)\s*(?:NT|NRT)\b/i);
+    const gtnt = s.match(/([\d][\d,.]*)\s*(?:GT|GRT)\s*\/\s*([\d][\d,.]*)\s*(?:NT|NRT)\b/i)
+        ?? s.match(/\b(?:GT|GRT)\s*\/\s*(?:NT|NRT)\s*:?\s*([\d][\d,.]*)\s*\/\s*([\d][\d,.]*)/i);
+    const tpc = s.match(/\btpc\s*:?\s*([\d]{1,3}[.,]\d{1,3})\b/i);
+    if (tpc) set('tpc', num(tpc[1], true));
     if (gtnt) {
         set('gt', num(gtnt[1]));
         set('nt', num(gtnt[2]));
     } else {
-        const gt = s.match(/([\d][\d,.]*)\s*(?:GT|GRT)\b/i);
+        const gt = s.match(/([\d]{3,}[\d,.]*)\s*(?:GT|GRT)\b/i);
         const nt = s.match(/([\d][\d,.]*)\s*(?:NT|NRT)\b/i);
         if (gt) set('gt', num(gt[1]));
         if (nt) set('nt', num(nt[1]));
@@ -145,7 +184,8 @@ function parsePosition(block, today) {
     const air = s.match(/air\s*draft\s*:?\s*([\d.,]+)/i);
     if (air) set('air_draft', num(air[1], true));
 
-    const gb = s.match(/grain\s*\/\s*bale\s*(?:capacity)?\s*:?\s*([\d][\d,.]*)\s*(?:cbm)?\s*\/\s*([\d][\d,.]*)/i);
+    const gb = s.match(/grain\s*\/\s*bale\s*(?:capacity)?\s*:?\s*([\d][\d,.]*)\s*(?:cbm)?\s*\/\s*([\d][\d,.]*)/i)
+        ?? s.match(/\bG\s*\/\s*B\s*(?:capa\w*)?\s*:?\s*([\d][\d,.]*)\s*(?:cbm|m3)?\s*\/\s*([\d][\d,.]*)/i);
     if (gb) {
         set('grain', num(gb[1]));
         set('bale', num(gb[2]));
@@ -156,14 +196,20 @@ function parsePosition(block, today) {
         if (b) set('bale', num(b[1]));
     }
 
-    const hoha = s.match(/(\d+)\s*HO\s*\/\s*(\d+)?\s*HA/i);
+    const hoha = s.match(/(\d+)\s*HO\s*\/\s*(\d+)?\s*HA/i) ?? s.match(/(\d+)\s*holds?\s*\/\s*\d+\s*hatch/i);
     if (hoha) set('hoha', +hoha[1]);
 
     if (/\bgearless\b|\bgls\b/i.test(s)) set('cranes_n', 0);
     const cr = s.match(/(\d+)\s*(?:x\s*)?cranes?\s*(?:of\s*)?(?:\d+\s*x\s*)?([\d.]+)\s*(?:t\b|ts\b|tons?\b|mt\b|swl)/i) ?? s.match(/(\d+)\s*x\s*([\d.]+)\s*(?:t|ts|tons?|mt)\s*(?:swl\s*)?(?:cranes?|derricks?)/i);
-    if (cr) {
-        set('cranes_n', +cr[1]);
-        set('cranes_swl', num(cr[2], true));
+    const crSwlFirst = s.match(/\bcranes?\s*:?\s*([\d.]+)\s*(?:mt|t|ts|tons?)\s*(?:swl\s*)?x\s*(\d+)/i);
+    const crShort = s.match(/\bcr\.?\s*(\d+)\s*x\s*([\d.]+)\s*(?:mt|t|ts|tons?)\b/i);
+    if (crSwlFirst) {
+        set('cranes_n', +crSwlFirst[2]);
+        set('cranes_swl', num(crSwlFirst[1], true));
+    } else if (cr ?? crShort) {
+        const c = cr ?? crShort;
+        set('cranes_n', +c[1]);
+        set('cranes_swl', num(c[2], true));
     }
     const gr = s.match(/(\d+)\s*(?:x\s*)?grabs?\s*(?:of\s*)?(?:\d+\s*x\s*)?([\d.]+)\s*cbm/i) ?? s.match(/(\d+)\s*x\s*([\d.]+)\s*cbm\s*grabs?/i);
     if (gr) {
@@ -188,12 +234,15 @@ function parsePosition(block, today) {
     // Speed / consumption: "About 14.0 knots on about 28.0 mts laden" · "ECO SPEED: about 13.0 knots on about 25.0 mts laden and ballast"
     const speeds = {};
     // The text after each figure is read by lookahead (not consumed), so "… laden / 12.5 kn on 23 mts ballast" finds both
-    const re = /(?:abt|about|ab\.)?\s*([\d.,]+)\s*(?:knots|kn|kts)\s*(?:on|\/|@|with)\s*(?:abt|about|ab\.)?\s*([\d.,]+)\s*(?:mts?|t|tons)\b(?=([^\n]{0,60}))/gi;
+    const re = /(?:abt|about|ab\.)?\s*([\d.,]+)\s*(?:knots|knts|kn|kts|k\b)\s*(?:on|\/|@|with)\s*(?:abt|about|ab\.)?\s*([\d.,]+)\s*(?:mts?|t|tons)(?![a-z])(?=([^\n]{0,60}))/gi;
     for (const line of block.split('\n')) {
         const eco = /\beco\b/i.test(line);
+        const head = line.toLowerCase().match(/^\W*(laden|ballast|at sea)\b/)?.[1];
         for (const m of line.matchAll(re)) {
-            const tail = m[3].toLowerCase().split(/[\d.,]+\s*(?:knots|kn|kts)\b/)[0];
-            const modes = /laden\s*(?:and|&|\/)\s*ballast|ballast\s*(?:and|&|\/)\s*laden|both/.test(tail) ? ['laden', 'ballast'] : /ballast/.test(tail) ? ['ballast'] : /laden/.test(tail) ? ['laden'] : [];
+            const tail = m[3].toLowerCase().split(/[\d.,]+\s*(?:knots|knts|kn|kts)\b/)[0];
+            const modes = /laden\s*(?:and|&|\/)\s*ballast|ballast\s*(?:and|&|\/)\s*laden|both/.test(tail) ? ['laden', 'ballast'] : /ballast/.test(tail) ? ['ballast'] : /laden/.test(tail) ? ['laden']
+                : head === 'laden' || head === 'ballast' ? [head] : head === 'at sea' ? ['laden', 'ballast'] : [];
+            if (head === 'at sea' && !/laden|ballast/.test(tail)) p._guessed.push('speeds');
             for (const mode of modes) speeds[eco ? `${mode}Eco` : mode] = { kn: num(m[1], true), cons: num(m[2], true) };
         }
     }
@@ -228,26 +277,36 @@ export function parseOrders(text, today = new Date()) {
     return orderBlocks(text).map((b) => parseOrder(b, today)).filter((o) => o.qty || o.cargo || o.load_port);
 }
 
-function parseOrder(block, today) {
+/** The whole text as one order (a recap has blank lines between its sections). */
+export function parseOrderBlock(text, today = new Date()) {
+    return parseOrder(String(text ?? ''), today);
+}
+
+const QTY_UNIT = String.raw`(?:mt|mts|mtons?|metric\s*tons?|t|tons)`;
+
+function parseOrder(raw, today) {
+    const block = stripClauseNumbers(raw);
     const s = block.replace(/\s+/g, ' ');
-    const o = { _missing: [], _guessed: [], source_text: block.trim(), status: 'open' };
+    const o = { _missing: [], _guessed: [], source_text: String(raw).trim(), status: 'open' };
     const set = (k, v) => { if (v !== null && v !== undefined && v !== '') o[k] = v; };
 
     const acc = block.match(/\b(?:account|acct|a\/c|chrtrs?|chrts|chtrs|charterers?)\s*[:\-]\s*([^\n]+)/i);
     if (acc) set('charterer', acc[1].trim());
 
-    const q = s.match(/([\d][\d,.]*)\s*(?:mt|mts|t|tons)\b\s*(?:(\d+(?:\.\d+)?)\s*%\s*(moloo|molchopt|mol\b|more or less(?: in (?:owners?|charterers?)'? option)?)?)?\s*(?:of\s+)?([^\n,;]*)/i);
+    const qRe = new RegExp(String.raw`(?<![x×]\s*)([\d][\d,.]*)\s*${QTY_UNIT}\b(?!\s*(?:x\b|swl|each|derricks?|cranes?|grabs?|dwt|ifo|mgo|mdo))\s*(?:(\d+(?:\.\d+)?)\s*%\s*(moloo|molchopt|mol\b|more or less(?: in (?:owners?|charterers?)'? option)?)?)?\s*(?:of\s+)?([^\n,;]*)`, 'i');
+    const qtyLine = block.split('\n').find((l) => /^\s*(?:cgo|cargo|quantity|qty|commodity)\b\s*[:\-]/i.test(l) && qRe.test(l));
+    const q = (qtyLine ?? '').match(qRe) ?? s.match(qRe);
     if (q) {
         set('qty', num(q[1]));
         if (q[2]) set('tol_pct', +q[2]);
         if (q[3]) set('option', /chopt|charterer/i.test(q[3]) ? 'MOLCHOPT' : 'MOLOO');
         else if (q[2]) { o.option = 'MOLOO'; o._guessed.push('option'); }
-        const cargo = q[4].replace(/\b(?:sf|s\.f\.)\b.*$/i, '').replace(/\b(?:in bulk|bulk)\b/i, (m) => m).trim();
+        const cargo = q[4].replace(/\b(?:sf|s\.f\.)\b.*$/i, '').replace(/\s+(?:in bundles of|of \d|\/\s*\d).*$/i, '').trim();
         if (cargo && !/^(?:\d|laycan|load|disch|frt|freight)/i.test(cargo)) set('cargo', cargo);
     }
     // "Cargo: wheat in bulk" names the cargo; "Cargo: 45,000 mt 10% … wheat" was already read by the quantity pattern
     const cargoLine = block.match(/\b(?:cargo|commodity)\s*[:\-]\s*([^\n]+)/i);
-    if (cargoLine && !/\b[\d][\d,.]*\s*(?:mt|mts|t|tons)\b/i.test(cargoLine[1])) set('cargo', cargoLine[1].trim());
+    if (cargoLine && !new RegExp(String.raw`\b[\d][\d,.]*\s*${QTY_UNIT}\b`, 'i').test(cargoLine[1])) set('cargo', cargoLine[1].trim());
 
     const sf = s.match(/\b(?:sf|s\.f\.|stowage factor)\s*:?\s*(?:abt|about|ard|around|~)?\s*([\d.,]+)\s*(cbm|cuft|wog|cbm\/mt|cuft\/lt)?/i);
     if (sf) {
@@ -261,10 +320,19 @@ function parseOrder(block, today) {
     const load = block.match(/\b(?:load(?:ing)?\s*port|pol|load(?:ing)?)\s*[:\-]\s*([^\n\/]+)/i);
     const disch = block.match(/\b(?:disch(?:arge|arging)?\s*port|pod|disch(?:arge|arging)?)\s*[:\-]\s*([^\n\/]+)/i);
     // "1 SB SP Novorossiysk" → "Novorossiysk" (berth/port qualifiers are not part of the name)
-    const cleanPort = (x) => x.replace(/^(?:\d+\s*)?(?:(?:sb|gsb|sa|sp|sbp|sbs|ssp|sb\/sp|aa|aaaa|bb|safe|berths?|ports?|anchorages?)\b[\s/,]*)+/i, '').trim();
+    const cleanPort = (x) => x.replace(/^(?:\d+\s*)?(?:(?:sb|gsb|gspb|gpb|sa|sp|sbp|sbs|ssp|sb\/sp|aa|aaaa|bb|safe|good|berths?|ports?|anchorages?)\b[\s/,]*)+/i, '')
+        .replace(/\s*[-–](?=\s*(?:\d|sub\b|g?s?p?b\b|aa)).*$/i, '').replace(/\s+(?:\d+\s*)?(?:gspb|gpb|gsb|sb|sp|aa+)\b.*$/i, '').replace(/\s*[,;].*$/, '').trim();
     if (load) set('load_port', cleanPort(load[1]));
     if (disch) set('disch_port', cleanPort(disch[1]));
-    if ((!o.load_port || !o.disch_port) && sbsp) {
+    // "1 sb aa Constantza/ 1 sb aa Damietta": a line of its own with berth/port qualifiers wins over a pair found anywhere
+    const pairRe = new RegExp(`^\\s*${portRe.replace(/\)\?$/, ')')}([A-Z][A-Za-zÇĞİÖŞÜçğıöşü' .()-]+?)\\s*(?:\\/|\\bto\\b|→|->)\\s*${portRe}([A-Z][A-Za-zÇĞİÖŞÜçğıöşü' .()-]+?)\\s*$`, 'i');
+    const pairLine = block.split('\n').map((l) => l.match(pairRe)).find(Boolean);
+    if (pairLine && !o.load_port && !o.disch_port) {
+        set('load_port', cleanPort(pairLine[1]));
+        set('disch_port', cleanPort(pairLine[2]));
+    }
+    const sbspOk = sbsp && !new RegExp(String.raw`\d\s*${QTY_UNIT}\s+of\s*$`, 'i').test(s.slice(0, sbsp.index + sbsp[0].indexOf(sbsp[1])));
+    if ((!o.load_port || !o.disch_port) && sbspOk) {
         if (!o.load_port) set('load_port', sbsp[1].trim());
         if (!o.disch_port) set('disch_port', sbsp[2].trim());
     }
@@ -274,7 +342,7 @@ function parseOrder(block, today) {
         if (!o.disch_port) set('disch_port', from[2].trim());
     }
 
-    const lc = s.match(/\b(?:laycan|lay\s*\/\s*can|l\/c|laydays)\s*:?\s*([^,;]{4,40})/i);
+    const lc = block.match(/\b(?:laycan|lay\s*\/\s*can|l\/c|laydays)\b\s*:?\s*([^;\n]{4,70})/i) ?? s.match(/\b(?:laycan|lay\s*\/\s*can|l\/c|laydays)\b\s*:?\s*([^,;]{4,40})/i);
     if (lc) {
         const range = parseDateRange(lc[1], today);
         if (range) {
@@ -284,22 +352,32 @@ function parseOrder(block, today) {
         }
     }
 
-    const terms = '(SHINC|SHEX(?:UU|EIU)?|SSHEX(?:UU)?|SATPM|FHEX(?:UU)?|WWD|PWWD)?';
+    const terms = String.raw`((?:atdn\s*)?(?:S?SHINC|SATPM|S?SHEX|F?S?HEX|FHINC|WWD|PWWD)(?:\s*(?:UU|EIU)\b)?)?`;
     // First plausible rate (≥ 100 t/day), so "Load: 1 SB SP Novorossiysk" is not read as 1 t/day
-    const rate = (word) => [...s.matchAll(new RegExp(`\\b${word}\\s*(?:rate)?\\s*:?\\s*([\\d][\\d,.]*)\\s*(?:mt|t|mts)?\\s*(?:pwwd|pd|\\/day|per day)?\\s*${terms}`, 'gi'))]
+    const rate = (word) => [...s.matchAll(new RegExp(`\\b${word}\\s*(?:rate)?\\s*:?\\s*([\\d][\\d,.]*)\\s*(?:mts|mt|t)?\\s*(?:pwwd|pd|\\/day|per day)?\\s*${terms}`, 'gi'))]
         .find((m) => num(m[1]) >= 100 && num(m[1]) < 200000);
     const lr = rate('load(?:ing)?');
     const dr = rate('disch(?:arge|arging)?');
     if (lr) {
         set('load_rate', num(lr[1]));
-        set('load_terms', lr[2]?.toUpperCase().replace('PWWD', 'WWD'));
+        if (lr[2]) set('load_terms', normalizeTerms(lr[2]));
     }
     if (dr) {
         set('disch_rate', num(dr[1]));
-        set('disch_terms', dr[2]?.toUpperCase().replace('PWWD', 'WWD'));
+        if (dr[2]) set('disch_terms', normalizeTerms(dr[2]));
+    }
+    if (!lr && !dr) {
+        const T = String.raw`((?:atdn\s*)?(?:S?SHINC|SATPM|S?SHEX|F?S?HEX|FHINC|P?WWD)(?:\s*(?:UU|EIU)\b)?)`;
+        const both = block.match(new RegExp(String.raw`^\s*([\d][\d,.]*)\s*(?:mts?|t)?\s*(?:pwwd|pd|\/day)?\s*${T}\s*\/\s*([\d][\d,.]*)\s*(?:mts?|t)?\s*(?:pwwd|pd|\/day)?\s*${T}`, 'im'));
+        if (both && num(both[1]) >= 100 && num(both[3]) >= 100) {
+            set('load_rate', num(both[1]));
+            set('load_terms', normalizeTerms(both[2]));
+            set('disch_rate', num(both[3]));
+            set('disch_terms', normalizeTerms(both[4]));
+        }
     }
 
-    const fr = s.match(/\b(?:frt|freight)(?:\s*idea)?\s*:?\s*(?:usd|us\$|\$)?\s*([\d][\d,.]*)\s*(k\b)?\s*(pmt|p\.?m\.?t\.?|\/mt|per mt|pt\b|fio\w*|lumpsum|ls\b|lsum|pdpr|\/day|per day|pd\b)?/i);
+    const fr = s.match(/\b(?:frt|freight)(?:\s*(?:idea|rate))?\s*:?\s*(?:usd|us\$|\$)?\.?\s*([\d][\d,.]*)\s*(k\b)?\s*(pmt|p\.?m\.?t\.?|\/mt|per mt|pt\b|fio\w*|lumpsum|ls\b|lsum|pdpr|\/day|per day|pd\b)?/i);
     if (fr) {
         const unit = (fr[3] ?? '').toLowerCase();
         set('freight', num(fr[1]) * (fr[2] ? 1000 : 1));
@@ -307,13 +385,15 @@ function parseOrder(block, today) {
         if (!unit) o._guessed.push('freight_type');
     }
 
-    const add = s.match(/([\d.]+)\s*%\s*(?:add(?:ress)?\.?\s*(?:comm?(?:ission)?)?|adcom|addcomm)/i);
-    const brok = s.match(/([\d.]+)\s*%\s*(?:brok(?:erage)?|bkg)/i);
-    const ttl = s.match(/([\d.]+)\s*%\s*(?:ttl|total|iac|tot)\b/i);
-    if (add) set('address_pct', +add[1]);
-    if (brok) set('brokerage_pct', +brok[1]);
+    const PCT = String.raw`(\d+(?:[.,]\d+)?)\s*(?:%|pct\b|per\s*cent)\s*`;
+    const pct = (m) => Number(m[1].replace(',', '.'));
+    const add = s.match(new RegExp(PCT + String.raw`(?:ad+(?:ress)?\.?\s*(?:comm?(?:ission)?)?|adcom|addcomm|addcom)`, 'i'));
+    const brok = s.match(new RegExp(PCT + String.raw`(?:brok(?:erage)?|bkg)`, 'i'));
+    const ttl = s.match(new RegExp(PCT + String.raw`(?:ttl|total|iac|tot)\b`, 'i'));
+    if (add) set('address_pct', pct(add));
+    if (brok) set('brokerage_pct', pct(brok));
     if (!add && !brok && ttl) {
-        set('brokerage_pct', +ttl[1]);
+        set('brokerage_pct', pct(ttl));
         o._guessed.push('brokerage_pct');
     }
 
@@ -322,7 +402,7 @@ function parseOrder(block, today) {
         set('dem', num(dem[1]));
         if (dem[2]) set('des', /^\d/.test(dem[2]) ? num(dem[2]) : num(dem[1]) / 2);
     }
-    if (/\bdhd\w*/i.test(s) && o.dem && !o.des) set('des', o.dem / 2);
+    if (/\bdhd\w*|despatch\s*half\s*dem|dispatch\s*half\s*dem|half\s*desp?atch|\bhd\b/i.test(s) && o.dem && !o.des) set('des', o.dem / 2);
 
     const cp = s.match(/\b(GENCON(?:\s*\d{2})?|NYPE(?:\s*(?:46|93|2015))?|AMWELSH(?:\s*93)?|SYNACOMEX|NORGRAIN|GRAINCON|ASBATIME|BARECON)\b/i);
     if (cp) set('cp_form', cp[1].toUpperCase().replace(/\s+/, ' '));

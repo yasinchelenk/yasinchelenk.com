@@ -13,6 +13,7 @@
 import { n, has, sum } from './units.js';
 import { cargoIntake, toleranceRange } from './intake.js';
 import { etsCost } from './ets.js';
+import { normalizeTerms } from './terms.js';
 import { fuelEu, co2Tonnes } from './fueleu.js';
 import { bunkerPlan } from './bunkerplan.js';
 
@@ -25,23 +26,7 @@ export const TERMS_FACTORS = {
     SSHEX: 7 / 5, SSHEXUU: 7 / 5, SSHEXEIU: 7 / 5, WWD: 1,
 };
 
-/**
- * Free-text terms from a cargo order or recap → a TERMS_FACTORS key: "shex uu" → SHEXUU, "PWWD SSHINC" → SHINC,
- * "FSHEX EIU" → FHEXEIU, "ATDNSHINC" → SHINC. Unknown text is returned upper-cased (factor 1).
- */
-export function normalizeTerms(terms) {
-    let t = String(terms ?? '').toUpperCase().replace(/[^A-Z]/g, '');
-    if (!t) return 'SHINC';
-    if (t in TERMS_FACTORS) return t;
-    t = t.replace(/^(?:P?WWD|PWD|ATDN|MTS)+/, '');
-    if (/^S?SHINC$|^FHINC$|^SHINC/.test(t)) return 'SHINC';
-    if (/^SATPM|^SATNOON/.test(t)) return 'SATPM';
-    const uu = /UU$|UNLESSUSED$/.test(t);
-    const eiu = /EIU$|EVENIFUSED$/.test(t);
-    const base = /^SSHEX|^SATSHEX/.test(t) ? 'SSHEX' : /^F(?:S)?HEX|^FRIHEX/.test(t) ? 'FHEX' : /^SHEX/.test(t) ? 'SHEX' : null;
-    if (base) return base + (uu ? 'UU' : eiu ? 'EIU' : '');
-    return t in TERMS_FACTORS ? t : String(terms ?? '').toUpperCase().trim();
-}
+export { normalizeTerms };
 
 export const SEA_MODES = { ballast: 'Ballast', laden: 'Laden', ballastEco: 'Ballast eco', ladenEco: 'Laden eco', custom1: 'Custom 1', custom2: 'Custom 2', custom3: 'Custom 3' };
 export const STOP_TYPES = { bunker: 'Bunkering', canal: 'Canal', strait: 'Strait', weather: 'Weather / delay', other: 'Other' };

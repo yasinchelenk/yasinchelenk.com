@@ -1,6 +1,6 @@
 // Fixtures & post-fixture: status flow, recap parser, default post-fixture checklist, notice dates, templates.
 import { n, has } from './units.js';
-import { parseOrders, parseDateRange, num } from './positions.js';
+import { parseOrderBlock, parseDateRange, stripClauseNumbers, money as moneyNum } from './positions.js';
 
 export const FIXTURE_STATUS = {
     negotiating: 'Negotiating', subs: 'On subs', fixed: 'Fixed', nominated: 'Nominated', loading: 'Loading', passage: 'On passage',
@@ -19,33 +19,76 @@ const addDays = (date, k) => {
 
 // ---------------------------------------------------------------- Recap parser
 
+const DAYS = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const hhmm = (h, m) => `${String(+h).padStart(2, '0')}:${String(+(m ?? 0)).padStart(2, '0')}`;
+
 /**
- * Reads a fixture recap e-mail (voyage or time charter). Cargo / ports / laycan / rates come from the cargo-order parser,
- * the rest (vessel, owners, CP, hire, delivery, subjects…) is recap specific. Returns fields + `_missing` / `_guessed`.
+ * Laytime exception window written in a clause → the Laytime tab's "Excepted periods" text:
+ * "TIME FROM 17:00 HRS ON FRIDAY OR DAY BEFORE … HOLIDAY UNTILL 08:00 HRS ON MONDAY OR NEXT WORKING DAY NOT TO COUNT"
+ * → "Fri 17:00 - Mon 08:00; eve 17:00 - next WD 08:00". Null when the clause has no such window.
+ */
+export function parseExceptClause(text) {
+    const D = '(sun|mon|tue|wed|thu|fri|sat)[a-z]*';
+    const m = String(text ?? '').match(new RegExp(String.raw`(?:time\s+)?from\s+(\d{1,2})[:.]?(\d{2})?\s*(?:hrs?|hours)?\s*(?:lt\s*)?(?:on\s+)?${D}([^\n]*?)\b(?:un?til+|till|to)\s+(\d{1,2})[:.]?(\d{2})?\s*(?:hrs?|hours)?\s*(?:lt\s*)?(?:on\s+)?${D}([^\n]*?)(?:not\s+to\s+count|excepted|$)`, 'i'));
+    if (!m) return null;
+    const parts = [`${DAY_NAMES[DAYS[m[3].slice(0, 3).toLowerCase()]]} ${hhmm(m[1], m[2])} - ${DAY_NAMES[DAYS[m[7].slice(0, 3).toLowerCase()]]} ${hhmm(m[5], m[6])}`];
+    if (/day\s+(?:before|prece+ding)|\beve\b|\bprece+ding\b|arife/i.test(m[4])) parts.push(`eve ${hhmm(m[1], m[2])} - next WD ${hhmm(m[5], m[6])}`);
+    return parts.join('; ');
+}
+
+/**
+ * Reads a fixture recap e-mail (voyage or time charter). Numbered clauses ("4. LAY/CAN:", "02 - Delivery :") are
+ * accepted. Cargo / ports / laycan / rates come from the cargo-order parser; the rest (vessel, parties, CP, hire,
+ * delivery, subjects, payment, NOR and laytime clauses…) is recap specific. Returns fields + `_missing` / `_guessed`.
  */
 export function parseRecap(text, today = new Date()) {
     const raw = String(text ?? '');
-    const s = raw.replace(/\s+/g, ' ');
-    const lines = raw.replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
-    const order = parseOrders(raw, today)[0] ?? { _missing: [], _guessed: [] };
+    const clean = stripClauseNumbers(raw);
+    const s = clean.replace(/\s+/g, ' ');
+    const lines = clean.split('\n').map((l) => l.trim()).filter(Boolean);
+    const order = parseOrderBlock(clean, today);
     const f = { _missing: [], _guessed: [...(order._guessed ?? [])], recap_text: raw.trim() };
-    const set = (k, v) => { if (v !== null && v !== undefined && v !== '') f[k] = v; };
-    for (const k of ['charterer', 'cargo', 'qty', 'tol_pct', 'option', 'sf', 'sf_unit', 'load_port', 'disch_port', 'laycan_from', 'laycan_to', 'load_rate', 'load_terms',
-        'disch_rate', 'disch_terms', 'freight', 'freight_type', 'address_pct', 'brokerage_pct', 'dem', 'des', 'cp_form']) {
-        if (order[k] !== undefined) set(k === 'charterer' ? 'charterers' : k, order[k]);
-    }
+    const set = (k, v) => { if (v !== null && v !== undefined && v !== '' && !(typeof v === 'number' && !Number.isFinite(v))) f[k] = v; };
     const line = (re) => lines.map((l) => l.match(re)).find(Boolean);
+    const na = (v) => /^(?:n\/?a|none|nil|same as\b.*|-+)$/i.test(String(v ?? '').trim());
 
-    const vsl = line(/^(?:M\.?\/?V\.?\s+|vessel\s*[:\-]\s*|vsl\s*[:\-]\s*|name\s*[:\-]\s*)([A-Z0-9][A-Z0-9 .'-]*?[A-Z0-9])(?:\s*[\/,–(]|\s+-\s+|$)/i);
-    if (vsl) set('vessel', vsl[1].trim().toUpperCase());
-    const own = line(/^(?:disponent\s+)?(?:owners?|ownrs|owns)\s*[:\-]\s*(.+)$/i);
-    if (own) set('owners', own[1]);
-    const chr = line(/^(?:charterers?|chrtrs?|chrts|chtrs|chrs|account|acct)\s*[:\-]\s*(.+)$/i);
-    if (chr) set('charterers', chr[1]);
+    // ---- Voyage or time charter? A hire figure or several TC words, and no freight-per-tonne + load-rate pair
+    const hireM = line(/^hire\s*[:\-]?\s*(?:usd|us\$|\$)\.?\s*([\d][\d.,]*)\s*(k\b)?/i) ?? s.match(/\bhire\s*(?:rate)?\s*:?\s*(?:usd|us\$|\$)\.?\s*([\d][\d.,]*)\s*(k\b)?/i);
+    const tcWords = [/\b(?:tct|trip\s*time\s*charter|time\s*charter|t\/c\s*trip)\b/i, /^del(?:y|ivery)?\b\s*[:\-]/im, /^redel(?:y|ivery)?\b/im, /\bbo[dr]\b|\bbunkers on (?:re)?delivery\b/i,
+        /\bc\s*\/?\s*[ev]\s*\/?\s*[ve]\b|cable.{0,30}victual/i, /\bilohc\b/i, /\bperiod\b.{0,30}\b(?:months?|years?|time\s*charter)\b/i].filter((re) => re.test(clean)).length;
+    const voyageish = order.freight_type === 'pt' && (order.load_rate || order.disch_rate || order.dem);
+    const tc = (!!hireM && !voyageish) || (tcWords >= 2 && !voyageish);
+
+    const keys = tc ? ['charterer', 'laycan_from', 'laycan_to', 'address_pct', 'brokerage_pct', 'cp_form']
+        : ['charterer', 'cargo', 'qty', 'tol_pct', 'option', 'sf', 'sf_unit', 'load_port', 'disch_port', 'laycan_from', 'laycan_to', 'load_rate', 'load_terms',
+            'disch_rate', 'disch_terms', 'freight', 'freight_type', 'address_pct', 'brokerage_pct', 'dem', 'des', 'cp_form'];
+    for (const k of keys) if (order[k] !== undefined) set(k === 'charterer' ? 'charterers' : k, order[k]);
+    if (tc) f._guessed = f._guessed.filter((k) => keys.includes(k));
+
+    // ---- Vessel
+    const vsl = line(/^(?:performing\s+(?:vsl|vessel)\s*:\s*)?(?:M\.?\/?V\.?\s+|vessel\s*[:\-]\s*|vsl\s*[:\-]\s*|name\s*[:\-]\s*)(?:M\.?\/?V\.?\s+)?([A-Z0-9][A-Z0-9 .'-]*?[A-Z0-9.])(?:\s*[\/,–(]|\s+-\s+|\s+(?:dwt|blt|built)\b|$)/i)
+        ?? s.match(/\b(?:performing\s+(?:vsl|vessel)|ref)\s*:\s*M\.?\/?V\.?\s+([A-Z0-9][A-Z0-9.'-]*(?:\s[A-Z0-9][A-Z0-9.'-]*)?)/i);
+    if (vsl) set('vessel', vsl[1].replace(/\.$/, '').trim().toUpperCase());
+
+    // ---- Parties
+    const own = line(/^(?:head\s+)?(?:disponent\s+)?(?:owners?|ownrs|owns)\b(?:\s*full\s*style)?\s*[:\-]\s*(.+)$/i);
+    if (own && !na(own[1]) && !/^disponent/i.test(own[0])) set('owners', own[1].trim());
+    const disp = line(/^disponent\s+(?:owners?|owns)\b(?:\s*full\s*style)?(?:\s*\([^)]*\))?\s*[:\-]\s*(.+)$/i);
+    if (disp && !na(disp[1])) set('disponent_owners', disp[1].trim());
+    const mgr = line(/^managers?\b(?:\s*full\s*style)?\.?\s*[:\-]\s*(.+)$/i);
+    if (mgr && !na(mgr[1])) set('managers', mgr[1].trim());
+    const coll = line(/^freight\s+collectors?\b(?:\s*\([^)]*\))?\s*[:\-]\s*(.+)$/i);
+    if (coll && !na(coll[1])) set('freight_collectors', coll[1].trim());
+    const chr = line(/^(?:charterers?|chrtrs?|chrts|chtrs|chrs|account|acct|acc)\s*[:\-]\s*(.+)$/i);
+    if (chr) set('charterers', chr[1].trim());
+    const guar = line(/^charterers?'?\s*performance\s+(?:is\s+)?guaranteed\s+by\s+(.+)$/i);
+    if (guar) set('guarantor', guar[1].replace(/^m(?:essrs|esrs)\.?\s*/i, '').replace(/^["']|["'].*$/g, '').trim());
     const brk = line(/^(?:brokers?|via|broker\(s\))\s*[:\-]\s*(.+)$/i) ?? line(/brokerage\s+(?:to|for)\s+(.+?)\s*[.;]?$/i);
     if (brk) set('brokers', brk[1].trim());
 
-    const cpd = s.match(/\bc\/?p\s*(?:dated|date|dd)\s*:?\s*([^,;]+?)(?=,|;|\bgencon|\bnype|\bamwelsh|\bsynacomex|$)/i);
+    // ---- Charter party
+    const cpd = s.match(/\bc\/?p\s*(?:dated|date|dd)\s*:?\s*([^,;]+?)(?=,|;|\bgencon|\bnype|\bamwelsh|\bsynacomex|\basf\b|$)/i);
     if (cpd) {
         const r = parseDateRange(cpd[1], today);
         if (r) set('cp_date', r.from);
@@ -53,35 +96,90 @@ export function parseRecap(text, today = new Date()) {
     const rider = line(/\b(?:gencon|nype|amwelsh|synacomex|norgrain|graincon|asbatime)\b[^+\n]*\+\s*((?:[\w']+\s+)?rider[^,;\n]*)/i)
         ?? line(/\b((?:chrtrs'?|chrts'?|owners'?|charterers'?)\s+rider[^,;\n]*)/i);
     if (rider) set('rider', rider[1].trim());
+    const asPer = s.match(/\b(?:otherwise|further terms?[^.]{0,40}?)\s*(?:as\s*per|asper)\s+(M\.?\/?V\.?\s+[A-Z0-9 .'-]+?(?:\s*\/\s*)?(?:c\/?p|charter\s*party)\s*(?:dated|dd)\s*[\w .\/-]+?)(?=\s+with|\s*,|$)/i);
+    if (asPer && !f.rider) set('rider', `as per ${asPer[1].trim()} with logical alterations`);
 
-    // Time charter or voyage charter?
-    const hire = s.match(/\bhire\s*:?\s*(?:usd|us\$|\$)\s*([\d][\d,.]*)\s*(k\b)?/i) ?? s.match(/(?:usd|us\$|\$)\s*([\d][\d,.]*)\s*(k\b)?\s*(?:pdpr|\/day|per day|daily)/i);
-    const tc = !!hire || /\b(?:tct|trip time charter|time charter|delivery|redelivery|dop|dlosp|aps)\b/i.test(s);
+    // ---- Time charter terms
     if (tc) {
-        set('type', /\bperiod\b|\d+\s*(?:-\s*\d+\s*)?months?\b/i.test(s) && !/\btct\b|\btrip\b/i.test(s) ? 'PERIOD' : 'TCT');
-        if (hire) set('hire_rate', num(hire[1]) * (hire[2] ? 1000 : 1));
-        if (f.freight_type === 'tc') { delete f.freight; delete f.freight_type; }
+        set('type', /\bperiod\b|\d+\s*(?:-\s*\d+\s*)?months?\b|\byears?\b/i.test(s) && !/\btct\b|\btrip\b/i.test(s) ? 'PERIOD' : 'TCT');
+        if (hireM) set('hire_rate', moneyNum(hireM[1]) * (hireM[2] ? 1000 : 1));
+        else {
+            const pd = s.match(/(?:usd|us\$|\$)\.?\s*([\d][\d.,]*)\s*(k\b)?\s*(?:pdpr|\/day|per day|daily)/i);
+            if (pd) { set('hire_rate', moneyNum(pd[1]) * (pd[2] ? 1000 : 1)); f._guessed.push('hire_rate'); }
+        }
+        const del = line(/^del(?:y|ivery)?\s*[:\-]\s*(.+)$/i);
+        if (del) set('delivery', del[1].replace(/,\s*$/, '').trim());
+        const redel = line(/^redel(?:y|ivery)?\s*(?:[:\-]|\bon\b|\bat\b)\s*(.+)$/i);
+        if (redel) set('redelivery', redel[1].replace(/,\s*$/, '').trim());
+        const dur = line(/^(?:duration|period|trip)\s*[:\-]\s*(.+)$/i) ?? line(/^((?:abt\s+)?\d+[^.\n]{0,40}?\b(?:period|months?|years?)\b[^.\n]*time\s*charter[^.\n]*)$/i);
+        if (dur) set('duration', dur[1].replace(/[.,]\s*$/, '').trim());
+        const pay = s.match(/hire\b[^.]{0,60}?(?:every|for|payable)\s*(\d{1,2})\s*days?\s*(?:payable\s*)?in\s*advance/i);
+        if (pay) set('hire_days', +pay[1]);
+        const bd = s.match(/hire\b[^.]{0,120}?(?:w\/i|within)\s*(\d{1,2})\s*(?:banking|bank|b\/?d|working)\s*days?/i);
+        if (bd) set('hire_bd', +bd[1]);
+        const cve = s.match(/\b(?:c\s*\/?\s*[ev]\s*\/?\s*[ve]|cable[^:]{0,40}?victual\w*)\b[^:\d]{0,20}:?\s*(?:usd|us\$|\$)\.?\s*([\d][\d.,]*)\s*,?-?\s*(lumpsum\s*)?(per\s*(?:month|pm|day|days)|pm\b|p\.?m\.?|pdpr|\/month|\/day)?/i);
+        if (cve) {
+            const v = moneyNum(cve[1]);
+            const perDay = /day|pdpr/i.test(cve[3] ?? '');
+            set('cve_month', perDay ? v * 30 : v);
+            if (perDay || !cve[3]) f._guessed.push('cve_month');
+        }
+        const ilohc = s.match(/\bilohc\b\s*:?\s*(?:usd|us\$|\$)\.?\s*([\d][\d.,]*)/i);
+        if (ilohc) set('ilohc', moneyNum(ilohc[1]));
+        const notices = s.match(/(\d{1,2}(?:\s*\/\s*\d{1,2}){1,6})\s*days?\s*(?:approx\w*|aprx\w*)\s*(?:notice\s*)?(?:of\s*)?redel\w*[^.]{0,40}?(\d{1,2}(?:\s*\/\s*\d{1,2}){1,6})\s*days?/i);
+        if (notices) set('redel_notices', `${notices[1].replace(/\s+/g, '')} approx · ${notices[2].replace(/\s+/g, '')} definite`);
     } else {
         set('type', /\bcoa\b|contract of affreightment/i.test(s) ? 'COA' : 'VC');
+        // Freight payment: "FRT IS PAYABLE 95% … WITHIN 3 B/D FROM … SIGNING AND RELEASING BS/L … BBB", "BALANCE … W/I 10 DAYS"
+        const first = s.match(/\b(?:frt|freight)\b[^.]{0,40}?payable\s*(\d{2,3})\s*%/i);
+        if (first) set('freight_first_pct', +first[1]);
+        const fbd = s.match(/\b(?:frt|freight)\b[^.]{0,200}?(?:w\/i|within)\s*(\d{1,2})\s*(?:b\/?d|banking\s*days?|bank\s*days?)/i);
+        if (fbd) set('freight_bd', +fbd[1]);
+        const bal = s.match(/\bbalance\s*(?:of\s*)?(?:frt|freight)[^.]{0,80}?(?:w\/i|within)\s*(\d{1,3})\s*days/i);
+        if (bal) set('freight_balance_days', +bal[1]);
+        const det = s.match(/\bdetention\b[^.]{0,60}?(?:usd|us\$|\$)\.?\s*([\d][\d.,]*)/i);
+        if (det) set('detention', moneyNum(det[1]));
+        const docs = s.match(/(\d{1,2})\s*(?:hrs?|hours)\s*to\s*(?:complete\s*)?(?:cgo|cargo)?\s*doc/i);
+        if (docs) set('docs_hrs', +docs[1]);
+        // Laytime clauses for the Laytime tab
+        if (/\b2\s*pm\s*\/\s*8\s*am\b/i.test(s)) set('start_rule', '2pm8am');
+        else if (/\b13[:.]?00\b[^.]{0,80}\b06[:.]?00\b|\bgencon\b[^.]{0,30}\bclause\s*6/i.test(s)) set('start_rule', 'gencon');
+        const norHrs = s.match(/\bnor\b[^.]{0,80}?between\s*(\d{1,2})[:.]?(\d{2})\s*(?:\/|-|and|to)\s*(\d{1,2})[:.]?(\d{2})\s*(?:hrs?)?\s*(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s*(?:through|thru|to|-)\s*(mon|tue|wed|thu|fri|sat|sun)[a-z]*/i);
+        if (norHrs) set('nor_hours', `${norHrs[5].slice(0, 3)}-${norHrs[6].slice(0, 3)} ${norHrs[1].padStart(2, '0')}${norHrs[2]}-${norHrs[3].padStart(2, '0')}${norHrs[4]}`);
+        if (/\bnor\b[^.]{0,200}?not\s+(?:to\s+be\s+tendered\s+)?before\s+(?:lay\s*days|laycan|the\s+first\s+lay\s*day)|\bnot\s+before\s+laydays\b/i.test(s)) set('nor_after_laycan', 1);
+        const exceptOf = (re) => lines.filter((l) => re.test(l)).map(parseExceptClause).find(Boolean);
+        set('load_except', exceptOf(/^load(?:ing)?\b/i));
+        set('disch_except', exceptOf(/^disch(?:arg\w*)?\b/i));
     }
-    const del = line(/^del(?:ivery)?\s*[:\-]\s*(.+)$/i);
-    if (del) set('delivery', del[1]);
-    const redel = line(/^redel(?:ivery)?\s*[:\-]\s*(.+)$/i);
-    if (redel) set('redelivery', redel[1]);
-    const dur = line(/^(?:duration|period|trip)\s*[:\-]\s*(.+)$/i);
-    if (dur) set('duration', dur[1]);
-    const bb = s.match(/\b(?:gbb|bb|ballast bonus)\s*:?\s*(?:usd|us\$|\$)\s*([\d][\d,.]*)\s*(k|m|mio)?/i);
-    if (bb) set('ballast_bonus', num(bb[1]) * (bb[2] ? (bb[2].toLowerCase() === 'k' ? 1000 : 1e6) : 1));
+    const bb = s.match(/\b(?:gbb|bb|ballast bonus)\s*:?\s*(?:usd|us\$|\$)\.?\s*([\d][\d.,]*)\s*(k|m|mio)?/i);
+    if (bb) set('ballast_bonus', moneyNum(bb[1]) * (bb[2] ? (bb[2].toLowerCase() === 'k' ? 1000 : 1e6) : 1));
     const tbar = s.match(/time\s*bar\w*\s*:?\s*(\d{1,3})\s*days/i);
     if (tbar) set('time_bar_days', +tbar[1]);
 
-    // Subjects: lifted / fully fixed → fixed; "sub(s) …" → on subs
-    if (/\b(?:subs?\s+(?:lifted|cleared)|all subs lifted|fully fixed|clean fixed|\bff\b|confirm(?:ed)? fixed)\b/i.test(s)) set('subs_status', 'fixed');
-    else if (/\bsubs?\b|\bsubject\b/i.test(s)) set('subs_status', 'subs');
+    // ---- Subjects: lifted / fully fixed → fixed; "sub …", "subject to …", "… approval to be lifted …" → on subs
+    const subLines = lines.flatMap((l) => {
+        if (/\bsubs?\s+(?:lifted|cleared)\b|\bsub\s+lifted\b/i.test(l)) return [];
+        const m = l.match(/\b(subj?(?:ect)?\s+(?:to\s+)?[^.;]{2,90}|[^.;]{0,40}\bapproval\s+to\s+be\s+li?f?ted\b[^.;]{0,60})/i);
+        return m ? [m[1].replace(/\s+/g, ' ').trim()] : [];
+    });
+    const lifted = /\b(?:subs?\s+(?:lifted|cleared)|all subs lifted|fully fixed|clean fixed|confirm(?:ed)? fixed)\b|\bff\b(?!\w)/i.test(s);
+    if (lifted && !subLines.some((x) => /to\s+be\s+li?f?ted/i.test(x))) set('subs_status', 'fixed');
+    else if (subLines.length) set('subs_status', 'subs');
     else set('subs_status', 'negotiating');
     f.status = f.subs_status === 'fixed' ? 'fixed' : f.subs_status === 'subs' ? 'subs' : 'negotiating';
-    const subj = s.match(/\b(subj(?:ect)?\s+(?:to\s+)?[^.;\n]+|sub\s+[^.;\n]+)/i);
-    if (subj && f.subs_status === 'subs') set('subjects', subj[1].trim());
+    if (f.subs_status === 'subs') {
+        set('subjects', [...new Set(subLines)].join('; ').slice(0, 400));
+        // Deadline for lifting: "within 6 working hrs", "w/i 24 hours", "latest 1 day after", "latest closing of bank … today"
+        const due = s.match(/\b(?:li?f?ted|lift)\b[^.;]{0,60}?(?:w\/i|within|latest)\s*(\d{1,3})\s*(working\s*)?(hrs?|hours|days?|b\/?d|banking\s*days?)/i);
+        const todayWord = /\b(?:li?f?ted|lift)\b[^.;]{0,60}?\btoday\b/i.test(s);
+        const base = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+        if (due) {
+            const qty = +due[1];
+            const daysAhead = /hr|hour/i.test(due[3]) ? Math.ceil(qty / 24) : qty;
+            set('subs_due', iso(new Date(base.getTime() + daysAhead * 86400000)));
+            f._guessed.push('subs_due');
+        } else if (todayWord) set('subs_due', iso(base));
+    }
 
     for (const k of ['vessel', 'charterers', isTc(f) ? 'hire_rate' : 'freight', 'laycan_from']) if (f[k] === undefined) f._missing.push(k);
     f.fixture_date = iso(today);
