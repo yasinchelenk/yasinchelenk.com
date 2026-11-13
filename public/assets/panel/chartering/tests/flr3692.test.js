@@ -71,3 +71,69 @@ test('Exception clause → excepted period text', () => {
         'Fri 17:00 - Mon 08:00; eve 17:00 - next WD 08:00', 'Friday 17:00 to Monday 08:00 and holiday eves');
     eq(parseExceptClause('1500 mt SHINC'), null, 'no window');
 });
+
+// ---------------------------------------------------------------- Laytime (FLR3692 Module 7 appendices)
+import { laytimeCalc, laytimePort, blankPort, fmtTime, parseExcepted } from '../engine/laytime.js';
+
+const ev = (type, at, until, rule) => ({ type, at, ...(until ? { until } : {}), ...(rule ? { rule } : {}) });
+const H = 60;
+const D = 1440;
+
+test('Module 7 App. 6 "Slow Coach" (GENCON 76, berth charter, WP SHEXUU, strike counts): 12 h demurrage = USD 5,000', () => {
+    // 2 Nov 2024 is a Saturday, as in the example. Monday 11 Nov is a public holiday.
+    const p = { ...blankPort('load'), name: 'Hull', country: '', qty: 30000, laytimeMode: 'rate', rate: 5000, terms: 'SHEXUU', startRule: 'gencon', charter: 'berth', turnHrs: 0,
+        events: [
+            ev('arrived', '2024-11-02 10:00'), ev('nor_tendered', '2024-11-02 10:00'), ev('all_fast', '2024-11-04 10:00'),
+            ev('hold_failed', '2024-11-04 10:00', '2024-11-04 12:00'), ev('commenced', '2024-11-04 12:00'),
+            ev('rain', '2024-11-05 09:30', '2024-11-05 11:45'), ev('strike', '2024-11-06 00:00', '2024-11-07 08:00', 'count'),
+            ev('rain', '2024-11-07 15:10', '2024-11-08 08:00'),
+            ev('no_work', '2024-11-10 00:00', '2024-11-10 08:00'), ev('no_work', '2024-11-10 17:30', '2024-11-11 08:00'),
+            ev('rain', '2024-11-11 09:30', '2024-11-11 10:30'), ev('shifting', '2024-11-11 10:30', '2024-11-11 20:05'), ev('no_work', '2024-11-11 20:05', '2024-11-12 00:00'),
+            ev('rain', '2024-11-12 08:25', '2024-11-12 09:15'), ev('rain', '2024-11-12 18:55', '2024-11-12 19:15'), ev('completed', '2024-11-13 09:15'),
+        ] };
+    const r = laytimeCalc({ cp: { demRate: 10000, onceOnDem: true }, ports: [p] }, [{ date: '2024-11-11', name: 'Public holiday' }]);
+    eq(fmtTime(r.ports[0].start), '2024-11-04 12:00', 'laytime from commencement of loading (invalid NOR waived, time used before counts)');
+    eq(fmtTime(r.ports[0].expiry), '2024-11-12 21:15', 'laytime expires Tuesday 12 Nov 21:15');
+    near(r.demMin, 12 * H, '12 hours on demurrage (rain after expiry does not stop it)', 1e-6);
+    near(r.demurrage, 5000, 'USD 5,000', 1e-6);
+});
+
+test('Module 7 App. 5: averaging (WTS) and reversing compared', () => {
+    // 4 Jun 2026 is a Thursday
+    const load = { ...blankPort('load'), name: 'L', laytimeMode: 'fixed', days: 5, terms: 'SHEX', turnHrs: 0, events: [ev('nor_tendered', '2026-06-04 00:00'), ev('commenced', '2026-06-04 00:00'), ev('completed', '2026-06-07 00:00')] };
+    const dis = { ...blankPort('disch'), name: 'D', laytimeMode: 'fixed', days: 4, terms: 'SHEX', turnHrs: 0, events: [ev('nor_tendered', '2026-06-16 00:00'), ev('commenced', '2026-06-16 00:00'), ev('completed', '2026-06-23 00:00')] };
+    const cp = { demRate: 10000, desRate: 5000, desBasis: 'WTS', onceOnDem: true };
+    const avg = laytimeCalc({ cp: { ...cp, mode: 'averaged' }, ports: [load, dis] });
+    near(avg.savedMin, 2 * D, 'load: 2 working days saved (Sunday excepted)', 1e-6);
+    near(avg.demMin, 3 * D, 'discharge: 3 days on demurrage', 1e-6);
+    near(avg.demurrage, 10000, 'averaged: 1 day demurrage = USD 10,000', 1e-6);
+    const rev = laytimeCalc({ cp: { ...cp, mode: 'reversible' }, ports: [load, dis] });
+    near(rev.demurrage, 0, 'reversed: 2 days carried forward → no demurrage', 1e-6);
+});
+
+test('CP excepted period "Fri 17:00 - Mon 08:00; eve 17:00 - next WD 08:00" (even if used)', () => {
+    const w = parseExcepted('Fri 17:00 - Mon 08:00; eve 17:00 - next WD 08:00');
+    eq([w.weekly.length, w.eve], [1, { from: 1020, to: 480 }], 'parsed');
+    // Thu 4 Jun 2026 08:00 start, 2 days laytime, worked through the weekend
+    const p = { ...blankPort('load'), name: 'X', laytimeMode: 'fixed', days: 2, terms: 'SHINC', turnHrs: 0, excepted: 'Fri 17:00 - Mon 08:00',
+        events: [ev('nor_tendered', '2026-06-04 08:00'), ev('commenced', '2026-06-04 08:00'), ev('completed', '2026-06-10 08:00')] };
+    const r = laytimePort(p, { onceOnDem: true });
+    // Thu 08:00 → Fri 17:00 = 33 h; remaining 15 h from Mon 08:00 → Mon 23:00
+    eq(fmtTime(r.expiry), '2026-06-08 23:00', 'Fri 17:00 – Mon 08:00 does not count, even though worked');
+    const hol = laytimePort({ ...p, excepted: 'eve 17:00 - next WD 08:00', events: [ev('nor_tendered', '2026-06-01 08:00'), ev('commenced', '2026-06-01 08:00'), ev('completed', '2026-06-06 08:00')] },
+        { onceOnDem: true }, { holidays: [{ date: '2026-06-03', name: 'Bayram' }] });
+    // Mon 08:00 → Tue 17:00 = 33 h (Tue is the eve), Wed holiday and Thu until 08:00 excepted, Thu 08:00 + 15 h
+    eq(fmtTime(hol.expiry), '2026-06-04 23:00', 'eve 17:00 → next working day 08:00 excepted');
+});
+
+test('2PM/8AM clause, NOR before laydays, detention after the free time for documents', () => {
+    const p = (events, over = {}) => ({ ...blankPort('load'), name: 'C', laytimeMode: 'fixed', days: 1, terms: 'SHINC', turnHrs: 0, startRule: '2pm8am', events, ...over });
+    eq(fmtTime(laytimePort(p([ev('nor_tendered', '2026-06-01 10:00'), ev('commenced', '2026-06-01 16:00'), ev('completed', '2026-06-03 00:00')]), {}).start), '2026-06-01 14:00', 'NOR before noon → 14:00');
+    eq(fmtTime(laytimePort(p([ev('nor_tendered', '2026-06-01 13:00'), ev('commenced', '2026-06-02 09:00'), ev('completed', '2026-06-03 00:00')]), {}).start), '2026-06-02 08:00', 'NOR after noon → 08:00 next working day');
+    const early = laytimePort(p([ev('nor_tendered', '2026-05-30 10:00'), ev('commenced', '2026-06-02 09:00'), ev('completed', '2026-06-04 00:00')]), { laycanFrom: '2026-06-01', laycanTo: '2026-06-05', norAfterLaycan: true });
+    eq(fmtTime(early.start), '2026-06-01 14:00', 'NOR before laydays: treated as given at laycan start (Mon 00:00 → 14:00 under 2PM/8AM)');
+    eq(early.warnings.some((w) => /laycan başlangıcından/.test(w)), true, 'warning about NOR before laycan');
+    const det = laytimeCalc({ cp: { demRate: 10000, detentionRate: 5000 }, ports: [p([ev('nor_tendered', '2026-06-01 06:00'), ev('commenced', '2026-06-01 14:00'), ev('completed', '2026-06-01 20:00'), ev('docs_on_board', '2026-06-02 06:00')], { docsHrs: 4, days: 2 })] });
+    near(det.detentionMin, 6 * H, 'documents 10 h after completion, 4 h free → 6 h detention', 1e-6);
+    near(det.detention, 1250, '6 h × USD 5,000/day', 1e-6);
+});

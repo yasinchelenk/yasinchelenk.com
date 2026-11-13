@@ -45,8 +45,10 @@ export const TERMS = {
     SATPM: { label: 'Saturday afternoons, Sundays & holidays excepted', days: [0], hol: true, satPm: true },
     SSHEX: { label: 'Saturdays, Sundays & holidays excepted', days: [6, 0], hol: true },
     SSHEXUU: { label: 'Saturdays, Sundays & holidays excepted, unless used', days: [6, 0], hol: true, uu: true },
+    SSHEXEIU: { label: 'Saturdays, Sundays & holidays excepted, even if used', days: [6, 0], hol: true },
     FHEX: { label: 'Fridays & holidays excepted', days: [5], hol: true },
     FHEXUU: { label: 'Fridays & holidays excepted, unless used', days: [5], hol: true, uu: true },
+    FHEXEIU: { label: 'Fridays & holidays excepted, even if used', days: [5], hol: true },
     WWD: { label: 'Weather working days (weather stops from the SOF)', days: [], hol: false },
 };
 
@@ -75,12 +77,43 @@ export const EVENTS = {
     waiting_berth: { label: 'Waiting for berth', period: true, rule: 'count' },
     draft_survey: { label: 'Draft survey', period: true, rule: 'count' },
     stoppage: { label: 'Other stoppage', period: true, rule: 'deduct' },
+    no_work: { label: 'No work (idle / not worked)', period: true, rule: 'count', idle: true },
     docs_on_board: { label: 'Documents on board' },
     sailed: { label: 'Sailed / hoses off' },
     other: { label: 'Other remark' },
 };
 
 export const RULES = { count: 'Counts 100%', half: 'Counts 50%', deduct: 'Deducted (0%)' };
+
+/**
+ * Commencement after NOR: before noon → same day at `am`, after noon → next working day at `pm` (minutes).
+ * GENCON 94 cl. 6(c): 13:00 / 06:00. The "2PM/8AM clause" common in Med/Black Sea recaps: 14:00 / 08:00.
+ */
+export const START_RULES = {
+    turn: { label: 'NOR + turn time' },
+    gencon: { label: 'GENCON 94 (13:00 / 06:00 next WD)', sameDay: 780, nextDay: 360 },
+    '2pm8am': { label: '2PM / 8AM clause (14:00 / 08:00 next WD)', sameDay: 840, nextDay: 480 },
+};
+
+const DOW_IDX = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+
+/**
+ * Excepted periods written in a CP ("time from 17:00 Friday or the day before a holiday until 08:00 Monday or the next
+ * working day not to count"): "Fri 17:00 - Mon 08:00; eve 17:00 - next WD 08:00".
+ * → { weekly: [[fromWeekMin, toWeekMin]], eve: {from, to} | null }   (week minutes: Sunday 00:00 = 0)
+ */
+export function parseExcepted(text) {
+    const out = { weekly: [], eve: null };
+    for (const part of String(text ?? '').split(/[;\n]+/)) {
+        const t = part.trim().toLowerCase();
+        if (!t) continue;
+        const ev = t.match(/^(?:eve|arife|holiday\s*eve|day\s*before\s*holiday)\s*(\d{1,2})[:.]?(\d{2})\s*[-–]\s*(?:next\s*(?:wd|working\s*day))\s*(\d{1,2})[:.]?(\d{2})$/);
+        if (ev) { out.eve = { from: +ev[1] * 60 + +ev[2], to: +ev[3] * 60 + +ev[4] }; continue; }
+        const w = t.match(/^([a-z]{3})[a-z]*\s*(\d{1,2})[:.]?(\d{2})\s*[-–]\s*([a-z]{3})[a-z]*\s*(\d{1,2})[:.]?(\d{2})$/);
+        if (w && w[1] in DOW_IDX && w[4] in DOW_IDX) out.weekly.push([DOW_IDX[w[1]] * DAY + +w[2] * 60 + +w[3], DOW_IDX[w[4]] * DAY + +w[5] * 60 + +w[6]]);
+    }
+    return out;
+}
 const RULE_FACTOR = { count: 1, half: 0.5, deduct: 0 };
 
 /**
@@ -125,11 +158,11 @@ function makeCtx(port, cp, holidays) {
     const periods = events.filter((e) => EVENTS[e.type]?.period && e.until !== null && e.until > e.t).map((e) => {
         const def = EVENTS[e.type];
         const rule = e.rule ?? (e.type === 'shifting' && cp.shiftingCounts ? 'count' : def.rule);
-        return { from: e.t, to: e.until, factor: RULE_FACTOR[rule] ?? 0, rule, evenOnDem: !!def.evenOnDem && rule !== 'count', label: e.note ? `${def.label} — ${e.note}` : def.label };
+        return { from: e.t, to: e.until, factor: RULE_FACTOR[rule] ?? 0, rule, idle: !!def.idle, evenOnDem: !!def.evenOnDem && rule !== 'count', label: e.note ? `${def.label} — ${e.note}` : def.label };
     });
     const commenced = first('commenced');
     const completed = first('completed');
-    return { terms, hol, events, first, periods, commenced, completed };
+    return { terms, hol, events, first, periods, commenced, completed, windows: parseExcepted(port.excepted) };
 }
 
 /** Why base laytime does not run at t (terms / holiday calendar), or null. */
@@ -142,6 +175,20 @@ function excepted(t, ctx) {
         const hday = ctx.hol.get(dateKey(t));
         if (hday && minuteOfDay(t) >= hday.fromMin) return `Holiday: ${hday.name}`;
     }
+    const win = ctx.windows;
+    if (win?.weekly.length) {
+        const wm = d * DAY + minuteOfDay(t);
+        for (const [a, b] of win.weekly) if (a <= b ? wm >= a && wm < b : wm >= a || wm < b) return 'Excepted period (CP)';
+    }
+    if (win?.eve) {
+        const today = ctx.hol.get(dateKey(t));
+        if (today && today.fromMin === 0) return `Holiday: ${today.name} (CP)`;
+        const tomorrow = ctx.hol.get(dateKey(t + DAY));
+        if (tomorrow && tomorrow.fromMin === 0 && minuteOfDay(t) >= win.eve.from) return `Eve of ${tomorrow.name} (CP)`;
+        // Next working day after a holiday, until the agreed hour
+        const yesterday = ctx.hol.get(dateKey(t - DAY));
+        if (yesterday && yesterday.fromMin === 0 && !ctx.hol.get(dateKey(t)) && minuteOfDay(t) < win.eve.to) return `After ${yesterday.name} (CP)`;
+    }
     return null;
 }
 
@@ -149,7 +196,7 @@ function excepted(t, ctx) {
 function working(t, ctx) {
     if (ctx.commenced === null || t < ctx.commenced) return false;
     if (ctx.completed !== null && t >= ctx.completed) return false;
-    return !ctx.periods.some((p) => p.factor < 1 && t >= p.from && t < p.to);
+    return !ctx.periods.some((p) => (p.factor < 1 || p.idle) && t >= p.from && t < p.to);
 }
 
 /** Next time after t where any rule may change. */
@@ -158,6 +205,8 @@ function nextBoundary(t, ctx, extra = []) {
     if (ctx.terms.satPm) cands.push(dayStart(t) + 720);
     const hday = ctx.hol.get(dateKey(t));
     if (hday) cands.push(dayStart(t) + hday.fromMin);
+    for (const [a, b] of ctx.windows?.weekly ?? []) cands.push(dayStart(t) + (a % DAY), dayStart(t) + (b % DAY));
+    if (ctx.windows?.eve) cands.push(dayStart(t) + ctx.windows.eve.from, dayStart(t) + ctx.windows.eve.to);
     for (const p of ctx.periods) cands.push(p.from, p.to);
     if (ctx.commenced !== null) cands.push(ctx.commenced);
     if (ctx.completed !== null) cands.push(ctx.completed);
@@ -209,7 +258,9 @@ function nextWorkingDay(t, ctx) {
     for (let day = dayStart(t) + DAY, k = 0; k < 15; k++, day += DAY) {
         if (ctx.terms.days.includes(dow(day))) continue;
         const hday = ctx.hol.get(dateKey(day));
-        if (ctx.terms.hol && hday && hday.fromMin === 0) continue;
+        if ((ctx.terms.hol || ctx.windows?.eve) && hday && hday.fromMin === 0) continue;
+        // A CP excepted period covering the whole working day (e.g. Fri 17:00 – Mon 08:00 makes Saturday and Sunday off)
+        if (excepted(day + 12 * 60, ctx) && excepted(day, ctx) && excepted(day + DAY - 1, ctx)) continue;
         return day;
     }
     return dayStart(t) + DAY;
@@ -237,9 +288,19 @@ export function laytimePort(port, cp = {}, { holidays = [], allowed, startOnDem 
     const allFast = ctx.first('all_fast');
     const fp = ctx.first('free_pratique');
     const docs = ctx.first('docs_on_board');
-    const end = port.endAt === 'docs' && docs !== null ? docs : ctx.completed;
+    let end = port.endAt === 'docs' && docs !== null ? docs : ctx.completed;
+    // Free time for cargo documents after completion counts as laytime; any excess is detention (rate in the CP)
+    let detention = 0;
+    if (has(port.docsHrs) && ctx.completed !== null && docs !== null && docs > ctx.completed) {
+        const freeEnd = ctx.completed + n(port.docsHrs) * 60;
+        end = Math.min(docs, freeEnd);
+        detention = Math.max(0, docs - freeEnd);
+    }
 
     if (end === null) warnings.push(`${port.name || 'Port'}: “Completed” olayı yok — laytime bitişi bilinmiyor.`);
+    const lc = port.kind !== 'disch' ? { from: parseTime(cp.laycanFrom ? `${cp.laycanFrom} 00:00` : null), to: parseTime(cp.laycanTo ? `${cp.laycanTo} 23:59` : null) } : { from: null, to: null };
+    if (lc.from !== null && nor !== null && nor < lc.from) warnings.push(`${port.name || 'Port'}: NOR laycan başlangıcından (${cp.laycanFrom}) önce verilmiş${cp.norAfterLaycan ? ' — CP: laytime laydays’ten önce başlamaz' : ' — CP’de “NOR not before laydays” var mı kontrol edin'}.`);
+    if (lc.to !== null && nor !== null && nor > lc.to) warnings.push(`${port.name || 'Port'}: NOR cancelling tarihinden (${cp.laycanTo}) sonra — charterers iptal hakkına sahip olabilir.`);
 
     // ---- Commencement
     let start = null;
@@ -252,12 +313,18 @@ export function laytimePort(port, cp = {}, { holidays = [], allowed, startOnDem 
         const basis = berthCp ? allFast ?? nor : nor;
         if (basis === null) warnings.push(`${port.name || 'Port'}: ${berthCp ? 'All fast / NOR' : 'NOR'} olayı yok.`);
         const hours = parseOfficeHours(port.norHours);
-        const deemed = berthCp && allFast !== null ? basis : deemedNor(basis, hours, ctx);
+        let deemed = berthCp && allFast !== null ? basis : deemedNor(basis, hours, ctx);
+        if (cp.norAfterLaycan && lc.from !== null && deemed !== null && deemed < lc.from) {
+            deemed = deemedNor(lc.from, hours, ctx);
+            startReason = `NOR before laydays — treated as given at the start of laycan ${fmtTime(deemed)}. `;
+        }
         if (deemed !== null && basis !== null && deemed !== basis) startReason = `NOR outside office hours — deemed tendered ${fmtTime(deemed)}. `;
         if (deemed !== null) {
-            if (port.startRule === 'gencon') {
-                start = minuteOfDay(deemed) <= 720 ? dayStart(deemed) + 780 : nextWorkingDay(deemed, ctx) + 360;
-                startReason += 'GENCON 94: NOR up to 12:00 → 13:00 same day, after 12:00 → 06:00 next working day.';
+            const rule = START_RULES[port.startRule];
+            if (rule?.sameDay !== undefined) {
+                start = minuteOfDay(deemed) <= 720 ? dayStart(deemed) + rule.sameDay : nextWorkingDay(deemed, ctx) + rule.nextDay;
+                const hm = (x) => `${pad(Math.floor(x / 60))}:${pad(x % 60)}`;
+                startReason += `${port.startRule === 'gencon' ? 'GENCON 94' : '2PM/8AM clause'}: NOR up to 12:00 → ${hm(rule.sameDay)} same day, after 12:00 → ${hm(rule.nextDay)} next working day.`;
             } else {
                 start = deemed + n(port.turnHrs) * 60;
                 startReason += `${berthCp ? 'All fast' : 'NOR'} + ${fmtDur(n(port.turnHrs) * 60)} turn time.`;
@@ -274,7 +341,7 @@ export function laytimePort(port, cp = {}, { holidays = [], allowed, startOnDem 
     }
 
     const result = {
-        name: port.name || '', kind: port.kind, allowed: allowedMin, start, startReason: startReason.trim(), end,
+        name: port.name || '', kind: port.kind, allowed: allowedMin, start, startReason: startReason.trim(), end, detention,
         segments: [], used: 0, demurrage: 0, expiry: null, onDemAtEnd: startOnDem, savedAts: 0, savedWts: 0, remaining: 0, warnings,
     };
     if (start === null || end === null || end <= start) {
@@ -341,6 +408,12 @@ export function laytimePort(port, cp = {}, { holidays = [], allowed, startOnDem 
         savedWts: Number.isFinite(remaining) ? remaining : 0, savedAts: ats,
     });
     if (!Number.isFinite(allowedMin)) warnings.push(`${port.name || 'Port'}: CQD (customary quick despatch) — sabit laytime yok, demurrage hesaplanmaz.`);
+    // "Unless used": an excepted day counted in full means no stoppage / "No work" line was entered for it
+    if (ctx.terms.uu) {
+        const fullDays = result.segments.filter((g) => g.phase === 'laytime' && /time used counts \(UU\)/.test(g.desc) && g.to - g.from >= DAY - 1);
+        if (fullDays.length) warnings.push(`${port.name || 'Port'}: ${fullDays.map((g) => dateKey(g.from)).join(', ')} tamamen “used” sayıldı (UU). Çalışılmayan saatler için “No work” satırı ekleyin; aksi hâlde SOF’ta çalışıldığı varsayılır.`);
+    }
+    if (detention > 0) warnings.push(`${port.name || 'Port'}: belgeler ${fmtDur(n(port.docsHrs) * 60)} serbest süreden ${fmtDur(detention)} geç — detention.`);
     return result;
 }
 
@@ -363,7 +436,8 @@ function mergeSegments(segs) {
 
 /**
  * Whole calculation over one or more ports.
- * cp: { demRate, desRate (default half), desBasis: 'ATS'|'WTS', onceOnDem, mode: 'separate'|'reversible'|'averaged', shiftingCounts, waitingCounts }
+ * cp: { demRate, desRate (default half), desBasis: 'ATS'|'WTS', onceOnDem, mode: 'separate'|'reversible'|'averaged', shiftingCounts, waitingCounts,
+ *       laycanFrom, laycanTo, norAfterLaycan, detentionRate }
  */
 export function laytimeCalc(calc, holidaysIn = []) {
     const cp = calc.cp ?? {};
@@ -414,12 +488,14 @@ export function laytimeCalc(calc, holidaysIn = []) {
         despatch = savedMin / DAY * desRate;
     }
 
+    const detentionMin = results.reduce((s, r) => s + (r.detention ?? 0), 0);
+    const detention = detentionMin / DAY * n(cp.detentionRate);
     return {
-        mode, ports: results, demRate, desRate, desBasis: ats ? 'ATS' : 'WTS',
+        mode, ports: results, demRate, desRate, desBasis: ats ? 'ATS' : 'WTS', detentionMin, detention,
         allowed: ports.reduce((s, p) => s + allowedMinutes(p), 0),
         used: results.reduce((s, r) => s + r.used, 0),
         demMin, savedMin, demurrage, despatch,
-        net: demurrage - despatch, // + owed to owners, − owed to charterers
+        net: demurrage - despatch + detention, // + owed to owners, − owed to charterers
         warnings: results.flatMap((r) => r.warnings),
     };
 }
@@ -459,7 +535,7 @@ export function parseSofText(text) {
             [/weather|wind|swell|sea state/, 'weather'], [/shift/, 'shifting'], // a bare "crane" is usually the ship's gear on a geared bulker, so only shore/terminal words mean shore
             [/break ?down.*(shore|conveyor|terminal)|(shore|terminal|conveyor).*break ?down/, 'breakdown_shore'],
             [/break ?down/, 'breakdown_ship'], [/strike/, 'strike'], [/wait.*cargo|awaiting cargo/, 'waiting_cargo'], [/wait.*berth|awaiting berth/, 'waiting_berth'],
-            [/draft survey|draught survey/, 'draft_survey'], [/holiday|bayram/, 'holiday'], [/doc.*on board|documents/, 'docs_on_board'],
+            [/no work|not worked|idle|no (?:cargo )?operations?/, 'no_work'], [/draft survey|draught survey/, 'draft_survey'], [/holiday|bayram/, 'holiday'], [/doc.*on board|documents/, 'docs_on_board'],
             [/sail|hoses off|cast off|departed/, 'sailed'], [/arriv|eosp|anchored|dropped anchor/, 'arrived'],
         ];
         return rules.find(([r]) => r.test(x))?.[1] ?? 'other';
@@ -488,7 +564,8 @@ export function blankLaytime() {
     return {
         name: '',
         vessel: { name: '', vesselId: null },
-        cp: { cpDate: '', form: 'GENCON 94', owners: '', charterers: '', cargo: '', demRate: null, desRate: null, desBasis: 'ATS', onceOnDem: true, mode: 'separate', shiftingCounts: false, waitingCounts: false },
+        cp: { cpDate: '', form: 'GENCON 94', owners: '', charterers: '', cargo: '', demRate: null, desRate: null, desBasis: 'ATS', onceOnDem: true, mode: 'separate', shiftingCounts: false, waitingCounts: false,
+            laycanFrom: '', laycanTo: '', norAfterLaycan: false, detentionRate: null },
         claim: { status: 'draft', timeBarDays: null, notes: '' },
         ports: [blankPort('load')],
     };
@@ -498,6 +575,6 @@ export function blankPort(kind = 'load') {
     return {
         name: '', kind, country: 'TR', tz: 'Europe/Istanbul', qty: null, laytimeMode: 'rate', rate: null, days: null, hours: null, terms: 'SHINC',
         turnHrs: 6, startRule: 'turn', charter: 'port', wibon: false, wipon: false, wifpon: false, wccon: false, requireFp: false,
-        usedBeforeCounts: true, norHours: '', endAt: 'completed', events: [],
+        usedBeforeCounts: true, norHours: '', endAt: 'completed', excepted: '', docsHrs: null, events: [],
     };
 }

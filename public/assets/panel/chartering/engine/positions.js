@@ -8,7 +8,7 @@ import { normalizeTerms } from './terms.js';
 export const VESSEL_TYPES = ['SDBC', 'Handysize', 'Handymax', 'Supramax', 'Ultramax', 'Panamax', 'Kamsarmax', 'Post-Panamax', 'Capesize', 'Newcastlemax', 'MPP', 'General Cargo', 'OHBC', 'Log carrier', 'Tweendecker', 'Mini bulker'];
 export const TONNAGE_STATUS = { expected: 'Expected', firm: 'Firm open', scpv: 'SCPV (subject to previous)', fixed: 'Fixed', withdrawn: 'Withdrawn' };
 export const ORDER_STATUS = { open: 'Open', working: 'Working', fixed: 'Fixed', failed: 'Failed', withdrawn: 'Withdrawn' };
-export const LAYTIME_TERMS = ['SHINC', 'SHEX', 'SHEXUU', 'SHEXEIU', 'SSHEX', 'SSHEXUU', 'SATPM', 'FHEX', 'WWD'];
+export const LAYTIME_TERMS = ['SHINC', 'SHEX', 'SHEXUU', 'SHEXEIU', 'SSHEX', 'SSHEXUU', 'SSHEXEIU', 'SATPM', 'FHEX', 'FHEXUU', 'FHEXEIU', 'WWD'];
 export const CP_FORMS = ['GENCON 94', 'NYPE 93', 'NYPE 2015', 'NYPE 46', 'ASBATIME', 'AMWELSH 93', 'SYNACOMEX', 'NORGRAIN', 'GRAINCON', 'BARECON'];
 
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };

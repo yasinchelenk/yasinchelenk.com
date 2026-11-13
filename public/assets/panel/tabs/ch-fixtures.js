@@ -5,7 +5,7 @@ import { get, post, put, del } from '../core/api.js';
 import { modal, confirmBox, segmented } from '../core/ui.js';
 import { Grid, resetLayoutButton } from '../core/grid.js';
 import { live } from '../core/live.js';
-import { parseRecap, defaultTasks, noticeDates, fillTemplate, fixtureVars, freightInvoice, FIXTURE_STATUS, FIXTURE_TYPES, DEFAULT_TEMPLATES, isTc } from '../chartering/engine/fixtures.js';
+import { parseRecap, defaultTasks, noticeDates, fillTemplate, fixtureVars, freightInvoice, laytimeFromFixture, FIXTURE_STATUS, FIXTURE_TYPES, DEFAULT_TEMPLATES, isTc } from '../chartering/engine/fixtures.js';
 import { LAYTIME_TERMS, CP_FORMS } from '../chartering/engine/positions.js';
 import { blankLaytime, blankPort } from '../chartering/engine/laytime.js';
 import { fmt, usd, specForm, dueBadge, copyReport, exportReport } from '../chartering/ui.js';
@@ -200,7 +200,9 @@ export async function mount(el, ctx, param) {
         c.vessel.name = f.vessel ?? '';
         Object.assign(c.cp, { cpDate: f.cp_date ?? '', form: f.cp_form ?? '', owners: f.owners ?? '', charterers: f.charterers ?? '', cargo: [f.qty && `${fmt(f.qty, 0)} mt`, f.cargo].filter(Boolean).join(' '),
             demRate: f.dem ?? null, desRate: f.des ?? null });
-        const port = (kind, name, rate, terms) => ({ ...blankPort(kind), name: name ?? '', qty: f.bl_qty ?? f.qty ?? null, rate: rate ?? null, terms: terms || 'SHINC' });
+        const lt = laytimeFromFixture(f);
+        Object.assign(c.cp, lt.cp);
+        const port = (kind, name, rate, terms) => ({ ...blankPort(kind), name: name ?? '', qty: f.bl_qty ?? f.qty ?? null, rate: rate ?? null, terms: terms || 'SHINC', ...lt.port(kind) });
         c.ports = [port('load', f.load_port, f.load_rate, f.load_terms), port('disch', f.disch_port, f.disch_rate, f.disch_terms)];
         c.claim = { status: 'draft', timeBarDays: f.time_bar_days ?? null, notes: '' };
         ctx.open('ch-laytime', { calc: c });

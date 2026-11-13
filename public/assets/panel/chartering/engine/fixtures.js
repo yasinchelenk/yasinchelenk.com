@@ -186,6 +186,25 @@ export function parseRecap(text, today = new Date()) {
     return f;
 }
 
+/** Laytime settings taken from a fixture (recap clauses) → { cp: {...}, port(kind): {...} } for the Laytime tab. */
+export function laytimeFromFixture(f = {}) {
+    const cp = {};
+    if (f.laycan_from) cp.laycanFrom = f.laycan_from;
+    if (f.laycan_to) cp.laycanTo = f.laycan_to;
+    if (f.nor_after_laycan) cp.norAfterLaycan = true;
+    if (has(f.detention)) cp.detentionRate = n(f.detention);
+    const port = (kind) => {
+        const p = {};
+        if (f.start_rule) { p.startRule = f.start_rule; if (f.start_rule !== 'turn') p.turnHrs = 0; }
+        if (f.nor_hours) p.norHours = f.nor_hours;
+        const ex = kind === 'disch' ? f.disch_except : f.load_except;
+        if (ex) p.excepted = ex;
+        if (has(f.docs_hrs)) p.docsHrs = n(f.docs_hrs);
+        return p;
+    };
+    return { cp, port };
+}
+
 // ---------------------------------------------------------------- Post-fixture checklist and notices
 
 /**

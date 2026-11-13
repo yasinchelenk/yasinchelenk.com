@@ -4,8 +4,9 @@
 // deducted under WWD / PWWD, counting under running days.
 import { local } from './time.js';
 import { blankPort, blankLaytime, EVENTS as LT_EVENTS, TERMS } from '../laytime.js';
+import { laytimeFromFixture } from '../fixtures.js';
 
-const TERM_ORDER = ['SSHEXUU', 'SSHEX', 'SHEXEIU', 'SHEXUU', 'SHEX', 'SATPM', 'FHEXUU', 'FHEX', 'SHINC'];
+const TERM_ORDER = ['SSHEXUU', 'SSHEXEIU', 'SSHEX', 'SHEXEIU', 'SHEXUU', 'SHEX', 'SATPM', 'FHEXUU', 'FHEXEIU', 'FHEX', 'SHINC'];
 const WEATHER = new Set(['rain', 'wind']);
 const RULE = { count: 'count', exclude: 'deduct', half: 'half' };
 
@@ -100,6 +101,8 @@ export function sofToLaytimePort(doc, a, dict, { fixture = null, port = null, so
         norHours: H.nor_hours ?? '', events,
         sof: sof ? { id: sof.id, ref: sof.ref, version: sof.version } : null,
     };
+    // Recap clauses kept on the fixture (2PM/8AM, excepted periods, docs free time) — the SOF header wins for NOR hours
+    Object.assign(p, Object.fromEntries(Object.entries(laytimeFromFixture(f).port(call)).filter(([k]) => !(k === 'norHours' && p.norHours))));
     return { port: p, warnings, sent };
 }
 
@@ -119,7 +122,7 @@ export function mergeIntoCalc(calc, port, { doc, fixture = null } = {}) {
             cpDate: H.cp_date || f.cp_date || '', form: H.cp_form || f.cp_form || c.cp.form, owners: H.owners || f.owners || '', charterers: H.charterers || f.charterers || '',
             cargo: [H.cp_qty, H.cargo || f.cargo].filter(Boolean).join(' '),
             demRate: firstNumber(H.dem_rate) ?? f.dem ?? null, desRate: firstNumber(H.des_rate) ?? f.des ?? null,
-        });
+        }, laytimeFromFixture(f).cp);
     }
     const i = c.ports.findIndex((p) => (port.sof && p.sof?.id === port.sof.id) || (!p.sof && p.kind === port.kind && (p.name || '').toLowerCase() === (port.name || '').toLowerCase()));
     if (i >= 0) c.ports[i] = port;
