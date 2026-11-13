@@ -150,3 +150,28 @@ test('Knowledge: glossary has the course abbreviations once each; BIMCO ranges',
     eq(/Indonesia/.test(REGIONS.FEAST), true, 'Far East per BIMCO');
     eq([IACS_MEMBERS.length, IACS_MEMBERS.some((m) => m[0] === 'TL'), IACS_MEMBERS.some((m) => m[0] === 'RS')], [12, true, false], 'IACS: 12 members, TL in, RS out');
 });
+
+// ---------------------------------------------------------------- Stowage & securing, ICA 1996 (2011)
+import { lashingRuleOfThumb, coilStack, tankTopLoad, icaApportion } from '../engine/stowage.js';
+
+test('Cargo Stowage & Securing: rule of thumb, coils, tank top', () => {
+    const l = lashingRuleOfThumb({ weight: 40, perSide: 4, breakingStrength: 18, device: 'chain' });
+    eq([l.mslEach, l.perSideTotal, l.ok, l.lashingsNeeded], [9, 36, false, 5], '40 t unit, 4 chains of 18 t BS a side: MSL 9 t each → 36 t < 40 t, 5 needed');
+    eq(lashingRuleOfThumb({ weight: 20, perSide: 3, breakingStrength: 10, device: 'wireSingle' }).ok, true, 'single-use wire 80%: 3 × 8 t ≥ 20 t');
+    eq([coilStack({ coilWeight: 9 }).maxTiers, coilStack({ coilWeight: 14 }).maxTiers, coilStack({ coilWeight: 22 }).maxTiers], [3, 2, 1], 'coil stacking table');
+    eq(coilStack({ coilWeight: 14, tiers: 3 }).ok, false, '14 t coils three high → 42 t on the bottom tier, too much');
+    const tt = tankTopLoad({ weight: 1200, length: 20, width: 15, permissible: 22 });
+    eq([tt.load, tt.ok, +tt.maxSolidHeight.toFixed(2)], [4, true, 2.8], '1,200 t on 300 m² = 4 t/m²; solid steel max 22 / 7.85 = 2.80 m');
+});
+
+test('ICA 1996 (2011) apportionment — FLR3692 Module 3 table 2', () => {
+    eq(icaApportion({ cause: 'seaworthiness' }).ownersPct, 100, '8(a) owners 100%');
+    eq(icaApportion({ cause: 'seaworthiness', handlingCausedUnseaworthiness: true }).ownersPct, 50, '8(a) caused by handling 50/50');
+    eq(icaApportion({ cause: 'handling' }).ownersPct, 0, '8(b) charterers 100%');
+    eq(icaApportion({ cause: 'handling', andResponsibility: true }).ownersPct, 50, '8(b) "and responsibility" 50/50');
+    eq(icaApportion({ cause: 'handling', andResponsibility: true, unseaworthinessCausedHandling: true }).ownersPct, 100, '8(b) caused by unseaworthiness → owners');
+    eq([icaApportion({ cause: 'shortage' }).ownersPct, icaApportion({ cause: 'shortage', evidence: 'charterers' }).ownersPct], [50, 0], '8(c)');
+    const o = icaApportion({ cause: 'other', amount: 80000, delivered: '2026-03-15' });
+    eq([o.owners, o.charterers, o.notifyBy], [40000, 40000, '2028-03-15'], '8(d) 50/50; notify within 24 months');
+    eq(icaApportion({ cause: 'other', delivered: '2026-03-15', hamburg: true }).notifyBy, '2029-03-15', '36 months under Hamburg Rules');
+});
