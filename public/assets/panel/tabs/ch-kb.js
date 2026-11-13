@@ -4,12 +4,12 @@ import { h, fill, toast, store, debounce, fmtDateTime } from '../core/dom.js';
 import { get, post, put, del } from '../core/api.js';
 import { confirmBox, segmented } from '../core/ui.js';
 import { runAdapter } from '../chartering/sources.js';
-import { kbTables, lessonUrl, CP_FORMS_INFO, KB_DEFAULTS } from '../chartering/kb.js';
-import { REGIONS } from '../chartering/regions.js';
+import { kbTables, lessonUrl, CP_FORMS_INFO, KB_DEFAULTS, BEAUFORT, DOUGLAS_SEA, DOUGLAS_SWELL, PSC_MOUS, IACS_MEMBERS, CARGO_CONVENTIONS } from '../chartering/kb.js';
+import { REGIONS, REGIONS_SOURCE } from '../chartering/regions.js';
 import { fmt, parseNum } from '../chartering/ui.js';
 import { sfToCuftLt } from '../chartering/engine/units.js';
 
-const VIEWS = { glossary: 'Glossary', regions: 'Regions', cp: 'CP forms', sizes: 'Vessel sizes', sf: 'Stowage factors', lessons: 'handybulk lessons' };
+const VIEWS = { glossary: 'Glossary', regions: 'Regions', cp: 'CP forms', sizes: 'Vessel sizes', sf: 'Stowage factors', reference: 'Reference', lessons: 'handybulk lessons' };
 // Editable tables: [key, label, kind ('text' | 'num'), width]
 const COLS = {
     glossary: [['abbr', 'Term', 'text', '120px'], ['expansion', 'Meaning', 'text', '220px'], ['text', 'Explanation', 'text', '420px'], ['slug', 'handybulk lesson (slug or URL)', 'text', '220px']],
@@ -39,7 +39,7 @@ export async function mount(el, ctx) {
         viewSeg.replaceChildren(segmented(Object.entries(VIEWS).map(([value, label]) => ({ value, label })), view, (v) => { view = v; editing = null; store.set('ch_kb_view', v); draw(); }));
         if (view === 'lessons' && !editing) { lessons(); return; }   // loads the 77 kB index on demand
         fill(body, editing ? editTable(view) : view === 'glossary' ? glossary() : view === 'regions' ? regions() : view === 'cp' ? cpForms()
-            : view === 'sizes' ? sizes() : stowage());
+            : view === 'sizes' ? sizes() : view === 'reference' ? reference() : stowage());
     }
 
     const q = () => search.trim().toLowerCase();
@@ -93,7 +93,27 @@ export async function mount(el, ctx) {
         return h('div.ch-board__view', toolbar(null),
             h('div.ch-scroll', h('table.ch-table', h('thead', h('tr', h('th', 'Abbreviation'), h('th', 'Area'))),
                 h('tbody', rows.map(([k, v]) => h('tr', h('td', h('b', k)), h('td', v)))))),
-            h('p.dim', 'Market ve Tonnage & Cargo tablolarında bu kısaltmaların üzerine gelince açıklama görünür.'));
+            h('p.dim', 'Market ve Tonnage & Cargo tablolarında bu kısaltmaların üzerine gelince açıklama görünür. “(BIMCO)” işaretli tanımlar: ', REGIONS_SOURCE));
+    }
+
+    // Weather scales for performance clauses, PSC regimes, IACS members, B/L liability regimes
+    function reference() {
+        const table = (title, head, rows, note) => (rows.length ? h('section.ch-ref',
+            h('h4', title),
+            h('div.ch-scroll', h('table.ch-table.ch-wrap', h('thead', h('tr', head.map((x) => h('th', x)))), h('tbody', rows.map((r) => h('tr', r.map((c, i) => h('td', i ? String(c) : h('b', String(c))))))))),
+            note ? h('p.dim', note) : null) : null);
+        const f = (rows) => rows.filter((r) => hit(...r));
+        return h('div.ch-board__view', toolbar(null),
+            table('Beaufort wind scale', ['BF', 'Description', 'Türkçe', 'Wind kn', 'Sea', 'Wave ≈ m'], f(BEAUFORT),
+                'İyi hava: CP aksi demedikçe genelde BF 4 ve altı (FLR3692 Modül 4 §12.2). Numaralar WMO’ya göredir (0 = sakin); bazı ders notları 1’den başlayarak bir kaydırır.'),
+            table('Douglas sea state (wind sea)', ['DSS', 'Description', 'Height m'], f(DOUGLAS_SEA), 'Performans hesabında genelde DSS 3 (slight) ve altı iyi hava sayılır.'),
+            table('Douglas swell', ['Swell', 'Description'], f(DOUGLAS_SWELL)),
+            table('Port State Control — regional MoUs', ['MoU', 'Region', 'Members (examples)'], f(PSC_MOUS),
+                'Türkiye Akdeniz ve Karadeniz MoU üyesidir. Gemi seçerken son PSC denetimleri ve detention kaydı kontrol edilir.'),
+            table('IACS members', ['Code', 'Society', 'Country'], f(IACS_MEMBERS),
+                'Rus Denizcilik Sicili’nin üyeliği 11 Mart 2022’de kaldırıldı; Türk Loydu 2023’te üye oldu. Recap’lerde sık istenen: “IACS class + IG P&I”.'),
+            table('Cargo liability regimes (B/L)', ['Regime', 'Main points', 'Limit', 'Time bar'], f(CARGO_CONVENTIONS),
+                'CP’de “Paramount clause” ile Hague / Hague-Visby kuralları sözleşmeye dahil edilir (FLR3692 Modül 5 §6).'));
     }
 
     function cpForms() {

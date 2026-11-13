@@ -137,3 +137,16 @@ test('2PM/8AM clause, NOR before laydays, detention after the free time for docu
     near(det.detentionMin, 6 * H, 'documents 10 h after completion, 4 h free → 6 h detention', 1e-6);
     near(det.detention, 1250, '6 h × USD 5,000/day', 1e-6);
 });
+
+// ---------------------------------------------------------------- Knowledge base
+import { KB_DEFAULTS, IACS_MEMBERS } from '../kb.js';
+import { REGIONS } from '../regions.js';
+
+test('Knowledge: glossary has the course abbreviations once each; BIMCO ranges', () => {
+    const abbrs = KB_DEFAULTS.glossary.map((r) => r.abbr.toUpperCase());
+    eq(abbrs.length, new Set(abbrs).size, 'no duplicate terms');
+    eq(['A/E (OFFER)', 'BENDS', 'ADA / WOG', 'SUB DETS', 'ATDNSHINC', 'PDPR', 'LOG ALTS'].every((a) => abbrs.includes(a)), true, 'Module 2 / GBD terms present');
+    eq(/NOT North Africa or the Adriatic/.test(REGIONS['Skaw-Passero']), true, 'Skaw–Passero per BIMCO');
+    eq(/Indonesia/.test(REGIONS.FEAST), true, 'Far East per BIMCO');
+    eq([IACS_MEMBERS.length, IACS_MEMBERS.some((m) => m[0] === 'TL'), IACS_MEMBERS.some((m) => m[0] === 'RS')], [12, true, false], 'IACS: 12 members, TL in, RS out');
+});

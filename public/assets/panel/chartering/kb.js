@@ -55,7 +55,6 @@ export const GLOSSARY = [
     ['STEM', 'Subject to enough merchandise', 'Cargo is confirmed available at the load port for the laycan; also a bunker supply order.', 'charterparty-fixing-on-subjects-subject-stem-subject-details-and-lifting-subjects'],
     ['SUBS', 'Subjects', 'Conditions that must be lifted before a fixture is fully binding (e.g. shippers’ approval, board approval).', 'charterparty-fixing-on-subjects-subject-stem-subject-details-and-lifting-subjects'],
     ['TC / TCT', 'Time charter / trip time charter', 'Ship hired for a period or one trip at a daily hire; charterers pay bunkers and port costs.', 'time-charter'],
-    ['TCE', 'Time charter equivalent', 'Voyage result expressed as daily hire: (net freight − voyage costs) ÷ voyage days.', 'voyage-estimation'],
     ['TPC', 'Tonnes per centimetre', 'Weight needed to change the mean draft by 1 cm at a given draft.', 'tpc-tons-per-centimeter'],
     ['WCCON', 'Whether customs cleared or not', 'NOR may be tendered before customs clearance.', 'notice-of-readiness-nor-and-commencement-of-laytime-in-ship-chartering'],
     ['WIBON', 'Whether in berth or not', 'NOR may be tendered on arrival at the port even if no berth is available.', 'notice-of-readiness-nor-and-commencement-of-laytime-in-ship-chartering'],
@@ -66,6 +65,48 @@ export const GLOSSARY = [
     ['Off-hire', 'Off-hire', 'Periods when hire stops under the CP (breakdown, deficiency of crew, etc.).', 'off-hire-clause-in-a-time-charterparty'],
     ['Once on demurrage', 'Always on demurrage', 'After laytime expires every minute counts, laytime exceptions (weather, holidays) no longer apply.', 'demurrage-in-a-voyage-charterparty'],
     ['Reversible', 'Reversible laytime', 'Load and discharge laytime are added together into one pool.', 'averaging-and-reversing-laytime'],
+];
+
+/**
+ * Terms added from the FLR3692 course (Module 2 "Trade jargon"), the GBD dry cargo chartering notes and BIMCO
+ * Check Before Fixing. Also merged into a customised glossary when that table does not have the term yet.
+ */
+export const GLOSSARY_ADDED = [
+    ['A/E (offer)', 'Accepted / except', 'Reply to an offer: everything accepted except the points listed, which follow as a counter. It is a counter-offer, not an acceptance.', null],
+    ['ADA / WOG', 'All details about / without guarantee', 'Vessel figures are approximate; with “without guarantee” (ADAWOG) they are not a contractual promise (The Lipa), so speed claims are hard to bring.', null],
+    ['ADDCOMM', 'Address commission', 'Commission charterers deduct from freight / hire / demurrage; in effect a discount (usually 1.25–3.75%).', null],
+    ['AFSPS', 'Arrival first sea pilot station', 'Delivery point on arrival at the first sea pilot station.', null],
+    ['AGW / WP', 'All going well / weather permitting', 'Qualifies an ETA: no promise if something goes wrong on the way.', null],
+    ['AIWL / IWL / INL', 'Always within Institute Warranty Limits / International Navigating Limits', 'Trading limits of the hull insurance; breaking them needs underwriters’ consent and an extra premium. INL replaced IWL in the Institute clauses.', null],
+    ['ATDNSHINC', 'Any time day or night, Sundays and holidays included', 'Delivery / redelivery or NOR at any hour of any day.', null],
+    ['BENDS', 'Both ends', 'At the load and the discharge port (e.g. “agents bends”, “demurrage bends”).', null],
+    ['BWAD / SWAD / SWDD', 'Brackish / salt water arrival draft; salt water departure draft', 'Draft limits stated for the port; water density changes the draft (see FWA / DWA).', null],
+    ['COP', 'Custom of the port', 'Loading / discharging as customary at the port; usually means no fixed laytime terms.', null],
+    ['DWAT', 'Deadweight all told', 'Total deadweight incl. bunkers, water and stores (same as DWT).', null],
+    ['Detention', 'Detention', 'Damages for keeping the ship beyond the agreed laytime and demurrage, or a fixed rate for other delays (e.g. waiting for cargo documents).', null],
+    ['DIOT', 'Daily including overtime', 'Hire rate that already covers officers’ and crew overtime.', null],
+    ['FD', 'Free despatch', 'No despatch money payable for time saved.', null],
+    ['FIOSLSD', 'Free in and out, stowed, lashed, secured, dunnaged', 'Loading, stowing, lashing, securing and dunnaging are for charterers’ account and risk.', null],
+    ['GA / ARB', 'General average / arbitration', 'Where general average is adjusted (York-Antwerp Rules) and where disputes are arbitrated, e.g. “GA / ARB London, English law”.', null],
+    ['Hague-Visby', 'Hague-Visby Rules', 'Carrier’s minimum liability for cargo under a B/L: due diligence for seaworthiness, 1-year time bar, limit 666.67 SDR per package or 2 SDR/kg.', null],
+    ['ISM / ISPS', 'International Safety Management / Ship and Port Facility Security Code', 'SOLAS IX safety management (DOC for the company, SMC for the ship) and SOLAS XI-2 security (ISSC). Usually covered by BIMCO ISM / ISPS clauses.', null],
+    ['ITF', 'International Transport Workers’ Federation', 'Seafarers’ union federation; an ITF boycott can delay a ship with unacceptable crew terms.', null],
+    ['LM', 'Lane metre / linear metre', 'Deck space unit for ro-ro cargo.', null],
+    ['LOG ALTS', 'Logical alterations', 'Detailed CP based on a previous CP “with logical alterations” to fit the new fixture.', null],
+    ['Main terms', 'Main terms', 'Vessel, account, cargo, ports, laycan, rates, commissions and subjects agreed first; details of the CP follow (“sub details”).', null],
+    ['MDO / MGO / IFO / HFO', 'Marine diesel / gas oil, intermediate / heavy fuel oil', 'Bunker grades; ISO 8217 specification is agreed in the bunker clause.', null],
+    ['NWD / WD', '(Next) working day', 'Day that is not a Sunday or holiday (or Friday in FHEX ports) — laytime often starts the next working day.', null],
+    ['PDPR', 'Per day pro rata', 'Daily rate applied pro rata for part of a day (hire, demurrage, detention).', null],
+    ['SS', 'Summer salt water', 'Draft / deadweight on summer salt-water marks.', null],
+    ['SUB BOD', 'Subject to board of directors approval', 'A subject that keeps the fixture non-binding until the board approves.', null],
+    ['SUB DETS', 'Subject to details', 'Main terms agreed; the CP details are still to be agreed. Fixing on subjects is not yet binding (Module 1 §5).', null],
+    ['SUB STEM', 'Subject to stem', 'Charterers must confirm cargo availability for the laycan before the fixture binds.', null],
+    ['SW / FW / BW', 'Salt / fresh / brackish water', 'Qualifies a draft.', null],
+    ['TEU / FEU', 'Twenty / forty-foot equivalent unit', 'Container capacity units.', null],
+    ['VCP / TCP', 'Voyage / time charter party', 'The contract type.', null],
+    ['WLTOHC', 'Water line to hatch coaming', 'Air distance for shore loaders; check against the loading port limits.', null],
+    ['WWDSHEX / WWDSHINC', 'Weather working days, Sundays and holidays excepted / included', 'Laytime in weather working days with or without Sundays and holidays.', null],
+    ['YAR', 'York-Antwerp Rules', 'Rules for adjusting general average (1974, 1994, 2004, 2016 editions).', null],
 ];
 
 /** [form, type, what it is, slug] — check the edition actually agreed in the recap. */
@@ -79,6 +120,15 @@ export const CP_FORMS_INFO = [
     ['GRAINCON', 'Voyage', 'BIMCO standard grain voyage charter.', 'grain-charterparty-explained-graincon-norgrain-synacomex-2023-grain-voyage-charter-parties-and-bulk-grain-shipping'],
     ['BARECON 2001 / 2017', 'Bareboat', 'BIMCO bareboat charter: charterers take over the ship with their own crew.', 'bareboat-charter-agreement-example-barecon-2017-clauses-and-ship-registr'],
     ['SHIPMAN 2009', 'Management', 'BIMCO ship management agreement between owners and a manager.', 'ship-management-technical-management-crew-management-shipman-port-agents-and-shipowner-responsibilities-explained'],
+    ['GENCON 76', 'Voyage', 'Older GENCON edition still met in amended forms; laytime clause 6 (13:00 / 06:00 next working day) is the basis of many CP examples (FLR3692 Module 7).', null],
+    ['BALTIME 1939 / 2001', 'Time', 'BIMCO uniform time charter; more owner-friendly than NYPE on off-hire and cargo claims.', null],
+    ['ASBATANKVOY', 'Voyage (tanker)', 'ASBA tanker voyage charter; 72 hours total laytime and pumping warranty are typical points.', null],
+    ['SHELLTIME / BPTIME / BEEPEETIME', 'Time (tanker)', 'Oil-major time charters with detailed performance clauses.', null],
+    ['GENCOA / VOLCOA', 'COA', 'BIMCO contracts of affreightment for bulk cargoes.', null],
+    ['CONGENBILL 2016', 'B/L', 'BIMCO B/L for use with charter parties (“freight payable as per charter party”).', null],
+    ['ICA 1996 (2011)', 'Agreement', 'Inter-Club NYPE Agreement: apportions cargo claims between owners and time charterers (see Calculators).', null],
+    ['CONWARTIME / VOYWAR', 'Clause', 'BIMCO war risks clauses for time and voyage charters (orders to war risk areas, extra insurance).', null],
+    ['BIMCO Sanctions clause', 'Clause', 'Owners may refuse orders that would expose them to sanctions; charterers indemnify.', null],
     ['BIMCO ETS clauses', 'Clause', 'BIMCO emission trading scheme clauses for time charters (2022) and voyage charters (2023): who surrenders and pays the EUAs.', 'ship-environmental-regulations-guide-marpol-ballast-water-and-emissions'],
 ];
 
@@ -122,10 +172,12 @@ export const STOWAGE_FACTORS = [
     { cargo: 'Sulphur', sf: 0.95, range: '0.90–1.00', note: 'Corrosive', slug: 'chemical-and-plastic-cargoes-in-shipping-cargo-properties-handling-methods-and-stowage-factors' },
 ];
 
+const glossaryRow = ([abbr, expansion, text, slug]) => ({ abbr, expansion, text, slug });
+
 export const KB_DEFAULTS = {
     sf: STOWAGE_FACTORS,
     sizes: VESSEL_SIZES,
-    glossary: GLOSSARY.map(([abbr, expansion, text, slug]) => ({ abbr, expansion, text, slug })),
+    glossary: [...GLOSSARY, ...GLOSSARY_ADDED].map(glossaryRow),
 };
 
 let cache = null;
@@ -134,6 +186,11 @@ export async function kbTables(force = false) {
     if (!cache || force) {
         const saved = await get('chartering/kb').catch(() => ({}));
         cache = { ...Object.fromEntries(Object.entries(KB_DEFAULTS).map(([k, v]) => [k, saved[k]?.rows ?? v])), meta: saved };
+        // A customised glossary still gets the terms added later (it keeps its own wording for the rest)
+        if (saved.glossary?.rows) {
+            const have = new Set(cache.glossary.map((r) => String(r.abbr).toUpperCase()));
+            cache.glossary = [...cache.glossary, ...GLOSSARY_ADDED.map(glossaryRow).filter((r) => !have.has(r.abbr.toUpperCase()))];
+        }
     }
     return cache;
 }
@@ -151,3 +208,64 @@ export function sfFor(table, cargo) {
 
 /** Contact roles (Contacts tab). */
 export const CONTACT_KINDS = { owner: 'Owners', operator: 'Operators', charterer: 'Charterers', broker: 'Brokers', agent: 'Agents', surveyor: 'Surveyors', bunker: 'Bunker suppliers', other: 'Other' };
+
+// ---------------------------------------------------------------- Reference tables (Knowledge → Reference)
+
+/** Beaufort scale (WMO numbering, 0 = calm). Good weather in performance clauses is usually up to BF 4 and DSS 3. */
+export const BEAUFORT = [
+    [0, 'Calm', 'Sakin', '< 1', 'Sea like a mirror', '0'],
+    [1, 'Light air', 'Esinti', '1–3', 'Ripples, no foam crests', '0.1'],
+    [2, 'Light breeze', 'Hafif rüzgâr', '4–6', 'Small wavelets, crests do not break', '0.2'],
+    [3, 'Gentle breeze', 'Latif rüzgâr', '7–10', 'Large wavelets, scattered white horses', '0.6'],
+    [4, 'Moderate breeze', 'Mutedil rüzgâr', '11–16', 'Small waves becoming longer, fairly frequent white horses', '1'],
+    [5, 'Fresh breeze', 'Fırışka rüzgâr', '17–21', 'Moderate waves, many white horses, some spray', '2'],
+    [6, 'Strong breeze', 'Kuvvetli rüzgâr', '22–27', 'Large waves, white foam crests, spray likely', '3'],
+    [7, 'Near gale', 'Mutedil fırtına', '28–33', 'Sea heaps up, foam blown in streaks', '4'],
+    [8, 'Gale', 'Fırtına', '34–40', 'Moderately high waves, crests break into spindrift', '5.5'],
+    [9, 'Strong gale', 'Kuvvetli fırtına', '41–47', 'High waves, dense foam streaks, spray affects visibility', '7'],
+    [10, 'Storm', 'Büyük fırtına', '48–55', 'Very high waves with long overhanging crests', '9'],
+    [11, 'Violent storm', 'Bora', '56–63', 'Exceptionally high waves', '11.5'],
+    [12, 'Hurricane', 'Kasırga', '≥ 64', 'Air filled with foam and spray, visibility very poor', '14+'],
+];
+
+/** Douglas sea state (wind sea) and swell. */
+export const DOUGLAS_SEA = [
+    [0, 'Calm (glassy)', '0'], [1, 'Calm (rippled)', '0–0.1'], [2, 'Smooth', '0.1–0.5'], [3, 'Slight', '0.5–1.25'], [4, 'Moderate', '1.25–2.5'],
+    [5, 'Rough', '2.5–4'], [6, 'Very rough', '4–6'], [7, 'High', '6–9'], [8, 'Very high', '9–14'], [9, 'Phenomenal', '14+'],
+];
+export const DOUGLAS_SWELL = [
+    [0, 'No swell'], [1, 'Very low (short and low)'], [2, 'Low (long and low)'], [3, 'Light (short and moderate)'], [4, 'Moderate (average and moderate)'],
+    [5, 'Moderate rough (long and moderate)'], [6, 'Rough (short and heavy)'], [7, 'High (average and heavy)'], [8, 'Very high (long and heavy)'], [9, 'Confused'],
+];
+
+/** Regional port State control agreements (MoU). */
+export const PSC_MOUS = [
+    ['Paris MoU', 'Europe and North Atlantic', 'EU coastal states, Iceland, Norway, UK, Canada …'],
+    ['Tokyo MoU', 'Asia–Pacific', 'Australia, China, Japan, Korea, Singapore …'],
+    ['Viña del Mar', 'Latin America', 'Argentina, Brazil, Chile, Mexico, Panama …'],
+    ['Caribbean MoU', 'Caribbean', 'Bahamas, Barbados, Jamaica, Trinidad & Tobago …'],
+    ['Abuja MoU', 'West and Central Africa', 'Nigeria, Ghana, Côte d’Ivoire, Cameroon …'],
+    ['Black Sea MoU', 'Black Sea', 'Bulgaria, Georgia, Romania, Russian Federation, Türkiye, Ukraine'],
+    ['Mediterranean MoU', 'Mediterranean', 'Algeria, Cyprus, Egypt, Jordan, Lebanon, Malta, Morocco, Tunisia, Türkiye …'],
+    ['Indian Ocean MoU', 'Indian Ocean', 'India, Iran, Kenya, Mauritius, South Africa …'],
+    ['Riyadh MoU', 'Gulf', 'Bahrain, Kuwait, Oman, Qatar, Saudi Arabia, UAE'],
+];
+
+/**
+ * IACS members (12). Russian Register's membership was withdrawn on 11 March 2022; Türk Loydu joined in 2023.
+ * Recaps often ask for “IACS class” and “IG P&I”.
+ */
+export const IACS_MEMBERS = [
+    ['ABS', 'American Bureau of Shipping', 'USA'], ['BV', 'Bureau Veritas', 'France'], ['CCS', 'China Classification Society', 'China'],
+    ['CRS', 'Croatian Register of Shipping', 'Croatia'], ['DNV', 'DNV', 'Norway'], ['IRS', 'Indian Register of Shipping', 'India'],
+    ['KR', 'Korean Register', 'Korea'], ['LR', 'Lloyd’s Register', 'UK'], ['NK', 'ClassNK (Nippon Kaiji Kyokai)', 'Japan'],
+    ['PRS', 'Polish Register of Shipping', 'Poland'], ['RINA', 'Registro Italiano Navale', 'Italy'], ['TL', 'Türk Loydu', 'Türkiye'],
+];
+export const IACS_CODES = new Set(['ABS', 'BV', 'CCS', 'CRS', 'DNV', 'DNV GL', 'GL', 'IRS', 'KR', 'LR', 'NK', 'NKK', 'PRS', 'RINA', 'TL']);
+
+/** Cargo liability regimes for B/Ls (Bills of Lading, North P&I; Gorton ch. 6). */
+export const CARGO_CONVENTIONS = [
+    ['Hague Rules (1924)', 'Due diligence for seaworthiness before and at the beginning of the voyage; catalogue of defences (Art. IV)', '£100 per package or unit (gold value)', '1 year'],
+    ['Hague-Visby Rules (1968 / 1979 SDR)', 'As Hague; B/L conclusive evidence in the hands of a third party', '666.67 SDR per package or 2 SDR per kg, whichever is higher', '1 year (extendable by agreement)'],
+    ['Hamburg Rules (1978)', 'Presumed fault; no nautical-fault defence; covers deck cargo and live animals', '835 SDR per package or 2.5 SDR per kg', '2 years'],
+];

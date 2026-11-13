@@ -1501,3 +1501,7 @@ input[data-date].is-invalid { border-color: var(--red); background-color: #fdece
 .cal-foot { display: flex; align-items: center; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--row-line); }
 .cal-link { color: var(--accent) !important; font-weight: 600; padding: 3px 6px !important; }
 .cal-hint { flex: 1; text-align: center; color: var(--dim); font-size: 11px; }
+
+/* Knowledge → Reference: stacked tables */
+.ch-ref h4 { margin: 6px 0 4px; }
+.ch-ref .ch-table td:first-child { white-space: nowrap; }
