@@ -16,8 +16,32 @@ import { etsCost } from './ets.js';
 import { fuelEu, co2Tonnes } from './fueleu.js';
 import { bunkerPlan } from './bunkerplan.js';
 
-/** Laytime terms → calendar days per working day. SSHEX = 7/5, SHEX = 7/6 (editable in settings). */
-export const TERMS_FACTORS = { SHINC: 1, SATPM: 14 / 13, SHEX: 7 / 6, SHEXUU: 7 / 6, SHEXEIU: 7 / 6, FHEX: 7 / 6, SSHEX: 7 / 5, WWD: 1 };
+/**
+ * Laytime terms → calendar days per working day (editable in settings). SHEX = 7/6, SSHEX = 7/5,
+ * SATPM (Saturday afternoon, Sundays and holidays excepted → 5.5 working days a week) = 7/5.5 = 14/11.
+ */
+export const TERMS_FACTORS = {
+    SHINC: 1, SATPM: 14 / 11, SHEX: 7 / 6, SHEXUU: 7 / 6, SHEXEIU: 7 / 6, FHEX: 7 / 6, FHEXUU: 7 / 6, FHEXEIU: 7 / 6,
+    SSHEX: 7 / 5, SSHEXUU: 7 / 5, SSHEXEIU: 7 / 5, WWD: 1,
+};
+
+/**
+ * Free-text terms from a cargo order or recap → a TERMS_FACTORS key: "shex uu" → SHEXUU, "PWWD SSHINC" → SHINC,
+ * "FSHEX EIU" → FHEXEIU, "ATDNSHINC" → SHINC. Unknown text is returned upper-cased (factor 1).
+ */
+export function normalizeTerms(terms) {
+    let t = String(terms ?? '').toUpperCase().replace(/[^A-Z]/g, '');
+    if (!t) return 'SHINC';
+    if (t in TERMS_FACTORS) return t;
+    t = t.replace(/^(?:P?WWD|PWD|ATDN|MTS)+/, '');
+    if (/^S?SHINC$|^FHINC$|^SHINC/.test(t)) return 'SHINC';
+    if (/^SATPM|^SATNOON/.test(t)) return 'SATPM';
+    const uu = /UU$|UNLESSUSED$/.test(t);
+    const eiu = /EIU$|EVENIFUSED$/.test(t);
+    const base = /^SSHEX|^SATSHEX/.test(t) ? 'SSHEX' : /^F(?:S)?HEX|^FRIHEX/.test(t) ? 'FHEX' : /^SHEX/.test(t) ? 'SHEX' : null;
+    if (base) return base + (uu ? 'UU' : eiu ? 'EIU' : '');
+    return t in TERMS_FACTORS ? t : String(terms ?? '').toUpperCase().trim();
+}
 
 export const SEA_MODES = { ballast: 'Ballast', laden: 'Laden', ballastEco: 'Ballast eco', ladenEco: 'Laden eco', custom1: 'Custom 1', custom2: 'Custom 2', custom3: 'Custom 3' };
 export const STOP_TYPES = { bunker: 'Bunkering', canal: 'Canal', strait: 'Strait', weather: 'Weather / delay', other: 'Other' };
@@ -69,7 +93,10 @@ export function blankEstimate() {
 /** Port name key: case, Turkish letters and accents do not matter (same rule as matching.js, kept here to avoid an import cycle). */
 const normPort = (x) => String(x ?? '').trim().replace(/ı/g, 'i').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ');
 
-const termsFactor = (terms, overrides = {}) => n(overrides[terms] ?? TERMS_FACTORS[terms] ?? 1) || 1;
+const termsFactor = (terms, overrides = {}) => {
+    const k = normalizeTerms(terms);
+    return n(overrides[k] ?? overrides[terms] ?? TERMS_FACTORS[k] ?? 1) || 1;
+};
 
 /** Daily consumption for a profile, as {ifo, mgo}. */
 function profileCons(vessel, profile) {

@@ -15,7 +15,7 @@ const blank = {
         offHires: [], extras: [], ownersExpenses: [], payments: [] }),
     offhire: () => ({ name: '', vessel: '', fixtureId: null, from: '', to: '', pct: 100, rate: null, ifo: null, mgo: null, ifoPrice: null, mgoPrice: null, reason: '' }),
     perf: () => ({ name: '', vessel: '', fixtureId: null, warrantedKn: null, warrantedIfo: null, warrantedMgo: null, speedTol: 0.5, consTolPct: 5, maxBf: BEAUFORT_DEFAULT, maxDss: DOUGLAS_DEFAULT,
-        hireRate: null, ifoPrice: null, mgoPrice: null, offsetUnder: false, reports: [] }),
+        hireRate: null, ifoPrice: null, mgoPrice: null, offsetUnder: false, lostTimeFuel: true, applyCurrent: false, wog: false, reports: [] }),
 };
 
 /** Instalments are covered by the payments in order; the first one not fully paid is the next due. */
@@ -121,10 +121,13 @@ export async function mount(el, ctx, param) {
                 section('tc-prices', 'Prices', 'orange', grid(
                     fld('Hire USD/day', numInput(c, 'hireRate', changed, { dec: 2 })), h('span'),
                     fld('IFO price', numInput(c, 'ifoPrice', changed)), fld('MGO price', numInput(c, 'mgoPrice', changed)),
-                    checkInput(c, 'offsetUnder', 'Offset under-consumption against over-consumption', changed))),
+                    checkInput(c, 'offsetUnder', 'Offset under-consumption against over-consumption', changed),
+                    checkInput(c, 'lostTimeFuel', 'Fuel burnt during the time lost (warranted cons. less “about”)', changed),
+                    checkInput(c, 'applyCurrent', 'Apply current factor (Cur kn column: + favourable / − adverse)', changed),
+                    checkInput(c, 'wog', 'Speed / consumption given “without guarantee” (WOG)', changed))),
                 section('tc-noon', 'Noon reports', 'blue', h('div',
                     rowsTable(c.reports, [['date', 'Date', 'date'], ['hours', 'Hours', 'small', '55px'], ['distance', 'Dist nm', 'small', '65px'], ['ifo', 'IFO t', 'small', '55px'], ['mgo', 'MGO t', 'small', '55px'],
-                        ['bf', 'BF', 'small', '40px'], ['dss', 'DSS', 'small', '40px']], () => ({ date: today(), hours: 24, distance: null, ifo: null, mgo: null, bf: null, dss: null }), { addLabel: '+ Report' }),
+                        ['bf', 'BF', 'small', '40px'], ['dss', 'DSS', 'small', '40px'], ['cur', 'Cur kn', 'small', '50px']], () => ({ date: today(), hours: 24, distance: null, ifo: null, mgo: null, bf: null, dss: null, cur: null }), { addLabel: '+ Report' }),
                     paste, h('div.toolbar', h('button.tiny', { type: 'button', on: { click: () => {
                         const rows = parseNoon(paste.value);
                         if (!rows.length) { toast('Satır okunamadı.', 'error'); return; }
@@ -190,6 +193,7 @@ export async function mount(el, ctx, param) {
         } else {
             res = performanceClaim(c);
             fill(right,
+                c.wog ? h('div.notice.warn', 'Hız ve tüketim “without guarantee” verilmişse (ADAWOG) bu rakamlar sözleşmesel garanti değildir; İngiliz hukukunda talep genelde yalnızca dürüstlük ihlaline dayanabilir (The Lipa [2001], FLR3692 Modül 4 §11.2). Hesap bilgi amaçlıdır.') : null,
                 res.insufficient ? h('div.notice.warn', 'İyi hava raporu yok veya garanti hızı eksik: hesap için BF/DSS sınırları içinde en az bir rapor ve garanti hızı gerekli.') : null,
                 kvList([
                     ['Reports', `${res.reports} total · ${res.gwReports} good weather`],
@@ -201,6 +205,7 @@ export async function mount(el, ctx, param) {
                     ['MGO over-consumption', `${fmt(res.overMgo, 2)} t`],
                     ['Time claim', usd(res.timeClaim ?? 0, 2)],
                     ['Consumption claim', usd(res.consClaim ?? 0, 2)],
+                    ['Fuel in time lost', res.lostFuelClaim ? `${fmt(res.lostIfo, 2)} t IFO${res.lostMgo ? ` + ${fmt(res.lostMgo, 2)} t MGO` : ''} · ${usd(res.lostFuelClaim, 2)}` : '—', { hint: 'Time lost × warranted consumption less the “about” allowance (FLR3692 Module 4 §14.2)' }],
                     ['Performance claim', usd(res.claim, 2), { strong: true }],
                 ]),
                 h('p.dim', `Good weather = BF ≤ ${c.maxBf} and DSS ≤ ${c.maxDss}. Rows outside are shown faded in the table on the left and excluded, then the result is extrapolated by distance. ${DISCLAIMER}`));
@@ -234,7 +239,7 @@ export async function mount(el, ctx, param) {
         if (kind === 'offhire') return { text: `${offhireText()}\n\n${DISCLAIMER}`, report: { title, file: title, note: DISCLAIMER, blocks: [{ text: offhireText() }] } };
         const rows = [['Reports (good weather)', `${res.reports} (${res.gwReports})`], ['Distance nm', fmt(res.totalDistance, 1)], ['Good-weather speed kn', fmt(res.gwSpeed, 2)], ['Allowed speed kn', fmt(res.allowedKn, 2)],
             ['Time lost h', fmt(res.timeLostH, 2)], ['IFO over-consumption t', fmt(res.overIfo, 2)], ['MGO over-consumption t', fmt(res.overMgo, 2)], ['Time claim USD', fmt(res.timeClaim ?? 0, 2)],
-            ['Consumption claim USD', fmt(res.consClaim ?? 0, 2)], ['Performance claim USD', fmt(res.claim, 2)]];
+            ['Consumption claim USD', fmt(res.consClaim ?? 0, 2)], ['Fuel in time lost USD', fmt(res.lostFuelClaim ?? 0, 2)], ['Performance claim USD', fmt(res.claim, 2)]];
         const noon = c.reports.map((r) => [r.date, fmt(r.hours, 1), fmt(r.distance, 1), fmt(r.ifo, 2), fmt(r.mgo, 2), r.bf ?? '', r.dss ?? '']);
         const head = ['Date', 'Hours', 'Dist', 'IFO', 'MGO', 'BF', 'DSS'];
         return { text: [title, `Warranted ${fmt(c.warrantedKn, 2)} kn on ${fmt(c.warrantedIfo, 2)} t IFO + ${fmt(c.warrantedMgo, 2)} t MGO (tol. ${c.speedTol} kn / ${c.consTolPct}%)`, '', textTable(['', ''], rows), '', textTable(head, noon), '', DISCLAIMER].join('\n'),

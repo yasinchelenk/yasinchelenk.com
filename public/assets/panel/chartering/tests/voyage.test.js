@@ -1,6 +1,6 @@
 // Acceptance test 12.1 — handybulk "M/V Apollon" voyage estimate.
 import { test, approx, near, eq } from './harness.js';
-import { estimate, sensitivity, layupVsTrading } from '../engine/voyage.js';
+import { estimate, sensitivity, layupVsTrading, TERMS_FACTORS, normalizeTerms } from '../engine/voyage.js';
 import { apollon } from '../engine/examples.js';
 
 test('12.1 Apollon — days', () => {
@@ -83,4 +83,12 @@ test('Lay-up vs trading', () => {
     near(r.trading, -15000, 'trading margin', 0.01);
     near(r.layup, -110000, 'lay-up cost', 0.01);
     eq(r.decision, 'trade', 'trading loses less than laying up');
+});
+
+test('Laytime terms factors and free-text terms (SATPM = 5.5 working days a week)', () => {
+    near(TERMS_FACTORS.SATPM, 7 / 5.5, 'SATPM: Saturday pm + Sunday + holidays excepted → 7 / 5.5', 1e-12);
+    near(TERMS_FACTORS.SSHEXUU, 7 / 5, 'SSHEXUU counted like SSHEX in the estimate', 1e-12);
+    near(TERMS_FACTORS.FHEXUU, 7 / 6, 'FHEXUU counted like FHEX in the estimate', 1e-12);
+    eq(['shex uu', 'PWWD SSHINC', 'fshex eiu', 'ATDNSHINC', 'sshex', '1500 fshex uu'.replace(/^\d+\s*/, ''), 'SATPM'].map(normalizeTerms),
+        ['SHEXUU', 'SHINC', 'FHEXEIU', 'SHINC', 'SSHEX', 'FHEXUU', 'SATPM'], 'free-text terms normalised');
 });
