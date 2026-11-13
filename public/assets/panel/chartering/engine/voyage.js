@@ -62,7 +62,8 @@ export function blankEstimate() {
             { type: 'sea', from: '', to: '', nm: null, mode: 'laden', ecaNm: null, weatherPct: null, eu: 0 },
             { type: 'disch', name: '', rate: null, terms: 'SHINC', turnHrs: null, waitDays: null, cost: null, eu: false, eca: false },
         ],
-        costs: { misc: null, ilohc: null, insurance: null, other: null },
+        // Voyage estimate cost items (course note "Voyage Estimate nasıl yapılır"): surveys, liner-term costs, crew bonuses, extra insurance
+        costs: { misc: null, ilohc: null, insurance: null, other: null, ap: null, hm: null, surveys: null, linerTerms: null, crewBonus: null },
         prices: { ifo: null, hsfo: null, ulsfo: null, mgo: null, euaEur: null, eurUsd: null },
         ets: { enabled: false, year: new Date().getFullYear() },
         fueleu: { enabled: false, include: true },
@@ -273,7 +274,9 @@ export function estimate(est) {
 
     const portCosts = sum(rows, (r) => r.cost);
     const costs = est.costs ?? {};
-    const otherCosts = n(costs.misc) + n(costs.ilohc) + n(costs.insurance) + n(costs.other);
+    const COST_KEYS = ['surveys', 'linerTerms', 'crewBonus', 'insurance', 'ap', 'hm', 'ilohc', 'misc', 'other'];
+    const otherItems = Object.fromEntries(COST_KEYS.map((k) => [k, n(costs[k])]).filter(([, v]) => v));
+    const otherCosts = Object.values(otherItems).reduce((a, b) => a + b, 0);
     const expenses = bunkerCost + portCosts + otherCosts + ets.cost + fueleu.cost + freightTax;
     const result = income - expenses;
 
@@ -323,7 +326,7 @@ export function estimate(est) {
         fueleu,
         emissions: { co2, perTon: qty + parcelQty > 0 ? co2 / (qty + parcelQty) : null, eeoi: (qty + parcelQty) > 0 && ladenNm > 0 ? co2 * 1e6 / ((qty + parcelQty) * ladenNm) : null },
         freight: { qty, gross: grossFreight, commPct, commission, tax: freightTax, net: netFreight, ballastBonus: bbNet, demurrage: demNet, despatch, income, cargoes },
-        expenses: { bunkers: bunkerCost, ports: portCosts, other: otherCosts, ets: ets.cost, fueleu: fueleu.cost, freightTax, total: expenses },
+        expenses: { bunkers: bunkerCost, ports: portCosts, other: otherCosts, otherItems, ets: ets.cost, fueleu: fueleu.cost, freightTax, total: expenses },
         result,
         daily,
         tcCommPct: tcComm * 100,
