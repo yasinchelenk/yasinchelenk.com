@@ -15,6 +15,7 @@ import { eta, requiredSpeed, offsetLabel, COMMON_ZONES } from '../chartering/eng
 import { etsCost, CF_DEFAULTS, phaseInPct, WHO_PAYS } from '../chartering/engine/ets.js';
 import { grossToNet, netToGross } from '../chartering/engine/commission.js';
 import { layupVsTrading } from '../chartering/engine/voyage.js';
+import { cii, ciiOutlook, SHIP_TYPES } from '../chartering/engine/cii.js';
 import { MSL_PCT, lashingRuleOfThumb, coilStack, tankTopLoad, ICA_CAUSES, icaApportion } from '../chartering/engine/stowage.js';
 
 const t = (x, d = 2, unit = '') => (Number.isFinite(x) ? `${fmt(x, d)}${unit ? ' ' + unit : ''}` : '—');
@@ -155,7 +156,7 @@ const CARDS = [
         fields: [['g1', 'Fuel 1', { type: 'select', options: { VLSFO: 'VLSFO (LFO)', HSFO: 'HSFO (HFO)', MGO: 'MGO/MDO', LNG: 'LNG' }, def: 'VLSFO' }], ['t1', 'Tons'],
             ['g2', 'Fuel 2', { type: 'select', options: { VLSFO: 'VLSFO (LFO)', HSFO: 'HSFO (HFO)', MGO: 'MGO/MDO', LNG: 'LNG' }, def: 'MGO' }], ['t2', 'Tons'],
             ['scope', 'Scope', { type: 'select', options: { 100: 'Intra-EU / at berth — 100%', 50: 'Into / out of EU — 50%', 0: 'Outside — 0%' }, def: '50' }],
-            ['year', 'Year', { small: true, def: new Date().getFullYear() }], ['eua', 'EUA price (EUR)', { small: true }], ['eurUsd', 'EUR/USD', { small: true }],
+            ['year', 'Year', { small: true, plain: true, def: new Date().getFullYear() }], ['eua', 'EUA price (EUR)', { small: true }], ['eurUsd', 'EUR/USD', { small: true }],
             ['cfHFO', 'Cf HFO', { small: true, def: CF_DEFAULTS.HFO, sub: 'Emission factors' }], ['cfLFO', 'Cf LFO', { small: true, def: CF_DEFAULTS.LFO }],
             ['cfMDO', 'Cf MDO/MGO', { small: true, def: CF_DEFAULTS.MDO }], ['cfLNG', 'Cf LNG', { small: true, def: CF_DEFAULTS.LNG }]],
         compute(v) {
@@ -167,6 +168,31 @@ const CARDS = [
                 ['EUAs to surrender', t(r.allowances, 2)], ['Cost', `€${fmt(r.cost, 2)}`, { strong: true }],
                 v.eurUsd ? ['Cost (USD)', usd(r.cost * v.eurUsd, 2), { strong: true }] : null,
                 ['Who pays — TC', WHO_PAYS.TC], ['Who pays — VC', WHO_PAYS.VC], ['Who pays — BB', WHO_PAYS.BB],
+            ];
+        },
+    },
+    {
+        id: 'cii', needs: ['dwt', 'nm'], title: 'CII rating (IMO carbon intensity)', cat: 'teal', links: [LESSONS.emissions],
+        desc: 'Attained CII (AER) = yıllık CO₂ (g) ÷ (DWT × seyredilen mil). Required = 2019 referans çizgisi (a × DWT^−c) × (1 − Z); Z: 2026 %11, 2027 %13,625, 2028 %16,25, 2029 %18,875, 2030 %21,5 (MEPC.400(83)). Not A–E, gemi tipinin dd sınırlarıyla (MEPC.354(78)). 3 yıl üst üste D veya bir kez E → SEEMP III’te düzeltici plan. Masa tahminidir, DCS doğrulaması değildir.',
+        fields: [['type', 'Ship type', { type: 'select', options: Object.fromEntries(Object.entries(SHIP_TYPES).map(([k, x]) => [k, x.label])), def: 'bulk' }],
+            ['dwt', 'DWT (t)'], ['nm', 'Distance sailed (nm/yr)'], ['year', 'Year', { small: true, plain: true, def: new Date().getFullYear() }],
+            ['g1', 'Fuel 1', { type: 'select', options: { VLSFO: 'VLSFO (LFO)', HSFO: 'HSFO (HFO)', MGO: 'MGO/MDO', LNG: 'LNG' }, def: 'VLSFO', sub: 'Fuel burnt in the year' }], ['t1', 'Tons'],
+            ['g2', 'Fuel 2', { type: 'select', options: { VLSFO: 'VLSFO (LFO)', HSFO: 'HSFO (HFO)', MGO: 'MGO/MDO', LNG: 'LNG' }, def: 'MGO' }], ['t2', 'Tons'],
+            ['g3', 'Fuel 3', { type: 'select', options: { VLSFO: 'VLSFO (LFO)', HSFO: 'HSFO (HFO)', MGO: 'MGO/MDO', LNG: 'LNG' }, def: 'HSFO' }], ['t3', 'Tons']],
+        compute(v) {
+            const year = v.year ?? new Date().getFullYear();
+            const r = cii({ type: v.type, dwt: v.dwt, nm: v.nm, year, fuels: [{ grade: v.g1, tons: v.t1 }, { grade: v.g2, tons: v.t2 }, { grade: v.g3, tons: v.t3 }] });
+            const out = ciiOutlook({ type: v.type, dwt: v.dwt, attained: r.attained, fromYear: year + 1, years: Math.max(0, Math.min(4, 2030 - year)) });
+            return [
+                ['CO₂ emitted', t(r.co2, 0, 't')],
+                ['Attained (g/dwt·nm)', t(r.attained, 3), { strong: true }],
+                ['Reference 2019', t(r.reference, 3)],
+                [`Required ${year}`, t(r.required, 3), { hint: `Z = ${fmt(r.z, 3)}%` }],
+                ['Attained ÷ required', t(r.ratio, 3)],
+                ['Rating', r.rating ?? '—', { strong: true, cls: r.rating === 'D' || r.rating === 'E' ? 'neg' : r.rating === 'A' || r.rating === 'B' ? 'pos' : '' }],
+                r.bounds ? ['A/B · B/C · C/D · D/E', [r.bounds.A, r.bounds.B, r.bounds.C, r.bounds.D].map((x) => fmt(x, 2)).join(' · ')] : null,
+                r.headroomC !== null ? [r.headroomC >= 0 ? 'CO₂ room left for C' : 'CO₂ over C', t(Math.abs(r.headroomC), 0, 't'), { cls: r.headroomC < 0 ? 'neg' : '' }] : null,
+                ...out.map((x) => [`Same in ${x.year}`, `${x.rating ?? '—'} · ${fmt(x.ratio, 3)}`]),
             ];
         },
     },
@@ -434,8 +460,8 @@ function card(def) {
             control = h('input', { type: 'datetime-local', value: v[k] ?? '', on: { input: (e) => { v[k] = e.target.value ? e.target.value.replace('T', ' ') : null; save(); update(); } } });
         } else {
             control = h('input.ch-num', {
-                type: 'text', inputmode: 'decimal', value: v[k] === null ? '' : fmt(v[k], null), autocomplete: 'off',
-                on: { input: (e) => { v[k] = parseNum(e.target.value, o.small); save(); update(); }, blur: (e) => { e.target.value = v[k] === null ? '' : fmt(v[k], null); }, focus: (e) => e.target.select() },
+                type: 'text', inputmode: 'decimal', value: v[k] === null ? '' : o.plain ? String(v[k]) : fmt(v[k], null), autocomplete: 'off',
+                on: { input: (e) => { v[k] = parseNum(e.target.value, o.small); save(); update(); }, blur: (e) => { e.target.value = v[k] === null ? '' : o.plain ? String(v[k]) : fmt(v[k], null); }, focus: (e) => e.target.select() },
             });
         }
         return [

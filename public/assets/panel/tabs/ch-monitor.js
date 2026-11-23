@@ -2,7 +2,8 @@
 // manual positions, Leaflet map with tracks, ports and anchorages, and a "can she make the laycan?" tool.
 import { h, fill, toast, store, fmtDate, fmtStamp, debounce } from '../core/dom.js';
 import { get, post, put, del } from '../core/api.js';
-import { modal, confirmBox, segmented } from '../core/ui.js';
+import { modal, confirmBox, segmented, popover } from '../core/ui.js';
+import { monitorAlerts, ALERT_DEFAULTS } from '../chartering/engine/alerts.js';
 import { Grid, resetLayoutButton } from '../core/grid.js';
 import { live } from '../core/live.js';
 import { gcNm, seaArea, NAV_STATUS, shipType, shipCategory, SHIP_CATEGORIES, freshness, etaMs, laycanReach, aisEtaIso } from '../chartering/engine/geo.js';
@@ -72,6 +73,9 @@ export async function mount(el, ctx) {
     const statusBox = h('div.ch-mon__status');
     const body = h('div.ch-mon__body');
     const tool = { watchId: null, port: '', lat: null, lon: null, factor: DEFAULT_FACTOR, nm: null, kn: null, from: '', to: '' };
+    let alertCfg = { ...ALERT_DEFAULTS, ...store.get('ch_mon_alerts', {}) };
+    const alertsOf = (r) => monitorAlerts(r, { settings: alertCfg, eta: ourEta(r)?.ms ?? null });
+    const alertBadges = (list) => list.map((a) => badge(a.level, a.text, a.detail ?? a.text));
 
     async function load() {
         const r = await get('chartering/monitor');
@@ -129,6 +133,7 @@ export async function mount(el, ctx) {
                 { key: 'last_time', label: 'Last position', width: 160, render: (r) => lastCell(r) },
                 { key: 'dest', label: 'Destination / ETA (AIS)', width: 200, render: (r) => (r.ais_dest ? `${r.ais_dest}${r.ais_eta ? ' · ' + (aisEtaIso(parseAisEta(r.ais_eta)) ?? r.ais_eta) : ''}` : '') },
                 { key: 'eta', label: 'ETA (ours) / laycan', width: 220, render: (r) => etaCell(r) },
+                { key: 'alerts', label: 'Alerts', width: 220, render: (r) => h('span.ch-cell-gap.ch-mon-alerts', alertBadges(alertsOf(r))) },
                 { key: 'open', label: 'Open', width: 150, render: (r) => [r.open_port, r.open_date && fmtDate(r.open_date)].filter(Boolean).join(' · ') },
                 { key: 'next_job', label: 'Next job', width: 160 },
                 { key: 'notes', label: 'Notes', width: 180 },
@@ -139,7 +144,39 @@ export async function mount(el, ctx) {
             const list = rows.filter((r) => (r.grp ?? 'watch') === k);
             return { key: k, className: cls, rows: list, head: h('div.grp.' + cls, h('span.grp__name', label), h('span.grp__pill', String(list.length))) };
         }).filter((s) => s.rows.length || s.key === 'watch'));
-        fill(body, h('div.toolbar', h('span.count', `${rows.length} vessels`), resetLayoutButton(grid, '↺ columns')), grid.el);
+        fill(body, h('div.toolbar', h('span.count', `${rows.length} vessels`), alertSummary(), h('span.spacer'), alertSettingsButton(), resetLayoutButton(grid, '↺ columns')), grid.el);
+    }
+
+    // ------------------------------------------------------------ Alerts (speed drop, AIS ETA slip, stale position, late for laycan)
+
+    function alertSummary() {
+        const hits = rows.map((r) => [r, alertsOf(r)]).filter(([, a]) => a.length);
+        if (!hits.length) return h('span.ch-badge.green', 'No alerts');
+        const red = hits.filter(([, a]) => a.some((x) => x.level === 'red')).length;
+        const btn = h('button.tiny', { type: 'button', class: red ? 'danger' : '', title: 'Uyarılı gemiler', on: { click: () => {
+            const pop = popover(btn, h('div.ch-mon-alertpop', h('h4', 'Alerts'),
+                hits.map(([r, a]) => h('button.ch-mon-alertpop__row', { type: 'button', on: { click: () => { pop.close(); editor(r); } } },
+                    h('b', r.name), h('span.ch-cell-gap', alertBadges(a))))), { className: 'ch-mon-alertpop-wrap' });
+        } } }, `⚠ ${hits.length} vessel${hits.length > 1 ? 's' : ''} with alerts${red ? ` · ${red} red` : ''}`);
+        return btn;
+    }
+
+    function alertSettingsButton() {
+        const btn = h('button.tiny.ghost', { type: 'button', title: 'Uyarı eşikleri', on: { click: () => {
+            const w = { ...alertCfg };
+            const num = (k, unit) => h('input.ch-num', { type: 'text', inputmode: 'decimal', value: w[k], style: { width: '64px' }, on: { input: (e) => { const x = parseNum(e.target.value, true); if (x !== null && x > 0) w[k] = x; } } });
+            const chk = (k) => h('input', { type: 'checkbox', checked: !!w[k], on: { change: (e) => { w[k] = e.target.checked; } } });
+            let pop;
+            pop = popover(btn, h('div.ch-mon-alertcfg', h('h4', 'Alert thresholds'),
+                h('label.check', chk('speedOn'), 'Speed drop ≥ ', num('speedDropPct'), ' % of the 24 h average'),
+                h('label.check', chk('etaOn'), 'AIS ETA later by ≥ ', num('etaDelayHrs'), ' h'),
+                h('label.check', chk('staleOn'), 'No position for > ', num('staleHrs'), ' h'),
+                h('label.check', chk('laycanOn'), 'Our ETA after the laycan'),
+                h('p.dim', 'Bu tarayıcıda saklanır. Hız düşüşü, geminin son 24 saatteki seyir hız ortalamasıyla karşılaştırılır (demirde/bağlıyken uyarı yok).'),
+                h('div.toolbar', h('button.tiny.ghost', { type: 'button', on: { click: () => { alertCfg = { ...ALERT_DEFAULTS }; store.set('ch_mon_alerts', {}); pop.close(); draw(); } } }, 'Defaults'), h('span.spacer'),
+                    h('button.tiny.primary', { type: 'button', on: { click: () => { alertCfg = w; store.set('ch_mon_alerts', w); pop.close(); draw(); } } }, 'Apply'))), { align: 'right' });
+        } } }, 'Alert settings');
+        return btn;
     }
 
     const parseAisEta = (s) => {

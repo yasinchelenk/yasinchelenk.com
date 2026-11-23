@@ -7,6 +7,10 @@
 //   { type: 'load'|'disch', name, qty?, rate, terms, turnHrs, waitDays, cost, maxDraft?, eu, eca, supply? }
 //   { type: 'bunker'|'canal'|'strait'|'weather'|'other', name, days, profile: 'idle'|'working'|'laden'|'ballast'|'none', cost, eu, eca, supply? }
 //
+// Voyage Operations (engine/operations.js) adds actuals to any item: `actDays` (days from the reported times) and
+// `actFuel` {ifo?, ulsfo?, mgo?} (tons burnt, from the ROBs); and to the cargo: `actualQty` (B/L quantity),
+// `demActual` / `desActual` (settled demurrage / despatch, USD). Without them the estimate is unchanged.
+//
 // Fuel buckets: `ifo` = the main fuel outside an ECA (VLSFO, or HSFO with a scrubber), `ulsfo` = 0.10% S fuel
 // burnt inside an ECA when the ship switches to ULSFO, `mgo` = gas oil (auxiliaries, and the ECA fuel when
 // the ship switches to MGO). A scrubber ship keeps burning HSFO inside an ECA.
@@ -210,7 +214,14 @@ export function estimate(est) {
         ulsfo: sum(rows, (r) => r.ulsfo),
         mgo: sum(rows, (r) => r.mgo) + idle.mgo * adjDays,
     };
-    const qtyIncl = { ifo: raw.ifo * (1 + safety), ulsfo: raw.ulsfo * (1 + safety), mgo: raw.mgo * (1 + safety) };
+    // The safety margin covers estimated consumption only: fuel reported from the ROBs (Voyage Operations) is taken as burnt
+    const reported = {
+        ifo: sum(rows.filter((r) => r.fuelActual), (r) => r.ifo),
+        ulsfo: sum(rows.filter((r) => r.fuelActual), (r) => r.ulsfo),
+        mgo: sum(rows.filter((r) => r.fuelActual), (r) => r.mgo),
+    };
+    const withMargin = (g) => reported[g] + (raw[g] - reported[g]) * (1 + safety);
+    const qtyIncl = { ifo: withMargin('ifo'), ulsfo: withMargin('ulsfo'), mgo: withMargin('mgo') };
     const market = marketPrices(est);
     // With a bunker plan the burnt fuel is priced from the stock on board (average / FIFO)
     const price = {
@@ -256,8 +267,8 @@ export function estimate(est) {
     const allFuels = [{ grade: mainGrade, tons: raw.ifo }, { grade: 'ULSFO', tons: raw.ulsfo }, { grade: 'MGO', tons: raw.mgo }];
     const co2 = co2Tonnes(allFuels);
 
-    // Freight: main cargo (quantity from the intake) + other parcels (fixed quantities)
-    const qty = intake.intake;
+    // Freight: main cargo (quantity from the intake, or the B/L figure once loaded) + other parcels (fixed quantities)
+    const qty = has(c.actualQty) ? n(c.actualQty) : intake.intake;
     const main = cargoFreight(c, qty);
     const cargoes = [{ index: 0, label: c.name || 'Cargo 1', account: c.account ?? '', qty, ...main },
         ...parcels.map((p, i) => ({ index: i + 1, label: p.name || `Cargo ${i + 2}`, account: p.account ?? '', qty: n(p.qty), ...cargoFreight(p, p.qty) }))];
@@ -268,8 +279,9 @@ export function estimate(est) {
     const commPct = n(c.addressPct) + n(c.brokeragePct);
     const comm = commPct / 100;
     const bbNet = n(c.ballastBonus) * (c.bbGross === false ? 1 : 1 - comm);
-    const demNet = n(c.demRate) * demDays * (1 - comm);
-    const despatch = n(c.desRate) * desDays;
+    // Settled laytime (Voyage Operations): the demurrage / despatch amounts replace rate × expected days
+    const demNet = (has(c.demActual) ? n(c.demActual) : n(c.demRate) * demDays) * (1 - comm);
+    const despatch = has(c.desActual) ? n(c.desActual) : n(c.desRate) * desDays;
     const income = netFreight + bbNet + demNet - despatch;
 
     const portCosts = sum(rows, (r) => r.cost);
@@ -356,34 +368,56 @@ function marketPrices(est) {
 
 function runItem(item, { v, s, intake, loadCount, dischCount, parcels }) {
     const base = { type: item.type, label: itemLabel(item), cost: n(item.cost) };
+    // Voyage Operations: days and fuel actually used on this item (from arrival / departure times and ROBs) win over the estimate
+    const actDays = has(item.actDays) ? Math.max(0, n(item.actDays)) : null;
+    const withActual = (row) => actualFuel(row, item.actFuel, actDays !== null);
     if (item.type === 'sea') {
         const p = legProfile(v, item);
         const nm = n(item.nm);
-        const days = p.kn > 0 ? nm / (p.kn * 24) * (1 + n(item.weatherPct) / 100) : 0;
+        const days = actDays ?? (p.kn > 0 ? nm / (p.kn * 24) * (1 + n(item.weatherPct) / 100) : 0);
         const ecaShare = nm > 0 ? Math.min(1, n(item.ecaNm) / nm) : 0;
         // Inside an ECA the main engine switches to MGO or ULSFO (same tonnage); a scrubber ship does not
         const fuel = splitMain(v, days * p.ifo, ecaShare, days * p.mgo);
-        return { ...base, mode: item.mode, nm, ecaNm: nm * ecaShare, kn: p.kn, days, ecaDays: days * ecaShare, ...fuel, euPct: n(item.eu) };
+        return withActual({ ...base, mode: item.mode, nm, ecaNm: nm * ecaShare, kn: actDays !== null && actDays > 0 ? nm / (actDays * 24) : p.kn, days, ecaDays: days * ecaShare, ...fuel, euPct: n(item.eu) });
     }
     if (item.type === 'load' || item.type === 'disch') {
         const count = item.type === 'load' ? loadCount : dischCount;
         const qty = has(item.qty) ? n(item.qty) : intake / count + parcelAt(parcels, item.type, item.name);
         const rate = n(item.rate);
-        const workDays = rate > 0 ? qty / rate * termsFactor(item.terms, s.terms) : 0;
-        const idleDays = n(item.turnHrs) / 24 + n(item.waitDays);
+        const estWork = rate > 0 ? qty / rate * termsFactor(item.terms, s.terms) : 0;
+        const estIdle = n(item.turnHrs) / 24 + n(item.waitDays);
+        // Actual port time: the working days the estimate expects (at most the time in port), the rest idle
+        const workDays = actDays !== null ? Math.min(estWork, actDays) : estWork;
+        const idleDays = actDays !== null ? actDays - workDays : estIdle;
         const work = profileCons(v, 'working');
         const idle = profileCons(v, 'idle');
         const days = workDays + idleDays;
         const fuel = splitMain(v, work.ifo * workDays + idle.ifo * idleDays, item.eca ? 1 : 0, work.mgo * workDays + idle.mgo * idleDays);
-        return {
-            ...base, qty, rate, rateOk: rate > 0 || qty === 0, workDays, idleDays, days, ecaDays: item.eca ? days : 0, ...fuel,
+        return withActual({
+            ...base, qty, rate, rateOk: rate > 0 || qty === 0 || actDays !== null, workDays, idleDays, days, ecaDays: item.eca ? days : 0, ...fuel,
             euPct: item.eu ? 100 : 0,
-        };
+        });
     }
-    const days = n(item.days);
+    const days = actDays ?? n(item.days);
     const cons = profileCons(v, item.profile ?? 'idle');
     const fuel = splitMain(v, cons.ifo * days, item.eca ? 1 : 0, cons.mgo * days);
-    return { ...base, days, ecaDays: item.eca ? days : 0, ...fuel, euPct: n(item.eu === true ? 100 : item.eu) };
+    return withActual({ ...base, days, ecaDays: item.eca ? days : 0, ...fuel, euPct: n(item.eu === true ? 100 : item.eu) });
+}
+
+/**
+ * Fuel actually burnt on an item (tons per bucket, from the ROBs) replaces the computed figure bucket by bucket.
+ * `actual` marks the row as reported, so the safety margin is not added on top of it.
+ */
+function actualFuel(row, fuel, timed) {
+    const out = { ...row, actual: timed, fuelActual: false };
+    if (!fuel) return out;
+    for (const g of ['ifo', 'ulsfo', 'mgo']) {
+        if (has(fuel[g])) {
+            out[g] = Math.max(0, n(fuel[g]));
+            out.fuelActual = true;
+        }
+    }
+    return out;
 }
 
 export function itemLabel(item) {

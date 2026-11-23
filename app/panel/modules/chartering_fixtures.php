@@ -326,6 +326,8 @@ function ch_deadlines(int $days = 60): array
             }
         }
     }
+    // Voyage Operations and Accounts: next voyage events, receivables / payables falling due (modules/chartering_ops.php)
+    array_push($items, ...ch_ops_deadlines($in, $to));
     usort($items, fn($a, $b) => strcmp($a['date'], $b['date']));
 
     return $items;

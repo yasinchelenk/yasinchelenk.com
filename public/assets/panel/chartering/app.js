@@ -13,6 +13,8 @@ export const TABS = [
     { code: 'ch-board', label: 'Tonnage & Cargo', tip: 'Market positions, cargo orders, matching and the distance matrix' },
     { code: 'ch-voyage', label: 'Voyage Estimator', tip: 'Intake, bunkers, freight, TCE, breakeven and sensitivity' },
     { code: 'ch-fixtures', label: 'Fixtures', tip: 'Fixture register from recaps, post-fixture checklist, deadlines, document templates' },
+    { code: 'ch-ops', label: 'Operations', tip: 'Voyage operations: arrival / departure reports with ROBs, actual vs initial P&L, milestones, balancing' },
+    { code: 'ch-accounts', label: 'Accounts', tip: 'Receivables & payables with payments, ageing, statements, cash-flow calendar and voyage statistics' },
     { code: 'ch-sof', label: 'SOF', tip: 'Statement of facts: templates, chronological events, stoppages, checks' },
     { code: 'ch-laytime', label: 'Laytime & Demurrage', tip: 'Time sheets from the SOF, demurrage / despatch, claim letter' },
     { code: 'ch-fleet', label: 'Fleet', tip: 'Own / managed vessels: current charter, min-max redelivery, hire, next dry dock and each vessel’s voyage log' },
