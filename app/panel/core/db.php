@@ -140,6 +140,9 @@ function panel_migrations(): array
         129 => 'chartering_migrate_129',
         // Chartering · Fleet: hire statement'lar (15/30 günlük dönemler, final statement) ve gemide statement ayarları
         130 => 'chartering_migrate_130',
+        // Fleet · hire statements: takip başkasında (hs_off) ve sistem dışında yapılmış dönemler (hs_done_until);
+        // mevcut gemilerde başlamış tüm dönemler yapıldı sayılır
+        131 => 'chartering_migrate_131',
     ];
 }
 

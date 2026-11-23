@@ -19,6 +19,8 @@ const CH_FLEET_FIELDS = [
     'next_dd' => 'date', 'status' => 'enum:on_hire|open|drydock|idle', 'notes' => 'text', 'sort' => 'int',
     // Hire statements (migration 130, chartering_fleet_hire.php): delivery time (GMT), hire paid every N days, letterhead
     'delivery_time' => 'text', 'hire_days' => 'int', 'owners' => 'text', 'owners_address' => 'text', 'charterers_address' => 'text', 'bank_details' => 'text',
+    // Migration 131: another desk prepares the statements (no reminders) / periods 1…N handled outside the system
+    'hs_off' => 'bool', 'hs_done_until' => 'int',
 ];
 
 const CH_FLEET_VOYAGE_FIELDS = [
@@ -155,6 +157,9 @@ entity_define('ch_fleet', [
             $t = ch_fleet_hhmm($d['delivery_time']);
             $t === false && api_error("Delivery saati okunamadı: “{$d['delivery_time']}” (ör. 01:45, GMT)");
             $d['delivery_time'] = $t;
+        }
+        if (isset($d['hs_done_until']) && (int) $d['hs_done_until'] < 0) {
+            $d['hs_done_until'] = 0;
         }
         if (isset($d['hire_days']) && ((int) $d['hire_days'] < 1 || (int) $d['hire_days'] > 90)) {
             api_error('Hire ödeme dönemi 1–90 gün olmalı (genelde 15).');

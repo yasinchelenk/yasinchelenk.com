@@ -8,7 +8,7 @@ import { modal, confirmPop } from '../core/ui.js';
 import { fmt, usd, numInput, textInput } from '../chartering/ui.js';
 import {
     computeStatement, statementRows, statementTitle, ordinalShort, parseOffHireText, trackPeriods, nextInterim, finalFrom, blankStatement, toUtc, dayDiff,
-    fmtStamp, fmtNum, emailText, offHireSummarised, PERIOD_STATUS, BUNKER_GRADES,
+    fmtStamp, fmtNum, emailText, offHireSummarised, PERIOD_STATUS, BUNKER_GRADES, startedPeriods,
 } from '../chartering/engine/hirestatement.js';
 
 /** Now in GMT, 'YYYY-MM-DD HH:MM' */
@@ -27,8 +27,15 @@ const currentOf = (f) => statementsOf(f).filter((s) => !f.delivery_date || Strin
 
 /** Hire periods of the current charter set against its statements: [{ period, stmt, status }] */
 export function track(f, now = nowUtc()) {
-    if (!f.delivery_date || !f.charterers || ['open', 'idle'].includes(f.status)) return [];
-    return trackPeriods({ start: startOf(f), end: endOf(f), every: Number(f.hire_days) || 15, statements: currentOf(f), now });
+    if (!f.delivery_date || !f.charterers || ['open', 'idle'].includes(f.status) || Number(f.hs_off)) return [];
+    return trackPeriods({ start: startOf(f), end: endOf(f), every: Number(f.hire_days) || 15, statements: currentOf(f), now, doneUntil: Number(f.hs_done_until) || 0 });
+}
+
+/** Sets “periods 1…n handled outside the system” on the vessel. */
+async function setDone(f, n, reload) {
+    await put(`chartering/fleet/${f.id}`, { hs_done_until: Math.max(0, n) });
+    toast(n > 0 ? `#1–#${n} yapıldı sayıldı.` : 'Geri alındı.');
+    await reload();
 }
 
 const URGENT = ['missing', 'unpaid', 'due', 'draft_due'];
@@ -40,19 +47,25 @@ const inDays = (t, now) => { const d = Math.round(dayDiff(now, t)); return d ===
 
 /** Fleet → “Needs attention” lines for hire statements. */
 export function hireAlerts(f, now = nowUtc()) {
-    return track(f, now).filter((r) => r.period && URGENT.includes(r.status)).map(({ period: p, stmt, status }) => {
+    const rows = track(f, now).filter((r) => r.period && URGENT.includes(r.status));
+    // Several periods without a statement → one line (usually statements made before the system, or by another desk)
+    const missing = rows.filter((r) => r.status === 'missing');
+    const grouped = missing.length > 1 ? [{ level: 'red', text: `Hire statements #${missing[0].period.no}–#${missing.at(-1).period.no} not prepared (${missing.length} periods) — open the vessel and mark them done if they were handled outside the system`,
+        date: missing[0].period.from.slice(0, 10) }] : [];
+    return [...grouped, ...rows.filter((r) => missing.length < 2 || r.status !== 'missing').map(({ period: p, stmt, status }) => {
         const no = `Hire statement ${p.no}`;
         if (status === 'missing') return { level: 'red', text: `${no} not prepared — period started ${ui(p.from)} GMT`, date: p.from.slice(0, 10) };
         if (status === 'unpaid') return { level: 'red', text: `${no} sent${stmt.sent_date ? ' ' + fmtDate(stmt.sent_date) : ''} — hire not received (${usd(Number(stmt.balance), 2)})`, date: p.from.slice(0, 10) };
         if (status === 'draft_due') return { level: started(p, now) ? 'red' : 'amber', text: `${no} is still a draft — period ${started(p, now) ? 'started' : 'starts'} ${ui(p.from)} GMT (${inDays(p.from, now)})`, date: p.from.slice(0, 10) };
         return { level: 'amber', text: `${no} to prepare — period ${d5(p.from)} – ${d5(p.to)} starts ${inDays(p.from, now)}`, date: p.from.slice(0, 10) };
-    });
+    })];
 }
 
 const badge = (status, extra = '') => { const [label, cls] = PERIOD_STATUS[status] ?? [status, 'gray']; return h('span.ch-badge.' + cls, label + extra); };
 
 /** Employment grid cell: the statement that needs attention, else the next one. */
 export function nextCell(f, onOpen) {
+    if (Number(f.hs_off)) return h('span.dim', { title: 'Hire statement’ları başka biri hazırlıyor (Statement settings)' }, 'not tracked');
     const rows = track(f);
     if (!rows.length) return h('span.dim', f.delivery_date && f.charterers ? '—' : '');
     const r = rows.find((x) => x.period && URGENT.includes(x.status)) ?? rows.find((x) => x.period && x.status === 'upcoming') ?? rows.filter((x) => x.period).at(-1);
@@ -67,49 +80,77 @@ export function nextCell(f, onOpen) {
  * opts: { canEdit, reload: () => Promise, rates: [{ from, rate }], onSettings: () => void }
  */
 export function hireSection(f, opts) {
-    const rows = track(f);
+    const now = nowUtc();
+    const rows = track(f, now);
     const all = currentOf(f);
     const every = Number(f.hire_days) || 15;
+    const doneUntil = Number(f.hs_done_until) || 0;
     const fin = all.find((s) => s.kind === 'final');
     const sent = all.filter((s) => s.status !== 'draft');
     const billed = sent.reduce((a, s) => a + (Number(s.balance) || 0), 0);
     const received = all.reduce((a, s) => a + (Number(s.paid_amount) || 0), 0);
+    const reload = opts.reload;
 
     const statusCell = (s) => h('span', badge(s.status === 'paid' ? 'paid' : s.status === 'sent' ? 'sent' : 'draft'));
     const quick = (s) => {
         if (!opts.canEdit) return null;
-        if (s.status === 'draft') return h('button.tiny', { type: 'button', title: 'Statement charterers’a gönderildi', on: { click: async () => { await put(`chartering/fleet-hire-statements/${s.id}`, { status: 'sent' }); toast('Sent olarak işaretlendi.'); await opts.reload(); } } }, 'Mark sent');
-        if (s.status === 'sent') return h('button.tiny', { type: 'button', on: { click: () => receivedDialog(s, opts.reload) } }, 'Hire received…');
+        if (s.status === 'draft') return h('button.tiny', { type: 'button', title: 'Statement charterers’a gönderildi', on: { click: async () => { await put(`chartering/fleet-hire-statements/${s.id}`, { status: 'sent' }); toast('Sent olarak işaretlendi.'); await reload(); } } }, 'Mark sent');
+        if (s.status === 'sent') return h('button.tiny', { type: 'button', on: { click: () => receivedDialog(s, reload) } }, 'Hire received…');
         return null;
     };
-    const table = h('table.ch-table.hs-table',
-        h('thead', h('tr', ['No', 'Period (GMT)', 'Days', 'Statement', 'Balance', 'Status', 'Sent', 'Hire received', ''].map((x, i) => h(i === 2 || i === 4 ? 'th.r' : 'th', x)))),
-        h('tbody', rows.map(({ period: p, stmt: s, status }) => h('tr' + (status === 'missing' || status === 'unpaid' || (status === 'draft_due' && started(p)) ? '.is-late' : URGENT.includes(status) ? '.is-due' : ''),
-            h('td', h('b', s?.kind === 'final' ? 'Final' : `#${p?.no ?? s?.stmt_no ?? ''}`)),
-            h('td.nowrap', p ? `${ui(p.from)} – ${ui(p.to)}` : s ? `${ui(s.period_from)} – ${ui(s.period_to)}` : '', p?.last ? h('small.dim', ' to redelivery') : null),
-            h('td.r', p ? fmt(p.days, p.days % 1 ? 2 : 0) : ''),
-            h('td', s ? h('button.ch-link', { type: 'button', on: { click: () => openStatement(f, s, opts) } }, statementTitle(s).replace(' HIRE STATEMENT', ''), s.stmt_date ? h('small.dim', ` · ${fmtDate(s.stmt_date)}`) : null)
-                : h('span.dim', p && status === 'upcoming' ? `starts ${inDays(p.from, nowUtc())}` : '—')),
-            h('td.r', s && s.balance !== null && s.balance !== undefined ? usd(Number(s.balance), 2) : ''),
-            h('td', p ? badge(status) : statusCell(s)),
-            h('td', s?.sent_date ? fmtDate(s.sent_date) : ''),
-            h('td', s?.paid_date ? h('span', fmtDate(s.paid_date), s.paid_amount ? h('small.dim', ` ${usd(Number(s.paid_amount), 2)}`) : null) : ''),
-            h('td.nowrap', s ? [quick(s), ' ', h('button.tiny', { type: 'button', on: { click: () => openStatement(f, s, opts) } }, 'Open')]
-                : opts.canEdit && p ? h('button.tiny' + (URGENT.includes(status) ? '.primary' : ''), { type: 'button', on: { click: () => openStatement(f, null, { ...opts, period: p }) } }, 'Prepare') : null)))),
+    // “Done”: this period (and every one before it) was handled outside the system — no statement needed here
+    const doneBtn = (p) => h('button.tiny.ghost', { type: 'button', title: p.no > doneUntil + 1 ? `#1–#${p.no} yapıldı say (sistem dışında hazırlandı)` : 'Bu dönem sistem dışında yapıldı', on: { click: (e) => {
+        if (p.no > doneUntil + 1) confirmPop(e.currentTarget, { text: `Mark #${doneUntil + 1}–#${p.no} as done?`, yes: 'Yes, done', danger: false, onYes: () => setDone(f, p.no, reload) });
+        else setDone(f, p.no, reload);
+    } } }, '✓ Done');
+    const actions = (p, s, status) => {
+        if (s) return [quick(s), ' ', h('button.tiny', { type: 'button', on: { click: () => openStatement(f, s, opts) } }, 'Open')];
+        if (!opts.canEdit || !p) return null;
+        if (status === 'done') return p.no === doneUntil ? h('button.tiny.ghost', { type: 'button', title: 'Bu dönemi yeniden takibe al', on: { click: () => setDone(f, p.no - 1, reload) } }, 'Undo') : null;
+        return [h('button.tiny' + (URGENT.includes(status) ? '.primary' : ''), { type: 'button', on: { click: () => openStatement(f, null, { ...opts, period: p }) } }, 'Prepare'), ' ', doneBtn(p)];
+    };
+    const rowEl = ({ period: p, stmt: s, status }) => h('tr' + (status === 'missing' || status === 'unpaid' || (status === 'draft_due' && started(p)) ? '.is-late' : URGENT.includes(status) ? '.is-due' : status === 'done' ? '.is-done' : ''),
+        h('td', h('b', s?.kind === 'final' ? 'Final' : `#${p?.no ?? s?.stmt_no ?? ''}`)),
+        h('td.nowrap', p ? `${ui(p.from)} – ${ui(p.to)}` : s ? `${ui(s.period_from)} – ${ui(s.period_to)}` : '', p?.last ? h('small.dim', ' to redelivery') : null),
+        h('td.r', p ? fmt(p.days, p.days % 1 ? 2 : 0) : ''),
+        h('td', s ? h('button.ch-link', { type: 'button', on: { click: () => openStatement(f, s, opts) } }, statementTitle(s).replace(' HIRE STATEMENT', ''), s.stmt_date ? h('small.dim', ` · ${fmtDate(s.stmt_date)}`) : null)
+            : h('span.dim', status === 'done' ? 'outside the system' : p && status === 'upcoming' ? `starts ${inDays(p.from, now)}` : '—')),
+        h('td.r', s && s.balance !== null && s.balance !== undefined ? usd(Number(s.balance), 2) : ''),
+        h('td', p ? badge(status) : statusCell(s)),
+        h('td', s?.sent_date ? fmtDate(s.sent_date) : ''),
+        h('td', s?.paid_date ? h('span', fmtDate(s.paid_date), s.paid_amount ? h('small.dim', ` ${usd(Number(s.paid_amount), 2)}`) : null) : ''),
+        h('td.nowrap', actions(p, s, status)));
+    const head = () => h('thead', h('tr', ['No', 'Period (GMT)', 'Days', 'Statement', 'Balance', 'Status', 'Sent', 'Hire received', ''].map((x, i) => h(i === 2 || i === 4 ? 'th.r' : 'th', x))));
+    // Finished periods (done / paid) except the last two go into “Earlier periods”
+    const finished = rows.filter((r) => r.period && (r.status === 'done' || r.status === 'paid'));
+    const earlier = new Set(finished.slice(0, Math.max(0, finished.length - 2)));
+    const visible = rows.filter((r) => !earlier.has(r));
+    const missing = rows.filter((r) => r.status === 'missing');
+    const table = h('table.ch-table.hs-table', head(),
+        h('tbody', visible.map(rowEl)),
         sent.length ? h('tfoot', h('tr', h('td', { colSpan: 4 }, `Sent: ${sent.length} statement${sent.length > 1 ? 's' : ''}`), h('td.r', h('b', usd(billed, 2))), h('td', { colSpan: 2 }, 'received'),
             h('td', h('b', usd(received, 2)), billed - received > 0.005 ? h('small.red', ` · ${usd(billed - received, 2)} outstanding`) : null), h('td'))) : null);
+    const earlierBox = earlier.size ? h('details.hs-earlier', h('summary', `Earlier periods (${earlier.size}) — done / paid`), h('table.ch-table.hs-table', head(), h('tbody', [...earlier].map(rowEl)))) : null;
 
     const ready = f.delivery_date && f.charterers;
-    return h('section.ch-sec.cat-green.hs-sec',
+    const off = !!Number(f.hs_off);
+    const toggleOff = (v) => async () => { await put(`chartering/fleet/${f.id}`, { hs_off: v }); toast(v ? 'Bu geminin hire statement takibi kapatıldı.' : 'Takip yeniden açıldı.'); await reload(); };
+    const lastStarted = ready ? startedPeriods({ start: startOf(f), end: endOf(f), every, now }) : 0;
+    return h('section.ch-sec.cat-green.hs-sec' + (off ? '.is-off' : ''),
         h('header.ch-sec__head.is-static', h('span.ch-sec__title', 'Hire statements'), h('span.ch-sec__badge', String(all.length)),
-            h('span.dim.fl-hint', ready ? `Hire every ${every} days from delivery ${ui(startOf(f))} GMT · reminder 3 days before each period` : 'Enter charterers and the delivery date to track hire statements'),
+            h('span.dim.fl-hint', off ? 'Not tracked — another desk prepares this vessel’s statements' : ready ? `Hire every ${every} days from delivery ${ui(startOf(f))} GMT · reminder 3 days before each period` : 'Enter charterers and the delivery date to track hire statements'),
             h('span.spacer'),
-            h('button', { type: 'button', title: 'Owners (letterhead), charterers’ address, bank details, hire period, delivery time', on: { click: () => settingsDialog(f, opts.reload) } }, 'Statement settings…'),
-            opts.canEdit && ready ? h('button', { type: 'button', title: 'Statement for a period of your choice (e.g. a balance or an extra statement)', on: { click: () => openStatement(f, null, { ...opts, period: null, free: true }) } }, '+ Statement') : null,
-            opts.canEdit && ready ? h('button' + (fin ? '' : '.primary'), { type: 'button', title: fin ? 'Open the final statement' : 'Final statement: delivery → redelivery, every off-hire and item, less the hire received',
+            opts.canEdit && !off && missing.length ? h('button', { type: 'button', title: 'Başlamış ve statement’ı olmayan tüm dönemler sistem dışında yapıldı say', on: { click: (e) => confirmPop(e.currentTarget, {
+                text: `Mark #1–#${lastStarted} as done (handled outside the system)?`, yes: 'Yes, done', danger: false, onYes: () => setDone(f, lastStarted, reload) }) } }, `✓ Mark past periods done (${missing.length})`) : null,
+            opts.canEdit ? h('button', { type: 'button', title: off ? 'Hire statement’ları yeniden biz takip edelim' : 'Bu geminin hire statement’larını başka biri hazırlıyor: hatırlatma ve uyarı çıkmasın', on: { click: toggleOff(!off) } }, off ? 'Track again' : 'Not tracked by us') : null,
+            h('button', { type: 'button', title: 'Owners (letterhead), charterers’ address, bank details, hire period, delivery time', on: { click: () => settingsDialog(f, reload) } }, 'Statement settings…'),
+            opts.canEdit && ready && !off ? h('button', { type: 'button', title: 'Statement for a period of your choice (e.g. a balance or an extra statement)', on: { click: () => openStatement(f, null, { ...opts, period: null, free: true }) } }, '+ Statement') : null,
+            opts.canEdit && ready && !off ? h('button' + (fin ? '' : '.primary'), { type: 'button', title: fin ? 'Open the final statement' : 'Final statement: delivery → redelivery, every off-hire and item, less the hire received',
                 on: { click: () => (fin ? openStatement(f, fin, opts) : openStatement(f, null, { ...opts, kind: 'final' })) } }, fin ? 'Final statement' : '+ Final statement') : null),
-        h('div.ch-sec__body', ready ? (rows.length ? table : h('p.dim', 'No hire period yet.')) : null,
-            ready && !f.delivery_time ? h('p.dim.hs-hint', 'Tip: enter the delivery time (GMT) in the charter above — periods run from the exact time of delivery (e.g. 04-09-2026 01:45 → 19-09-2026 01:45).') : null));
+        h('div.ch-sec__body',
+            off ? h('p.dim', all.length ? `${all.length} statement kayıtlı; açmak için “Track again”.` : 'Bu geminin hire statement’ları burada takip edilmiyor.')
+                : [ready ? earlierBox : null, ready ? (rows.length ? table : h('p.dim', 'No hire period yet.')) : null,
+                    ready && !f.delivery_time ? h('p.dim.hs-hint', 'Tip: enter the delivery time (GMT) in the charter above — periods run from the exact time of delivery (e.g. 04-09-2026 01:45 → 19-09-2026 01:45).') : null]));
 }
 
 function receivedDialog(s, reload) {
@@ -127,13 +168,18 @@ function receivedDialog(s, reload) {
 }
 
 function settingsDialog(f, reload) {
-    const w = { hire_days: f.hire_days ?? 15, delivery_time: f.delivery_time ?? '', owners: f.owners ?? '', owners_address: f.owners_address ?? '', charterers_address: f.charterers_address ?? '', bank_details: f.bank_details ?? '' };
+    const w = { hire_days: f.hire_days ?? 15, delivery_time: f.delivery_time ?? '', owners: f.owners ?? '', owners_address: f.owners_address ?? '', charterers_address: f.charterers_address ?? '', bank_details: f.bank_details ?? '',
+        hs_off: Number(f.hs_off) ? 1 : 0, hs_done_until: Number(f.hs_done_until) || 0 };
     const ta = (k, rows, ph) => h('textarea', { rows, placeholder: ph ?? '', on: { input: (e) => { w[k] = e.target.value; } } }, w[k]);
     modal({ title: `Statement settings · ${f.vessel}`, width: 760,
         body: h('div.ch-grid', { style: { '--cols': 2 } },
             h('label.ch-field', h('span.ch-field__label', 'Hire paid every (days)'), h('select', { on: { change: (e) => { w.hire_days = Number(e.target.value); } } },
                 [15, 30, 14, 7].map((d) => h('option', { value: d, selected: Number(w.hire_days) === d }, `${d} days${d === 15 ? ' (usual)' : ''}`)))),
             h('label.ch-field', h('span.ch-field__label', 'Delivery time (GMT)'), textInput(w, 'delivery_time', null, { placeholder: 'e.g. 01:45' })),
+            h('label.check', { style: { gridColumn: 'span 2' } }, h('input', { type: 'checkbox', checked: !!w.hs_off, on: { change: (e) => { w.hs_off = e.target.checked ? 1 : 0; } } }),
+                'Not tracked by us — another desk prepares this vessel’s hire statements (no reminders)'),
+            h('label.ch-field', h('span.ch-field__label', 'Done outside the system up to statement no.'), numInput(w, 'hs_done_until', null, { small: true, placeholder: '0' })),
+            h('span.dim', { style: { alignSelf: 'end', fontSize: '12px' } }, 'Bu numaraya kadar olan dönemler “Done” sayılır, uyarı çıkmaz.'),
             h('label.ch-field', { style: { gridColumn: 'span 2' } }, h('span.ch-field__label', 'Owners (letterhead of the statement)'), textInput(w, 'owners', null, { placeholder: 'e.g. EXAMPLE SHIPPING LTD.' })),
             h('label.ch-field', h('span.ch-field__label', 'Owners’ address (footer)'), ta('owners_address', 3)),
             h('label.ch-field', h('span.ch-field__label', `Charterers’ address (${f.charterers ?? 'charterers'})`), ta('charterers_address', 3, 'Address lines, VAT no …')),

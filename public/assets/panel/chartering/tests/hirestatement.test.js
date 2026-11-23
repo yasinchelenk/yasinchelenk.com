@@ -1,7 +1,7 @@
 // Fleet · hire statements (engine/hirestatement.js). Example figures only — commercial data stays in the database.
 import { test, eq, near } from './harness.js';
 import { computeStatement, statementRows, hirePeriods, hireLines, statementTitle, ordinalShort, parseOffHireText, periodStatus, trackPeriods,
-    nextInterim, finalFrom, toUtc } from '../engine/hirestatement.js';
+    nextInterim, finalFrom, toUtc, startedPeriods } from '../engine/hirestatement.js';
 
 const example = () => ({
     owners: 'EXAMPLE SHIPPING LTD', charterersName: 'Example Charterers',
@@ -125,4 +125,12 @@ test('Off-hire of an earlier period at the rate then in force', () => {
     near(computeStatement(s).offHire, 0.25 * 15000, 'priced at the CP hire (before the addendum)', 1e-6);
     near(computeStatement({ ...s, rateSchedule: undefined }).offHire, 0.25 * 16000, 'no schedule → nearest hire line', 1e-6);
     near(computeStatement({ ...s, offHires: [{ ...s.offHires[0], rate: 14000 }] }).offHire, 0.25 * 14000, 'typed rate wins', 1e-6);
+});
+
+test('Periods marked done (handled outside the system)', () => {
+    const t = trackPeriods({ start: '2026-01-01 00:00', every: 15, now: '2026-03-10 00:00', doneUntil: 4, statements: [] });
+    eq(t.map((x) => x.status), ['done', 'done', 'done', 'done', 'missing', 'upcoming', 'upcoming'], 'periods 1–4 done, 5 started without a statement');
+    eq(periodStatus({ no: 2, from: '2026-01-16 00:00' }, { status: 'sent' }, '2026-03-10 00:00', { doneUntil: 4 }), 'done', 'a sent one inside “done” counts as done');
+    eq(startedPeriods({ start: '2026-01-01 00:00', every: 15, now: '2026-03-10 00:00' }), 5, 'five periods started by 10 March');
+    eq(startedPeriods({ start: '2026-01-01 00:00', end: '2027-01-01 00:00', every: 15, now: '2026-03-10 00:00' }), 5, '… also when the redelivery is known');
 });

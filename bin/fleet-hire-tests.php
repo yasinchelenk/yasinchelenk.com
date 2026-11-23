@@ -75,6 +75,18 @@ eq(array_map(fn($d) => [$d['no'], $d['title']], ch_fleet_hs_due($fleet, '2026-09
 eq(ch_fleet_hs_due(['status' => 'open'] + $fleet, '2026-10-02 09:00'), [], 'open vessel: nothing due');
 eq(array_column(ch_fleet_hs_due(['redel_max' => '2026-09-30'] + $fleet, '2026-10-02 09:00'), 'no'), [2], 'no period after redelivery (only the unpaid one before it)');
 
+echo "Done outside the system / tracked by another desk\n";
+eq(array_column(ch_fleet_hs_due(['hs_done_until' => 2] + $fleet, '2026-10-02 09:00'), 'no'), [3], 'periods 1–2 marked done: only no. 3 left');
+eq(ch_fleet_hs_due(['hs_off' => 1] + $fleet, '2026-10-02 09:00'), [], 'statements prepared by another desk: nothing due');
+eq(ch_fleet_hs_started($fleet, strtotime('2026-10-02 09:00 UTC')), 2, 'two periods started by 2 October');
+eq(ch_fleet_hs_started(['redel_max' => '2026-09-25'] + $fleet, strtotime('2026-12-01 00:00 UTC')), 2, '… none after redelivery');
+$u = ent_update('ch_fleet', $f['id'], ['hs_done_until' => 5, 'hs_off' => true]);
+eq([(int) $u['hs_done_until'], (int) $u['hs_off']], [5, 1], 'saved on the vessel');
+ent_update('ch_fleet', $f['id'], ['hs_done_until' => null, 'hs_off' => false]);
+$pdo = db();
+chartering_migrate_131($pdo);
+eq((int) scalar('SELECT hs_done_until FROM ch_fleet WHERE id = ?', [$f['id']]), 1, 'migration: started periods done, up to the first statement still awaiting hire (no. 2)');
+
 echo "Lists\n";
 $list = rows('SELECT f.id, ' . ch_fleet_hs_list_sql() . ' FROM ch_fleet f');
 $hs = json_decode($list[0]['hire_statements'], true);
