@@ -17,6 +17,8 @@ const CH_FLEET_FIELDS = [
     'charterers' => 'text', 'cp_date' => 'date', 'delivery_date' => 'date', 'delivery_place' => 'text', 'period' => 'text',
     'redel_min' => 'date', 'redel_max' => 'date', 'redel_place' => 'text', 'hire_rate' => 'num',
     'next_dd' => 'date', 'status' => 'enum:on_hire|open|drydock|idle', 'notes' => 'text', 'sort' => 'int',
+    // Hire statements (migration 130, chartering_fleet_hire.php): delivery time (GMT), hire paid every N days, letterhead
+    'delivery_time' => 'text', 'hire_days' => 'int', 'owners' => 'text', 'owners_address' => 'text', 'charterers_address' => 'text', 'bank_details' => 'text',
 ];
 
 const CH_FLEET_VOYAGE_FIELDS = [
@@ -149,6 +151,14 @@ entity_define('ch_fleet', [
         if (!empty($m['redel_min']) && !empty($m['redel_max']) && $m['redel_min'] > $m['redel_max']) {
             api_error('Min redelivery, max redelivery’den sonra olamaz.');
         }
+        if (array_key_exists('delivery_time', $d)) {
+            $t = ch_fleet_hhmm($d['delivery_time']);
+            $t === false && api_error("Delivery saati okunamadı: “{$d['delivery_time']}” (ör. 01:45, GMT)");
+            $d['delivery_time'] = $t;
+        }
+        if (isset($d['hire_days']) && ((int) $d['hire_days'] < 1 || (int) $d['hire_days'] > 90)) {
+            api_error('Hire ödeme dönemi 1–90 gün olmalı (genelde 15).');
+        }
         if (!$before && !isset($d['sort'])) {
             $d['sort'] = (int) scalar('SELECT COALESCE(MAX(sort), 0) FROM ch_fleet') + 1;
         }
@@ -164,6 +174,10 @@ entity_define('ch_fleet', [
             ent_delete('ch_fleet_addendum', (int) $a['id']);
         }
         $GLOBALS['ch_fleet_deleting'] = null;
+        // Hire statements too — chartering_fleet_hire.php
+        foreach (rows('SELECT id FROM ch_fleet_hire_statements WHERE fleet_id = ?', [$row['id']]) as $s) {
+            ent_delete('ch_fleet_hire_statement', (int) $s['id']);
+        }
         // Port calls (and their contact logs) too — chartering_agents.php
         foreach (rows('SELECT id FROM ch_port_calls WHERE fleet_id = ?', [$row['id']]) as $c) {
             ent_delete('ch_port_call', (int) $c['id']);
@@ -276,7 +290,8 @@ function ch_fleet_list(): never
             FROM ch_fleet_voyages v WHERE v.fleet_id = f.id AND v.load_port IS NOT NULL ORDER BY v.voy_year DESC, v.sort DESC, v.id DESC LIMIT 1) AS last_voyage,
         (SELECT json_group_array(json_object('id', a.id, 'add_no', a.add_no, 'add_date', a.add_date, 'kind', a.kind, 'effective_date', a.effective_date, 'hire_rate', a.hire_rate,
             'redel_min', a.redel_min, 'redel_max', a.redel_max, 'prev_redel_min', a.prev_redel_min, 'prev_redel_max', a.prev_redel_max))
-            FROM (SELECT * FROM ch_fleet_addenda WHERE fleet_id = f.id ORDER BY " . CH_FLEET_ADDENDA_ORDER . ") a) AS addenda
+            FROM (SELECT * FROM ch_fleet_addenda WHERE fleet_id = f.id ORDER BY " . CH_FLEET_ADDENDA_ORDER . ") a) AS addenda,
+        " . ch_fleet_hs_list_sql() . "
         FROM ch_fleet f ORDER BY f.sort, f.vessel"));
 }
 
@@ -285,6 +300,7 @@ function ch_fleet_get(array $p): never
     $f = row('SELECT * FROM ch_fleet WHERE id = ?', [$p['id']]) ?? api_error('Gemi bulunamadı.', 404);
     $f['voyages_list'] = rows('SELECT * FROM ch_fleet_voyages WHERE fleet_id = ? ORDER BY voy_year, sort, id', [$p['id']]);
     $f['addenda'] = rows('SELECT * FROM ch_fleet_addenda WHERE fleet_id = ? ORDER BY ' . CH_FLEET_ADDENDA_ORDER, [$p['id']]);
+    $f['hire_statements'] = ch_fleet_hs_of((int) $p['id']);
     json_response($f);
 }
 

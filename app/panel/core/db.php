@@ -138,6 +138,8 @@ function panel_migrations(): array
         // Chartering · Fixtures: taraflar, subjects bitişi, navlun / hire ödeme şartları, recap'ten laytime maddeleri,
         // B/L kontrolü, sertifikalar ve teklif–karşı teklif kaydı
         129 => 'chartering_migrate_129',
+        // Chartering · Fleet: hire statement'lar (15/30 günlük dönemler, final statement) ve gemide statement ayarları
+        130 => 'chartering_migrate_130',
     ];
 }
 

@@ -45,7 +45,20 @@ final class MiniZip
     }
 }
 
-const XLSX_STYLES =['' => 0, 'bold' => 1, 'money' => 2, 'bold_money' => 3, 'title' => 4, 'dim' => 5, 'head' => 6, 'head_r' => 7];
+const XLSX_STYLES =['' => 0, 'bold' => 1, 'money' => 2, 'bold_money' => 3, 'title' => 4, 'dim' => 5, 'head' => 6, 'head_r' => 7,
+    // Dates as Excel serial numbers (so formulas like =C9-A9 work), day fractions, quantities, a shaded total
+    'datetime' => 8, 'date' => 9, 'days' => 10, 'qty' => 11, 'total_money' => 12];
+
+/** Excel serial number of a 'YYYY-MM-DD[ HH:MM]' UTC time (for the 'datetime' / 'date' styles); null when unreadable. */
+function xlsx_serial(?string $t): ?float
+{
+    if (!$t || !preg_match('/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/', $t, $m)) {
+        return null;
+    }
+    $ts = gmmktime((int) ($m[4] ?? 0), (int) ($m[5] ?? 0), 0, (int) $m[2], (int) $m[3], (int) $m[1]);
+
+    return $ts / 86400 + 25569;
+}
 
 function xlsx_col(int $i): string
 {
@@ -67,6 +80,7 @@ function xlsx_write_book(string $file, array $sheets): void
 {
     $esc = fn($s) => htmlspecialchars((string) $s, ENT_XML1 | ENT_QUOTES, 'UTF-8');
     $xmls = [];
+    $hasFormula = false;
     foreach (array_values($sheets) as $opt) {
     $rows = $opt['rows'] ?? [];
     $sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -84,15 +98,21 @@ function xlsx_write_book(string $file, array $sheets): void
         foreach (array_values((array) $cells) as $c => $cell) {
             $v = is_array($cell) ? ($cell['v'] ?? null) : $cell;
             $s = XLSX_STYLES[is_array($cell) ? ($cell['s'] ?? '') : ''] ?? 0;
-            if ($v === null || $v === '') {
+            if (($v === null || $v === '') && !(is_array($cell) && !empty($cell['f']))) {
                 if ($s) {
                     $sheet .= '<c r="' . xlsx_col($c) . ($r + 1) . '" s="' . $s . '"/>';
                 }
                 continue;
             }
             $ref = xlsx_col($c) . ($r + 1);
+            // ['f' => 'C9*D9', 'v' => cached value]: Excel recalculates on opening (fullCalcOnLoad)
+            if (is_array($cell) && !empty($cell['f'])) {
+                $sheet .= "<c r=\"{$ref}\" s=\"{$s}\"><f>" . $esc(ltrim((string) $cell['f'], '=')) . '</f>' . (is_int($v) || is_float($v) ? '<v>' . (is_float($v) ? round($v, 9) : $v) . '</v>' : '') . '</c>';
+                $hasFormula = true;
+                continue;
+            }
             $sheet .= is_int($v) || is_float($v)
-                ? "<c r=\"{$ref}\" s=\"{$s}\"><v>" . (is_float($v) ? round($v, 6) : $v) . '</v></c>'
+                ? "<c r=\"{$ref}\" s=\"{$s}\"><v>" . (is_float($v) ? round($v, 10) : $v) . '</v></c>'
                 : "<c r=\"{$ref}\" s=\"{$s}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">" . $esc($v) . '</t></is></c>';
         }
         $sheet .= '</row>';
@@ -106,12 +126,13 @@ function xlsx_write_book(string $file, array $sheets): void
     }
 
     $styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        . '<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00"/></numFmts>'
+        . '<numFmts count="5"><numFmt numFmtId="164" formatCode="#,##0.00"/><numFmt numFmtId="165" formatCode="dd.mm.yyyy hh:mm"/><numFmt numFmtId="166" formatCode="dd.mm.yyyy"/>'
+        . '<numFmt numFmtId="167" formatCode="0.000000"/><numFmt numFmtId="168" formatCode="#,##0.000"/></numFmts>'
         . '<fonts count="4"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font><font><b/><sz val="14"/><name val="Arial"/></font><font><sz val="9"/><color rgb="FF6B7A8C"/><name val="Arial"/></font></fonts>'
         . '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8EEF4"/><bgColor indexed="64"/></patternFill></fill></fills>'
         . '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
         . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-        . '<cellXfs count="8"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+        . '<cellXfs count="13"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
         . '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
         . '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
         . '<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>'
@@ -119,6 +140,11 @@ function xlsx_write_book(string $file, array $sheets): void
         . '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
         . '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'
         . '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="right"/></xf>'
+        . '<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="left"/></xf>'
+        . '<xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="left"/></xf>'
+        . '<xf numFmtId="167" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+        . '<xf numFmtId="168" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+        . '<xf numFmtId="164" fontId="1" fillId="2" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/>'
         . '</cellXfs></styleSheet>';
 
     // Sheet names: unique, max 31 characters, no []:*?/\
@@ -142,7 +168,8 @@ function xlsx_write_book(string $file, array $sheets): void
     $zip->addFromString('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
     $zip->addFromString('xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        . '<sheets>' . implode('', array_map(fn($i) => '<sheet name="' . $esc($names[$i]) . '" sheetId="' . ($i + 1) . '" r:id="rId' . ($i + 1) . '"/>', array_keys($xmls))) . '</sheets></workbook>');
+        . '<sheets>' . implode('', array_map(fn($i) => '<sheet name="' . $esc($names[$i]) . '" sheetId="' . ($i + 1) . '" r:id="rId' . ($i + 1) . '"/>', array_keys($xmls))) . '</sheets>'
+        . ($hasFormula ? '<calcPr calcId="191029" fullCalcOnLoad="1"/>' : '') . '</workbook>');
     $zip->addFromString('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         . implode('', array_map(fn($i) => '<Relationship Id="rId' . ($i + 1) . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' . ($i + 1) . '.xml"/>', array_keys($xmls)))
         . '<Relationship Id="rId' . (count($xmls) + 1) . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');

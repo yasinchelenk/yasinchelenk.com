@@ -310,6 +310,15 @@ function ch_deadlines(int $days = 60): array
                 }
             }
         }
+        // Hire statements: the next period's statement to prepare / send, hire not received on a sent one
+        foreach (rows("SELECT * FROM ch_fleet WHERE charterers IS NOT NULL AND delivery_date IS NOT NULL") as $f) {
+            foreach (ch_fleet_hs_due($f) as $d) {
+                if ($d['date'] <= $to) {
+                    $items[] = ['kind' => 'hire_statement', 'date' => $d['date'], 'title' => $d['title'], 'detail' => trim($f['vessel'] . ($f['charterers'] ? " · {$f['charterers']}" : '')),
+                        'tab' => 'ch-fleet', 'id' => (int) $f['id'], 'overdue' => $d['overdue']];
+                }
+            }
+        }
         // New hire agreed in a CP addendum (e.g. on an extension)
         foreach (rows("SELECT a.fleet_id, a.add_no, a.effective_date, a.hire_rate, f.vessel FROM ch_fleet_addenda a JOIN ch_fleet f ON f.id = a.fleet_id WHERE a.hire_rate IS NOT NULL AND a.effective_date IS NOT NULL") as $a) {
             if ($in($a['effective_date'])) {

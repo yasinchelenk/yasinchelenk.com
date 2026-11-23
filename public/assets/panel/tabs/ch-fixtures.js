@@ -21,7 +21,7 @@ const PIPE = [
     ['closed', 'Closed / failed', 'cat-gray', ['closed', 'failed']],
 ];
 const KIND = { laycan: 'Laycan', cancelling: 'Cancelling', notice: 'ETA notice', subs: 'Subjects', freight: 'Freight', time_bar: 'Time bar', task: 'Task', hire: 'Hire', redelivery: 'Redelivery',
-    redel_notice: 'Redelivery notice', cert: 'Certificate', drydock: 'Dry dock' };
+    redel_notice: 'Redelivery notice', cert: 'Certificate', drydock: 'Dry dock', hire_statement: 'Hire statement' };
 
 const FORM = [
     ['vessel', 'Vessel', 'text'], ['type', 'Type', 'select', FIXTURE_TYPES], ['status', 'Status', 'select', FIXTURE_STATUS], ['fixture_date', 'Fixture date', 'date'],
