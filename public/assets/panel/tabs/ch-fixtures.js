@@ -21,7 +21,8 @@ const PIPE = [
     ['closed', 'Closed / failed', 'cat-gray', ['closed', 'failed']],
 ];
 const KIND = { laycan: 'Laycan', cancelling: 'Cancelling', notice: 'ETA notice', subs: 'Subjects', freight: 'Freight', time_bar: 'Time bar', task: 'Task', hire: 'Hire', redelivery: 'Redelivery',
-    redel_notice: 'Redelivery notice', cert: 'Certificate', drydock: 'Dry dock', hire_statement: 'Hire statement' };
+    redel_notice: 'Redelivery notice', cert: 'Certificate', drydock: 'Dry dock', hire_statement: 'Hire statement', receivable: 'To collect', payable: 'To pay', voyage: 'Voyage' };
+const KIND_V1 = ['laycan', 'cancelling', 'notice', 'subs', 'freight', 'time_bar', 'task', 'hire', 'redelivery', 'redel_notice', 'cert', 'drydock', 'hire_statement'];
 
 const FORM = [
     ['vessel', 'Vessel', 'text'], ['type', 'Type', 'select', FIXTURE_TYPES], ['status', 'Status', 'select', FIXTURE_STATUS], ['fixture_date', 'Fixture date', 'date'],
@@ -212,6 +213,7 @@ export async function mount(el, ctx, param) {
                             !isTc(w) && ctx.allowed('ch-sof') ? h('button.tiny', { type: 'button', on: { click: go(() => ctx.open('ch-sof', { fixture: w, call: 'disch' })) } }, 'SOF disch port →') : null,
                             h('button.tiny', { type: 'button', on: { click: go(() => openLaytime(w)) } }, 'Laytime calculation →'),
                             isTc(w) ? h('button.tiny', { type: 'button', on: { click: go(() => ctx.open('ch-tc', { fixture: w })) } }, 'Hire statement →') : null,
+                            !isTc(w) && ctx.allowed('ch-ops') && f.id ? h('button.tiny', { type: 'button', title: 'Gerçekleşenleri (varış/kalkış, ROB, B/L, demurrage) girip Initial ile karşılaştırın', on: { click: go(() => ctx.open('ch-ops', { fromFixture: f.id })) } }, 'Voyage operation →') : null,
                             ...(f.tc ?? []).map((t) => h('span.ch-badge.green', `${t.kind}: ${t.name}`)))))),
             actions: [
                 canEdit ? { label: 'Delete', danger: true, onClick: async () => {
@@ -291,10 +293,13 @@ export async function mount(el, ctx, param) {
 
     async function drawDeadlines() {
         const items = await get('chartering/deadlines', { days: 90 });
-        const kinds = store.get('ch_fx_kinds', Object.keys(KIND));
+        // Hidden kinds are remembered (not the shown ones), so kinds added later appear by default
+        const legacy = store.get('ch_fx_kinds', null);
+        const off = store.get('ch_fx_kinds_off', legacy ? KIND_V1.filter((k) => !legacy.includes(k)) : []);
+        const kinds = Object.keys(KIND).filter((k) => !off.includes(k));
         const chips = h('div.ch-chips', Object.entries(KIND).map(([k, label]) => h('label.ch-chip', h('input', { type: 'checkbox', checked: kinds.includes(k), on: { change: (e) => {
             const next = e.target.checked ? [...kinds, k] : kinds.filter((x) => x !== k);
-            store.set('ch_fx_kinds', next);
+            store.set('ch_fx_kinds_off', Object.keys(KIND).filter((x) => !next.includes(x)));
             drawDeadlines();
         } } }), label)));
         const shown = items.filter((x) => kinds.includes(x.kind));
@@ -302,7 +307,7 @@ export async function mount(el, ctx, param) {
             shown.length ? h('div.ch-scroll', h('table.ch-table',
                 h('thead', h('tr', ['Date', '', 'Kind', 'What', 'Fixture / detail', ''].map((x) => h('th', x)))),
                 h('tbody', shown.map((x) => h('tr', h('td', fmtDate(x.date)), h('td', dueBadge(x.date)), h('td', KIND[x.kind] ?? x.kind), h('td', h('b', x.title)), h('td', x.detail),
-                    h('td', h('button.tiny', { type: 'button', on: { click: () => (x.tab === 'ch-fixtures' ? openFixture(x.id) : ctx.open(x.tab, x.tab === 'ch-fleet' && x.id ? { openId: x.id } : undefined)) } }, 'Open'))))))) : h('p.dim', 'Önümüzdeki 90 günde iş yok.'),
+                    h('td', h('button.tiny', { type: 'button', on: { click: () => (x.tab === 'ch-fixtures' ? openFixture(x.id) : ctx.open(x.tab, ['ch-fleet', 'ch-ops', 'ch-accounts'].includes(x.tab) && x.id ? { openId: x.id } : undefined)) } }, 'Open'))))))) : h('p.dim', 'Önümüzdeki 90 günde iş yok.'),
             h('p.dim', 'Laycan, cancelling, ETA notice’ları, navlun vadesi, kontrol listesi görevleri, claim time bar’ları, hire ödemeleri ve Fleet’teki redelivery / dry dock tarihleri. Market sekmesindeki “Upcoming” kartı da buradan beslenir.'));
     }
 

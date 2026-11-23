@@ -123,18 +123,33 @@ function ch_monitor_status(): array
 function ch_monitor_bundle(): never
 {
     // Agents of our own (Fleet) ships at their current / next ports, matched to the watchlist in the browser
-    json_response(['rows' => rows('SELECT * FROM ch_watchlist ORDER BY name'), 'status' => ch_monitor_status(), 'agents' => ch_port_calls_for_monitor()]);
+    json_response(['rows' => ch_watch_rows(), 'status' => ch_monitor_status(), 'agents' => ch_port_calls_for_monitor()]);
+}
+
+/**
+ * Watchlist rows with `sog_avg24`: the mean speed over the last 24 h while under way (SOG > 3 kn, at least three
+ * positions) — the yardstick of the "speed down" alert.
+ */
+function ch_watch_rows(): array
+{
+    $avg = [];
+    foreach (rows('SELECT watch_id, AVG(sog) AS a, COUNT(*) AS n FROM ch_ais_positions WHERE at >= ? AND sog > 3 GROUP BY watch_id', [gmdate('Y-m-d H:i:s', time() - 86400)]) as $r) {
+        if ((int) $r['n'] >= 3) {
+            $avg[(int) $r['watch_id']] = round((float) $r['a'], 2);
+        }
+    }
+    return array_map(fn($r) => $r + ['sog_avg24' => $avg[(int) $r['id']] ?? null], rows('SELECT * FROM ch_watchlist ORDER BY name'));
 }
 
 function ch_monitor_refresh(): never
 {
     $last = row('SELECT * FROM ch_ais_runs ORDER BY id DESC LIMIT 1');
     if ($last && strtotime($last['at'] . ' UTC') > time() - CH_AIS_MIN_INTERVAL) {
-        json_response(['skipped' => 'recent', 'status' => ch_monitor_status(), 'rows' => rows('SELECT * FROM ch_watchlist ORDER BY name')]);
+        json_response(['skipped' => 'recent', 'status' => ch_monitor_status(), 'rows' => ch_watch_rows()]);
     }
     @set_time_limit(60);
     $res = ch_ais_collect(15, 'refresh');
-    json_response($res + ['status' => ch_monitor_status(), 'rows' => rows('SELECT * FROM ch_watchlist ORDER BY name')]);
+    json_response($res + ['status' => ch_monitor_status(), 'rows' => ch_watch_rows()]);
 }
 
 function ch_monitor_set_provider(array $p, array $in): never
@@ -244,6 +259,11 @@ function ch_ais_collect(int $seconds, string $trigger, ?AisProvider $provider = 
                     'ais_length' => $r['length'] ?? null, 'ais_beam' => $r['beam'] ?? null, 'ais_draught' => $r['draught'] ?? null, 'ais_dest' => $r['dest'] ?? null,
                     'ais_eta' => is_array($eta) && !empty($eta['Month']) ? sprintf('%02d-%02d %02d:%02d', $eta['Month'], $eta['Day'], $eta['Hour'] ?? 0, $eta['Minute'] ?? 0) : null,
                 ], fn($v) => $v !== null && $v !== '');
+                // Alerts: keep the ETA the ship reported before, and when it changed (Position Monitor → "AIS ETA … later")
+                if (isset($upd['ais_eta']) && !empty($w['ais_eta']) && $upd['ais_eta'] !== $w['ais_eta']) {
+                    $upd['ais_eta_prev'] = $w['ais_eta'];
+                    $upd['ais_eta_changed'] = gmdate('Y-m-d H:i');
+                }
                 if ($upd) {
                     update('ch_watchlist', $id, $upd);
                     $touched[$id] = true;

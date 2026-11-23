@@ -143,6 +143,12 @@ function panel_migrations(): array
         // Fleet · hire statements: takip başkasında (hs_off) ve sistem dışında yapılmış dönemler (hs_done_until);
         // mevcut gemilerde başlamış tüm dönemler yapıldı sayılır
         131 => 'chartering_migrate_131',
+        // Chartering · Voyage Operations: seferler (Initial / Current, gerçekleşen kayıtlar) ve milestone'lar
+        132 => 'chartering_migrate_132',
+        // Chartering · Accounts: alacak / borç defteri (navlun, demurrage, despatch, hire, DA, bunker, brokeraj) ve tahsilatlar
+        133 => 'chartering_migrate_133',
+        // Position Monitor uyarıları: AIS ETA'nın önceki değeri ve değiştiği zaman
+        134 => 'chartering_migrate_134',
     ];
 }
 
