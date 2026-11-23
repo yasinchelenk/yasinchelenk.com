@@ -335,8 +335,10 @@ export function parseOffHireText(text) {
  *  paid · sent (awaiting payment) · unpaid (sent, period started > `payDays` ago and not paid) · draft ·
  *  due (no statement, period starts within `lead` days) · missing (no statement, period already started) · upcoming
  */
-export function periodStatus(period, stmt, now, { lead = 3, payDays = 3 } = {}) {
+export function periodStatus(period, stmt, now, { lead = 3, payDays = 3, doneUntil = 0 } = {}) {
     const toStart = dayDiff(now, period.from);
+    // “Done” on the vessel: every period up to this one was handled outside the system (earlier statements, another desk)
+    if (period.no <= n(doneUntil) && (!stmt || stmt.status !== 'paid')) return 'done';
     if (stmt) {
         if (stmt.status === 'paid') return 'paid';
         if (stmt.status === 'sent') return toStart < -payDays ? 'unpaid' : 'sent';
@@ -347,8 +349,14 @@ export function periodStatus(period, stmt, now, { lead = 3, payDays = 3 } = {}) 
     return 'upcoming';
 }
 
+/** Number of the last hire period that has started by `now` (0 before delivery). */
+export function startedPeriods({ start, end = null, every = 15, now }) {
+    const t = utcMin(now);
+    return hirePeriods({ start, end, every, until: now }).filter((p) => utcMin(p.from) <= t).length;
+}
+
 export const PERIOD_STATUS = {
-    paid: ['Paid', 'green'], sent: ['Sent · awaiting hire', 'blue'], unpaid: ['Sent · hire not received', 'red'], draft: ['Draft', 'gray'],
+    paid: ['Paid', 'green'], done: ['Done', 'green'], sent: ['Sent · awaiting hire', 'blue'], unpaid: ['Sent · hire not received', 'red'], draft: ['Draft', 'gray'],
     draft_due: ['Draft · not sent', 'amber'], due: ['To prepare', 'amber'], missing: ['Not prepared', 'red'], upcoming: ['Upcoming', 'gray'],
 };
 
@@ -356,7 +364,7 @@ export const PERIOD_STATUS = {
  * The statements of the current charter set against the expected hire periods:
  * [{ period, stmt, status }] — plus statements that match no period (e.g. extra / final) as { period: null, stmt }.
  */
-export function trackPeriods({ start, end, every, statements = [], now, lead, payDays, ahead = 2 }) {
+export function trackPeriods({ start, end, every, statements = [], now, lead, payDays, ahead = 2, doneUntil = 0 }) {
     const nowT = utcMin(now);
     const until = nowT === null ? null : fmtUtcMin(nowT + Math.max(1, n(every) || 15) * ahead * DAY);
     const periods = hirePeriods({ start, end, every, until });
@@ -366,7 +374,7 @@ export function trackPeriods({ start, end, every, statements = [], now, lead, pa
         const st = interim.find((x) => Number(x.stmt_no) === p.no && !used.has(x.id))
             ?? interim.find((x) => !used.has(x.id) && x.period_from && Math.abs(dayDiff(x.period_from, p.from)) < 1);
         if (st) used.add(st.id);
-        return { period: p, stmt: st ?? null, status: periodStatus(p, st, now, { lead, payDays }) };
+        return { period: p, stmt: st ?? null, status: periodStatus(p, st, now, { lead, payDays, doneUntil }) };
     })
         // far-future periods without a statement are not shown (only the next couple)
         .filter((r) => r.stmt || utcMin(r.period.from) <= (until ? utcMin(until) : Infinity));

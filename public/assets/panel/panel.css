@@ -1580,3 +1580,7 @@ tr.hs-doc__balance td { font-weight: 800; background: #dae6f2; color: var(--navy
 .hs-doc__bank b { color: var(--navy); }
 .hs-doc__remarks { margin-top: 10px; white-space: pre-wrap; color: var(--dim); }
 .hs-doc__foot { margin-top: 14px; padding-top: 6px; border-top: 1px solid var(--line); text-align: center; font-size: 10px; color: var(--dim); }
+table.hs-table tr.is-done td { color: var(--dim); }
+details.hs-earlier { margin-bottom: 6px; }
+details.hs-earlier > summary { cursor: pointer; color: var(--dim); font-size: 12.5px; padding: 2px 0 6px; }
+.hs-sec.is-off { opacity: .85; }

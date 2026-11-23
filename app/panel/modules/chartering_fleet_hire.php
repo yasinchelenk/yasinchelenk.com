@@ -25,6 +25,57 @@ const CH_FLEET_HS_FIELDS = [
 const CH_FLEET_HS_VESSEL = [
     'delivery_time' => 'text', 'hire_days' => 'int', 'owners' => 'text', 'owners_address' => 'text', 'charterers_address' => 'text', 'bank_details' => 'text',
 ];
+/**
+ * Migration 131: hs_off = 1 → another desk prepares this vessel's statements (no tracking, no reminders);
+ * hs_done_until = N → hire periods 1…N were handled outside the system (counted as done).
+ */
+const CH_FLEET_HS_TRACK = ['hs_off' => 'bool', 'hs_done_until' => 'int'];
+
+function chartering_migrate_131(PDO $pdo): void
+{
+    $have = array_column($pdo->query('PRAGMA table_info(ch_fleet)')->fetchAll(), 'name');
+    foreach (CH_FLEET_HS_TRACK as $k => $t) {
+        if (!in_array($k, $have, true)) {
+            $pdo->exec("ALTER TABLE ch_fleet ADD COLUMN {$k} INTEGER");
+        }
+    }
+    // Statements made before the tracking existed: every period already started counts as done, except from the first
+    // statement still a draft / awaiting hire in the system
+    $now = time();
+    foreach ($pdo->query('SELECT * FROM ch_fleet WHERE delivery_date IS NOT NULL')->fetchAll() as $f) {
+        $n = ch_fleet_hs_started($f, $now);
+        $open = $pdo->prepare("SELECT MIN(stmt_no) FROM ch_fleet_hire_statements WHERE fleet_id = ? AND kind = 'interim' AND status IN ('draft', 'sent') AND period_from >= ?");
+        $open->execute([$f['id'], $f['delivery_date']]);
+        $first = $open->fetchColumn();
+        if ($first) {
+            $n = min($n, (int) $first - 1);
+        }
+        if ($n > 0) {
+            $pdo->prepare('UPDATE ch_fleet SET hs_done_until = ? WHERE id = ?')->execute([$n, $f['id']]);
+        }
+    }
+}
+
+/** Number of the vessel's hire periods that have started by $now (unix time), stopping at max redelivery. */
+function ch_fleet_hs_started(array $f, int $now): int
+{
+    if (empty($f['delivery_date'])) {
+        return 0;
+    }
+    $every = max(1, (int) ($f['hire_days'] ?? 0) ?: 15) * 86400;
+    $time = ch_fleet_hhmm($f['delivery_time'] ?? null) ?: '00:00';
+    $start = strtotime("{$f['delivery_date']} {$time} UTC");
+    $end = !empty($f['redel_max']) ? strtotime("{$f['redel_max']} 00:00 UTC") : PHP_INT_MAX;
+    if ($now < $start) {
+        return 0;
+    }
+    $n = intdiv($now - $start, $every) + 1;
+    while ($n > 0 && $start + ($n - 1) * $every >= $end) {
+        $n--;
+    }
+
+    return min($n, 200);
+}
 
 function chartering_migrate_130(PDO $pdo): void
 {
@@ -172,9 +223,10 @@ function ch_fleet_hs_list_sql(): string
  */
 function ch_fleet_hs_due(array $f, ?string $now = null, int $payDays = 3): array
 {
-    if (empty($f['delivery_date']) || empty($f['charterers']) || in_array($f['status'] ?? '', ['open', 'idle'], true)) {
+    if (empty($f['delivery_date']) || empty($f['charterers']) || in_array($f['status'] ?? '', ['open', 'idle'], true) || !empty($f['hs_off'])) {
         return [];
     }
+    $doneUntil = (int) ($f['hs_done_until'] ?? 0);
     $now ??= gmdate('Y-m-d H:i');
     $every = max(1, (int) ($f['hire_days'] ?? 0) ?: 15) * 86400;
     $time = ch_fleet_hhmm($f['delivery_time'] ?? null) ?: '00:00';
@@ -193,8 +245,10 @@ function ch_fleet_hs_due(array $f, ?string $now = null, int $payDays = 3): array
         if (($end !== null && $t >= $end) || ($t > $nowT && $future++ >= 1)) {
             break;
         }
-        $from = gmdate('Y-m-d H:i', $t);
         $s = $byNo[$i] ?? null;
+        if ($i <= $doneUntil) {
+            continue;
+        }
         $daysTo = ($t - $nowT) / 86400;
         if ($s === null || $s['status'] === 'draft') {
             $out[] = ['date' => gmdate('Y-m-d', $t), 'no' => $i, 'overdue' => $daysTo < 0,
