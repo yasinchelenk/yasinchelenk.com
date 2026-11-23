@@ -9,6 +9,7 @@ import { live } from '../core/live.js';
 import { fmt, usd, specForm, kvList } from '../chartering/ui.js';
 import { PURPOSES, PDA, FDA, statusBadge, isActive, nextTime, hoursTo, callIssues, contactButtons, agentCell, callEditor, loadPorts, agentCc } from '../chartering/agents.js';
 import { normPort } from '../chartering/engine/matching.js';
+import { hireAlerts, nextCell, hireSection, track as hireTrack } from './ch-fleet-hire.js';
 
 const STATUS_OPTS = [['on_hire', 'On hire'], ['open', 'Open'], ['drydock', 'Dry dock'], ['idle', 'Idle / lay-up']];
 const STATE = {
@@ -19,7 +20,8 @@ const FORM = [
     ['vessel', 'Vessel', 'text'], ['ex_name', 'Ex name / alias', 'text'], ['teu', 'TEU', 'int'], ['dwt', 'DWT', 'int'],
     ['imo', 'IMO', 'text'], ['vessel_type', 'Type', 'text'], ['status', 'Status (empty = automatic)', 'select', { '': 'Automatic', ...Object.fromEntries(STATUS_OPTS) }], ['next_dd', 'Next dry dock', 'date'],
     ['charterers', 'Charterers', 'text', { span: 2 }], ['cp_date', 'CP date', 'date'], ['hire_rate', 'CP hire (USD/day)', 'num'],
-    ['delivery_date', 'Delivery', 'date'], ['delivery_place', 'Delivery place', 'text'], ['period', 'Period', 'text', { span: 2 }],
+    ['delivery_date', 'Delivery', 'date'], ['delivery_time', 'Delivery time (GMT)', 'text'], ['delivery_place', 'Delivery place', 'text'], ['hire_days', 'Hire paid every (days)', 'int'],
+    ['period', 'Period', 'text', { span: 4 }],
     ['redel_min', 'Min redelivery', 'date'], ['redel_max', 'Max redelivery', 'date'], ['redel_place', 'Redelivery range', 'text', { span: 2 }],
     ['notes', 'Notes', 'textarea', { span: 4 }],
 ];
@@ -117,6 +119,7 @@ export function fleetAlerts(f, t = today()) {
     else if (f.next_dd && n(f.next_dd) <= 90) out.push({ level: 'amber', text: `Dry dock due in ${n(f.next_dd)} d (${fmtDate(f.next_dd)})`, date: f.next_dd });
     const nx = nextRateChange(f, t);
     if (nx && n(nx.from) <= 30 && st !== 'open') out.push({ level: 'blue', text: `Hire changes to $${fmt(nx.rate, 0)}/day on ${fmtDate(nx.from)} (${nx.src}) — in ${n(nx.from)} d`, date: nx.from });
+    out.push(...hireAlerts(f));
     if (st === 'open') out.push({ level: 'gray', text: 'Open — no employment recorded', date: null });
     return out;
 }
@@ -212,12 +215,23 @@ export async function mount(el, ctx, param) {
         const daily = employed.reduce((s, f) => s + currentRate(f), 0);
         const next = list.filter((f) => f.redel_min && f.redel_min >= today() && ['on_hire', 'window'].includes(fleetState(f))).sort((a, b) => a.redel_min.localeCompare(b.redel_min))[0];
         const stat = (label, value, sub, cls = '') => h('div.ch-stat' + cls, h('span.ch-stat__label', label), h('span.ch-stat__value', value), h('span.ch-stat__sub', sub ?? ''));
-        return h('div.ch-stats',
+        return h('div.ch-stats.fl-stats',
             stat('Vessels', String(list.length), `${list.reduce((s, f) => s + (Number(f.teu) || 0), 0).toLocaleString('tr-TR')} TEU in total`),
             stat('On hire', String(states.filter((s) => ['on_hire', 'window', 'overdue', 'fixed'].includes(s)).length), `${states.filter((s) => s === 'open' || s === 'idle').length} open / idle · ${states.filter((s) => s === 'drydock').length} dry dock`),
             stat('Daily hire', employed.length ? usd(daily) : '—', employed.length ? `avg ${usd(daily / employed.length)}/day · ${employed.length} vessels` : 'no hire recorded'),
             stat('Hire per month', employed.length ? usd(daily * 30.4) : '—', 'gross, before commissions'),
+            hireStat(),
             stat('Next redelivery', next ? next.vessel : '—', next ? `${fmtDate(next.redel_min)} – ${fmtDate(next.redel_max)} · ${next.charterers ?? ''}` : ''));
+    }
+
+    /** Hire statements to prepare / send, and hire not received yet */
+    function hireStat() {
+        const rows = list.flatMap((f) => hireTrack(f));
+        const todo = rows.filter((r) => ['missing', 'due', 'draft_due'].includes(r.status)).length;
+        const unpaid = rows.filter((r) => r.status === 'unpaid' || r.status === 'sent');
+        const open = unpaid.reduce((s, r) => s + (Number(r.stmt?.balance) || 0), 0);
+        return h('div.ch-stat' + (rows.some((r) => r.status === 'missing' || r.status === 'unpaid') ? '.is-alert' : ''), h('span.ch-stat__label', 'Hire statements'),
+            h('span.ch-stat__value', todo ? `${todo} to send` : '✓'), h('span.ch-stat__sub', unpaid.length ? `${unpaid.length} awaiting hire · ${usd(open)}` : 'nothing awaiting hire'));
     }
 
     function alertsBox() {
@@ -254,6 +268,8 @@ export async function mount(el, ctx, param) {
                     return h('span.fl-rate', { title: hireSchedule(r).map((s) => `${s.src}: $${fmt(s.rate, 0)}/day from ${fmtDate(s.from)}`).join('\n') },
                         fmt(cur, 0), nx ? h('small.fl-rate__next', ` → ${fmt(nx.rate, 0)} from ${fmtDate(nx.from).slice(0, 5)}`) : changed ? h('small.dim', ' add.') : null);
                 } },
+            { key: 'hire_stmt', label: 'Hire statement', width: 210, title: 'Sıradaki / bekleyen hire statement (15 günlük dönemler, delivery’den itibaren)',
+                render: (r) => nextCell(r, () => openVessel(r.id, { focus: 'hire' })) },
             { key: 'next_dd', label: 'Next DD', width: 150, sortable: true, render: dateCell('next_dd', 90), edit: { type: 'date' } },
             { key: 'port_agent', label: 'Port / agent', width: 260, title: 'Sıradaki / bulunduğu liman ve acentesi (Port calls & agents)',
                 render: (r) => {
@@ -456,12 +472,13 @@ export async function mount(el, ctx, param) {
 
     // ------------------------------------------------------------ Vessel detail: charter + voyage log
 
-    async function openVessel(id, { keep = false } = {}) {
+    async function openVessel(id, { keep = false, focus = null } = {}) {
         const f = await get(`chartering/fleet/${id}`);
         const voyages = f.voyages_list;
         delete f.voyages_list;
         current = { fleet: f, voyages };
         drawDetail(keep);
+        if (focus === 'hire') body.querySelector('.hs-sec')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
 
     function drawDetail(keep) {
@@ -500,9 +517,10 @@ export async function mount(el, ctx, param) {
                         hf ? ['Still to earn → min / max', `${usd(hf.toMin)} / ${usd(hf.toMax)}`, { hint: 'From today (or delivery) to min / max redelivery × daily hire' }] : null,
                     ]),
                     fleetAlerts(f).length ? h('ul.fl-detail__alerts', fleetAlerts(f).map((a) => h('li.fl-alert.' + a.level, a.text))) : null,
-                    h('p.ch-disclaimer', 'Hire figures count each day at the rate in effect that day (CP hire, then any addendum’s new rate), before commissions and off-hire — use TC Desk for the hire statement.')))));
+                    h('p.ch-disclaimer', 'Hire figures count each day at the rate in effect that day (CP hire, then any addendum’s new rate), before commissions and off-hire — the hire statements below deduct those.')))));
 
         const addenda = addendaSection(f);
+        const hire = hireSection(f, { canEdit, reload: load, rates: hireSchedule(f).map((x) => ({ from: x.from, rate: x.rate })) });
 
         vgrid?.destroy?.();
         vgrid = voyageGrid(f, voyages);
@@ -539,7 +557,7 @@ export async function mount(el, ctx, param) {
                     current = null;
                     await load();
                 } }) } }, 'Delete vessel')),
-            charter, vesselCalls(f), addenda, log);
+            charter, vesselCalls(f), addenda, hire, log);
         if (keep) window.scrollTo(0, scroll);
     }
 
@@ -768,6 +786,7 @@ export async function mount(el, ctx, param) {
             reload();
         }),
         live.on('ch_fleet_addendum', (c) => { if (!c.mine) reload(); }),
+        live.on('ch_fleet_hire_statement', (c) => { if (!c.mine) reload(); }),
         live.on('ch_port_call', (c) => { if (!c.mine) reload(); }),
         live.on('ch_port_call_log', (c) => { if (!c.mine) reload(); }),
         live.on('ch_fleet_voyage', (c) => {
