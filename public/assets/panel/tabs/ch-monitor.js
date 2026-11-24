@@ -1,6 +1,6 @@
 // CHARTERING · Position Monitor (spec §4): watchlist grouped by status, live AIS (server-side collector),
 // manual positions, Leaflet map with tracks, ports and anchorages, and a "can she make the laycan?" tool.
-import { h, fill, toast, store, fmtDate, fmtStamp, debounce } from '../core/dom.js';
+import { h, fill, toast, store, fmtDate, fmtStamp, debounce, copyText, nowLocal, matches } from '../core/dom.js';
 import { get, post, put, del } from '../core/api.js';
 import { modal, confirmBox, segmented, popover } from '../core/ui.js';
 import { monitorAlerts, ALERT_DEFAULTS } from '../chartering/engine/alerts.js';
@@ -12,6 +12,8 @@ import { blankEstimate } from '../chartering/engine/voyage.js';
 import { parseNum, fmt } from '../chartering/ui.js';
 import { normPort } from '../chartering/engine/matching.js';
 import { statusBadge, nextTime, contactButtons, agentText, callIssues } from '../chartering/agents.js';
+import { EVENT_CODES, codeInfo, normCode, summarize, eventLine, eventSentence, opsTime } from '../chartering/engine/vesselevents.js';
+import { formatInZone } from '../chartering/engine/eta.js';
 
 const GROUPS = {
     fixed: ['Fixed / On voyage', 'cat-purple', '#7d4fd6'], open: ['Open / Prompt', 'cat-green', '#18996c'], ballast: ['Ballasting', 'cat-blue', '#2f6fdd'],
@@ -70,6 +72,7 @@ export async function mount(el, ctx) {
     let shipLayer = null;
     let trackLayer = null;
     let pickTarget = null;
+    let refreshEvents = null;   // the open "Vessel events" dialog redraws itself after a reload
     const statusBox = h('div.ch-mon__status');
     const body = h('div.ch-mon__body');
     const tool = { watchId: null, port: '', lat: null, lon: null, factor: DEFAULT_FACTOR, nm: null, kn: null, from: '', to: '' };
@@ -82,6 +85,7 @@ export async function mount(el, ctx) {
         rows = r.rows;
         status = r.status;
         agents = r.agents ?? [];
+        refreshEvents?.();
         // On the map keep the user's zoom/pan: only the markers are redrawn
         if (view === 'map' && map && window.L) {
             drawStatus();
@@ -133,6 +137,7 @@ export async function mount(el, ctx) {
                 { key: 'last_time', label: 'Last position', width: 160, render: (r) => lastCell(r) },
                 { key: 'dest', label: 'Destination / ETA (AIS)', width: 200, render: (r) => (r.ais_dest ? `${r.ais_dest}${r.ais_eta ? ' · ' + (aisEtaIso(parseAisEta(r.ais_eta)) ?? r.ais_eta) : ''}` : '') },
                 { key: 'eta', label: 'ETA (ours) / laycan', width: 220, render: (r) => etaCell(r) },
+                { key: 'events', label: 'Events (ETB / ATB / ETC/S / ATS …)', width: 300, render: (r) => eventsCell(r) },
                 { key: 'alerts', label: 'Alerts', width: 220, render: (r) => h('span.ch-cell-gap.ch-mon-alerts', alertBadges(alertsOf(r))) },
                 { key: 'open', label: 'Open', width: 150, render: (r) => [r.open_port, r.open_date && fmtDate(r.open_date)].filter(Boolean).join(' · ') },
                 { key: 'next_job', label: 'Next job', width: 160 },
@@ -245,6 +250,138 @@ export async function mount(el, ctx) {
         e.route[0] = { ...e.route[0], from: Number.isFinite(r.last_lat) ? `${seaArea(r.last_lat, r.last_lon)} (${latLonText(r.last_lat, r.last_lon)})` : r.open_port ?? '', to: r.target_name ?? '', nm: eta?.nm ? Math.round(eta.nm) : null };
         e.route[1] = { ...e.route[1], name: r.target_name ?? '' };
         return e;
+    }
+
+    // ------------------------------------------------------------ Vessel events (ETA / ATA / NOR / ETB / ATB / ETC/S / ATS …)
+
+    const evTz = (port) => (port ? tzByPort.get(normPort(port)) ?? null : null);
+    const evSummary = (r) => summarize(r.events ?? [], { tzOf: evTz });
+    const evShort = (e) => { const t = opsTime(e.at); return `${t.slice(0, 5)} ${t.slice(11)} ${e.tz === 'UTC' ? 'UTC' : 'LT'}`; };
+    const evTitle = (e) => [eventSentence(e), e.note, e.approx ? 'Limanın saat dilimi Ports’ta yok — sıralamada LT, UTC sayıldı.' : null].filter(Boolean).join('\n');
+    const evBadge = (e, prefix = '') => h('span.ch-badge.' + (e.kind === 'actual' ? 'green' : e.kind === 'estimate' ? 'blue' : 'gray'), { title: evTitle(e) },
+        `${prefix}${e.code}${e.port ? ' ' + e.port : ''} ${evShort(e)}`);
+
+    function eventsCell(r) {
+        const s = evSummary(r);
+        return h('span.ch-cell-gap.ch-mon-ev', { title: 'Olayları aç / ekle', on: { click: (e) => { e.stopPropagation(); eventsDialog(r.id); } } },
+            s.lastActual ? evBadge(s.lastActual) : null,
+            s.next ? evBadge(s.next, '→ ') : null,
+            s.overdue.length ? badge('amber', `${s.overdue.length} overdue`, s.overdue.map(eventSentence).join('\n') + '\nGerçekleşen (A…) zaman henüz girilmedi.') : null,
+            s.list.length ? null : h('span.dim', canEdit ? '+ add event' : '—'));
+    }
+
+    /** All ships (watchId null) or one ship: add / edit / delete events, copy them as text for e-mails. */
+    function eventsDialog(watchId = null) {
+        const one = watchId !== null;
+        const blank = (id) => {
+            const r = rows.find((x) => x.id === id);
+            return { id: null, watch_id: id ?? null, code: '', port: r?.events?.at(-1)?.port ?? '', at: nowLocal(), tz: r?.events?.at(-1)?.tz ?? 'LT', note: '' };
+        };
+        let ev = blank(watchId ?? rows[0]?.id ?? null);
+        let q = '';
+        const formBox = h('div.ch-mon-evform');
+        const listBox = h('div');
+        const vesselName = (id) => rows.find((x) => x.id === id)?.name ?? '';
+
+        const items = () => rows.filter((r) => !one || r.id === watchId)
+            .flatMap((r) => {
+                const s = evSummary(r);
+                return s.list.map((e) => {
+                    const state = e.kind !== 'estimate' ? null : e.replaced ? ['gray', 'revised'] : e.settled ? ['gray', 'done'] : s.overdue.includes(e) ? ['amber', 'overdue'] : ['blue', 'pending'];
+                    return { ...e, vessel: r.name, watch_id: r.id, state };
+                });
+            })
+            .filter((e) => matches(`${e.vessel} ${e.code} ${e.port ?? ''} ${e.note ?? ''}`, q))
+            .sort((a, b) => (b.ms ?? 0) - (a.ms ?? 0) || b.id - a.id);
+
+        async function save() {
+            const data = { ...ev, code: normCode(ev.code) };
+            if (!data.watch_id) return toast('Gemi seçin.', 'error');
+            if (!data.code) return toast('Olay kodu yazın (ör. ATS).', 'error');
+            if (!data.at) return toast('Tarih ve saat girin.', 'error');
+            const body = { code: data.code, port: data.port || null, at: data.at, tz: data.tz, note: data.note || null };
+            if (data.id) await put(`chartering/watch-events/${data.id}`, body);
+            else await post('chartering/watch-events', { watch_id: data.watch_id, ...body });
+            toast(`${vesselName(data.watch_id)} · ${data.code} kaydedildi.`);
+            ev = blank(data.watch_id);
+            await load();
+            drawForm();
+        }
+
+        function drawForm() {
+            if (!canEdit) { formBox.replaceChildren(); return; }
+            // Typing only refreshes the hint and the preview line: re-drawing the form would take the focus away
+            const hint = h('span.dim');
+            const prev = h('span');
+            const upd = () => {
+                const info = codeInfo(ev.code);
+                hint.textContent = info ? info.text : ev.code ? 'Serbest kod (listede yok) — olduğu gibi kaydedilir.' : 'Kodu yukarıdan seçin veya yazın.';
+                prev.replaceChildren(ev.code && ev.at ? h('code.ch-mon-evline', { title: eventSentence(ev) }, eventLine(vesselName(ev.watch_id), { ...ev, code: normCode(ev.code) })) : '');
+            };
+            const field = (label, control) => h('label.ch-field', h('span.ch-field__label', label), control);
+            const chip = (c) => h('button.tiny' + (normCode(ev.code) === c ? '.primary' : '.ghost'), { type: 'button', title: codeInfo(c)?.text, on: { click: () => { ev.code = c; drawForm(); } } }, c);
+            formBox.replaceChildren(
+                h('div.ch-mon-evchips', ['ETA', 'ATA', 'NOR', 'ETB', 'ATB', 'ETC', 'ATC', 'ETC/S', 'ATC/S', 'ETS', 'ATS', 'ETD', 'ATD'].map(chip)),
+                h('div.ch-grid', { style: { '--cols': 6 } },
+                    field('Vessel', h('select', { disabled: !!ev.id || one, on: { change: (e) => { ev = { ...blank(+e.target.value), code: ev.code, at: ev.at }; drawForm(); } } },
+                        rows.map((r) => h('option', { value: r.id, selected: r.id === ev.watch_id }, r.name)))),
+                    field('Event', h('input', { type: 'text', value: ev.code, list: 'ch-mon-ev-codes', placeholder: 'ATS, ETB …', on: { input: (e) => { ev.code = e.target.value; upd(); } } })),
+                    field('Port', h('input', { type: 'text', value: ev.port ?? '', list: 'ch-mon-ev-ports', placeholder: 'MURMANSK', on: { input: (e) => { ev.port = e.target.value; upd(); } } })),
+                    field('Date / time', h('input', { type: 'datetime-local', value: (ev.at ?? '').replace(' ', 'T'), on: { input: (e) => { ev.at = e.target.value.replace('T', ' '); upd(); } } })),
+                    field('Time basis', h('select', { on: { change: (e) => { ev.tz = e.target.value; upd(); } } },
+                        [['LT', 'LT (port local)'], ['UTC', 'UTC']].map(([v, l]) => h('option', { value: v, selected: ev.tz === v }, l)))),
+                    field('Note', h('input', { type: 'text', value: ev.note ?? '', placeholder: 'e.g. pilot off 1430, 2 tugs', on: { input: (e) => { ev.note = e.target.value; upd(); }, keydown: (e) => { if (e.key === 'Enter') save().catch(() => {}); } } }))),
+                h('div.toolbar', hint, prev, h('span.spacer'),
+                    ev.id ? h('button.tiny.ghost', { type: 'button', on: { click: () => { ev = blank(ev.watch_id); drawForm(); } } }, 'Cancel edit') : null,
+                    h('button.primary', { type: 'button', on: { click: () => save().catch(() => {}) } }, ev.id ? 'Save changes' : '+ Add event')));
+            upd();
+        }
+
+        function drawEvList() {
+            const list = items();
+            const b = (label, title, fn) => h('button.tiny.ghost', { type: 'button', title, on: { click: (e) => { e.stopPropagation(); fn(); } } }, label);
+            const lt = (e) => {
+                const tz = evTz(e.port);
+                if (e.tz === 'UTC') return tz ? `${formatInZone(e.ms, tz).slice(11)} LT` : '';
+                return tz && e.ms ? `${formatInZone(e.ms, 'UTC').slice(11)} UTC` : '';
+            };
+            const copyAll = () => {
+                const lines = [...list].reverse().map((e) => eventLine(e.vessel, e));
+                copyText(lines.join('\n'));
+                toast(`${lines.length} satır kopyalandı.`);
+            };
+            listBox.replaceChildren(
+                h('div.toolbar',
+                    one ? null : h('input.search', { type: 'search', placeholder: 'Ara: gemi, kod, liman, not', value: q, on: { input: debounce((e) => { q = e.target.value; drawEvList(); }, 200) } }),
+                    h('span.count', `${list.length} events`), h('span.spacer'),
+                    list.length ? h('button.tiny', { type: 'button', title: 'Görünen olayları e-posta metni olarak kopyala (eskiden yeniye)', on: { click: copyAll } }, '⧉ Copy as text') : null),
+                list.length ? h('div.ch-scroll', h('table.ch-table.ch-mon-evtable',
+                    h('thead', h('tr', one ? null : h('th', 'Vessel'), h('th', 'Event'), h('th', 'Port'), h('th', 'Date / time'), h('th', ''), h('th', 'Note'), h('th', 'Status'), h('th', 'By'), h('th', ''))),
+                    h('tbody', list.map((e) => h('tr', { class: e.state?.[1] === 'revised' || e.state?.[1] === 'done' ? 'is-done' : '' },
+                        one ? null : h('td', h('b', e.vessel)),
+                        h('td', h('span.ch-badge.' + (e.kind === 'actual' ? 'green' : e.kind === 'estimate' ? 'blue' : 'gray'), { title: codeInfo(e.code)?.text ?? '' }, e.code)),
+                        h('td', e.port ?? ''),
+                        h('td', { title: e.approx ? 'Limanın saat dilimi Ports’ta yok' : '' }, `${opsTime(e.at)} ${e.tz === 'UTC' ? 'UTC' : 'LT'}`),
+                        h('td.dim', lt(e)),
+                        h('td', e.note ?? ''),
+                        h('td', e.state ? badge(e.state[0], e.state[1], e.state[1] === 'overdue' ? 'Zamanı geçti, gerçekleşen (A…) kayıt yok' : '') : ''),
+                        h('td.dim', { title: e.updated_at ?? '' }, e.updated_by ?? ''),
+                        h('td', h('span.ch-row-actions',
+                            b('⧉', 'Satırı kopyala', () => { copyText(eventLine(e.vessel, e)); toast('Kopyalandı.'); }),
+                            canEdit ? b('✎', 'Düzenle', () => { ev = { id: e.id, watch_id: e.watch_id, code: e.code, port: e.port ?? '', at: e.at, tz: e.tz ?? 'LT', note: e.note ?? '' }; drawForm(); formBox.scrollIntoView({ block: 'nearest' }); }) : null,
+                            canEdit ? b('✕', 'Sil', async () => { if (await confirmBox(`${e.vessel} · ${e.code} ${e.port ?? ''} ${opsTime(e.at)} silinsin mi?`, { yes: 'Sil' })) { await del(`chartering/watch-events/${e.id}`); load(); } }) : null)))))))
+                    : h('p.dim', one ? 'Bu gemi için kayıt yok. Örn. ATS · MURMANSK · 22.11.2026 14:00 LT.' : 'Henüz olay kaydı yok.'));
+        }
+
+        drawForm();
+        drawEvList();
+        refreshEvents = drawEvList;
+        modal({ title: one ? `Vessel events — ${vesselName(watchId)}` : 'Vessel events', width: 1080,
+            body: h('div.ch-entry-wrap', formBox, listBox,
+                h('datalist#ch-mon-ev-codes', EVENT_CODES.map(([c, d]) => h('option', { value: c }, d))),
+                h('datalist#ch-mon-ev-ports', PORT_LIST.map((p) => h('option', { value: String(p.name).toUpperCase() }, p.country))),
+                h('p.dim.ch-mon__note', 'E… tahmin, A… gerçekleşen. Aynı limanda karşılığı (ETB → ATB, ETC/S → ATS) girilince tahmin “done” olur; aynı kodla yeni tahmin eskisini “revised” yapar. LT, Ports’taki saat dilimiyle UTC’ye çevrilip sıralanır.')),
+            actions: [{ label: 'Close' }], onClose: () => { refreshEvents = null; } });
     }
 
     // ------------------------------------------------------------ Dialogs
@@ -396,6 +533,7 @@ export async function mount(el, ctx) {
                 h('div', `Last position ${f.text} (${fmtUtc(utcMs(r.last_time))})`),
                 r.ais_dest ? h('div', `AIS: ${r.ais_dest}${r.ais_eta ? ' · ETA ' + r.ais_eta : ''}`) : null,
                 e?.ms ? h('div', `Our ETA ${r.target_name ?? ''}: ${fmtUtc(e.ms)}`) : null,
+                ((s) => [s.lastActual, s.next].filter(Boolean).map((x) => h('div', eventSentence(x))))(evSummary(r)),
                 h('div.ch-pop__actions',
                     h('button.tiny', { type: 'button', on: { click: () => showTrack(L, r, 24) } }, 'Track 24 h'),
                     h('button.tiny', { type: 'button', on: { click: () => showTrack(L, r, 72) } }, '72 h'),
@@ -494,11 +632,13 @@ export async function mount(el, ctx) {
         }
     } } }, 'Refresh now');
     el.append(
-        h('div.toolbar', h('strong', 'Position Monitor'), viewSeg, canEdit ? h('button.primary', { type: 'button', on: { click: () => addDialog().catch(() => {}) } }, '+ Add vessel') : null, refreshBtn),
+        h('div.toolbar', h('strong', 'Position Monitor'), viewSeg, canEdit ? h('button.primary', { type: 'button', on: { click: () => addDialog().catch(() => {}) } }, '+ Add vessel') : null, refreshBtn,
+            h('button', { type: 'button', title: 'Tüm gemilerin ETA / ETB / ATB / ETC/S / ATS kayıtları', on: { click: () => eventsDialog() } }, 'Vessel events')),
         statusBox, body);
     body.append(h('div.empty-state', 'Loading…'));
     await load();
     const reload = debounce(load, 500);
     const off = live.on('ch_watch', () => reload());
-    return { dispose: () => { off(); grid?.destroy?.(); map?.remove(); } };
+    const offEv = live.on('ch_watch_event', () => reload());
+    return { dispose: () => { off(); offEv(); grid?.destroy?.(); map?.remove(); } };
 }
