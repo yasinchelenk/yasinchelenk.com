@@ -1649,3 +1649,13 @@ button.ch-mon-alertpop__row { display: grid !important; justify-items: start !im
     .ch-acc-cash, .ch-ops-cii { grid-template-columns: 1fr; }
     .ch-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Position Monitor · vessel events (ETA / ATA / NOR / ETB / ATB / ETC/S / ATS …) */
+.ch-mon-ev { flex-wrap: wrap; cursor: pointer; min-height: 20px; }
+.ch-mon-ev:hover .ch-badge { filter: brightness(.96); }
+.ch-mon-evchips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ch-mon-evform { display: grid; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--row-line); }
+.ch-mon-evline { font-size: 12px; background: var(--chip-bg); border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
+table.ch-mon-evtable td { vertical-align: middle; white-space: nowrap; }
+table.ch-mon-evtable td:nth-last-child(4) { white-space: normal; min-width: 160px; }
+table.ch-mon-evtable tr.is-done td { opacity: .6; }

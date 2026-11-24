@@ -34,6 +34,32 @@ function chartering_migrate_110(PDO $pdo): void
         SQL);
 }
 
+/**
+ * Migration 135: vessel events — ETA / ATA / NOR / ETB / ATB / ETC/S / ATS … lines kept per watchlist ship
+ * ("BOSTON TRADER ATS MURMANSK 22.11.2026 1400 LT"). `at` is port local time (tz LT) or UTC.
+ */
+function chartering_migrate_135(PDO $pdo): void
+{
+    $pdo->exec(<<<'SQL'
+        CREATE TABLE ch_watch_events (
+            id INTEGER PRIMARY KEY, watch_id INTEGER NOT NULL REFERENCES ch_watchlist(id) ON DELETE CASCADE,
+            code TEXT NOT NULL, port TEXT, at TEXT NOT NULL, tz TEXT, note TEXT,
+            created_at TEXT, created_by TEXT, updated_at TEXT, updated_by TEXT
+        );
+        CREATE INDEX idx_ch_watch_events ON ch_watch_events(watch_id, at);
+        SQL);
+}
+
+/** 'e.t.c s' → 'ETC/S', 'atcs' → 'ATC/S' (same rule as engine/vesselevents.js normCode) */
+function ch_event_code(string $s): string
+{
+    $c = preg_replace('/[.\s]+/u', '', mb_strtoupper(str_replace('\\', '/', $s)));
+    if (preg_match('/^[EA]TCS$/', $c)) {
+        $c = substr($c, 0, 3) . '/S';
+    }
+    return mb_substr($c, 0, 12);
+}
+
 entity_define('ch_watch', [
     'table'  => 'ch_watchlist',
     'page'   => 'ch-monitor',
@@ -64,6 +90,45 @@ entity_define('ch_watch', [
         }
         return $d + ($before ? [] : ['grp' => 'watch']);
     },
+    // Events go first, one at a time, so History can bring each back with the ship
+    'before_delete' => function (array $row): void {
+        foreach (rows('SELECT id FROM ch_watch_events WHERE watch_id = ?', [$row['id']]) as $e) {
+            ent_delete('ch_watch_event', (int) $e['id']);
+        }
+    },
+]);
+
+entity_define('ch_watch_event', [
+    'table'  => 'ch_watch_events',
+    'page'   => 'ch-monitor',
+    'undo'   => true,
+    'label'  => fn($r) => trim(((string) scalar('SELECT name FROM ch_watchlist WHERE id = ?', [$r['watch_id']])) . ' · ' . ($r['code'] ?? '') . ' ' . ($r['port'] ?? '')),
+    'fields' => ['watch_id' => 'int', 'code' => 'text', 'port' => 'upper', 'at' => 'datetime', 'tz' => 'enum:LT|UTC', 'note' => 'text'],
+    'prepare' => function (array $d, ?array $before): array {
+        $m = array_merge($before ?? [], $d);
+        if (empty($m['watch_id']) || !scalar('SELECT 1 FROM ch_watchlist WHERE id = ?', [$m['watch_id']])) {
+            api_error('Gemi izleme listesinde bulunamadı.');
+        }
+        if ($before && array_key_exists('watch_id', $d) && (int) $d['watch_id'] !== (int) $before['watch_id']) {
+            api_error('Olay başka bir gemiye taşınamaz.');
+        }
+        if (array_key_exists('code', $d)) {
+            $d['code'] = $d['code'] === null ? null : ch_event_code($d['code']);
+        }
+        if (trim((string) ($d['code'] ?? $m['code'] ?? '')) === '') {
+            api_error('Olay kodu gerekli (ör. ETB, ATB, ETC/S, ATS).');
+        }
+        if (empty($d['at'] ?? $m['at'] ?? null)) {
+            api_error('Tarih ve saat gerekli.');
+        }
+        if (isset($d['note'])) {
+            $d['note'] = mb_substr($d['note'], 0, 300);
+        }
+        if (!$before && empty($d['tz'])) {
+            $d['tz'] = 'LT';
+        }
+        return $d;
+    },
 ]);
 
 function module_routes_chartering_monitor(): void
@@ -74,6 +139,7 @@ function module_routes_chartering_monitor(): void
     route('GET', '/api/chartering/watch/{id}/track', 'ch_watch_track', 'ch-monitor');
     route('POST', '/api/chartering/watch/{id}/manual', 'ch_watch_manual', 'ch-monitor');
     crud_routes('ch_watch', '/api/chartering/watch');
+    crud_routes('ch_watch_event', '/api/chartering/watch-events');
 }
 
 const CH_AIS_PROVIDERS = ['pelyr', 'aisstream', 'demo', 'off'];
@@ -138,7 +204,12 @@ function ch_watch_rows(): array
             $avg[(int) $r['watch_id']] = round((float) $r['a'], 2);
         }
     }
-    return array_map(fn($r) => $r + ['sog_avg24' => $avg[(int) $r['id']] ?? null], rows('SELECT * FROM ch_watchlist ORDER BY name'));
+    // Vessel events (ETB / ATB / ETC/S / ATS …) of every ship, oldest first
+    $events = [];
+    foreach (rows('SELECT id, watch_id, code, port, at, tz, note, updated_at, updated_by FROM ch_watch_events ORDER BY at, id') as $e) {
+        $events[(int) $e['watch_id']][] = $e;
+    }
+    return array_map(fn($r) => $r + ['sog_avg24' => $avg[(int) $r['id']] ?? null, 'events' => $events[(int) $r['id']] ?? []], rows('SELECT * FROM ch_watchlist ORDER BY name'));
 }
 
 function ch_monitor_refresh(): never

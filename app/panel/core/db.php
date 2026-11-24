@@ -149,6 +149,8 @@ function panel_migrations(): array
         133 => 'chartering_migrate_133',
         // Position Monitor uyarıları: AIS ETA'nın önceki değeri ve değiştiği zaman
         134 => 'chartering_migrate_134',
+        // Position Monitor: gemi olayları (ETA / ATA / NOR / ETB / ATB / ETC/S / ATS …), liman yerel saati veya UTC
+        135 => 'chartering_migrate_135',
     ];
 }
 
