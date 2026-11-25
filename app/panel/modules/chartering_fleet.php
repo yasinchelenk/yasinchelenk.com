@@ -21,6 +21,8 @@ const CH_FLEET_FIELDS = [
     'delivery_time' => 'text', 'hire_days' => 'int', 'owners' => 'text', 'owners_address' => 'text', 'charterers_address' => 'text', 'bank_details' => 'text',
     // Migration 131: another desk prepares the statements (no reminders) / periods 1…N handled outside the system
     'hs_off' => 'bool', 'hs_done_until' => 'int',
+    // Migration 136: restart points of the hire periods [{no, from, every, reason}] (chartering_fleet_hire.php)
+    'hs_schedule' => 'json',
 ];
 
 const CH_FLEET_VOYAGE_FIELDS = [
@@ -163,6 +165,9 @@ entity_define('ch_fleet', [
         }
         if (isset($d['hire_days']) && ((int) $d['hire_days'] < 1 || (int) $d['hire_days'] > 90)) {
             api_error('Hire ödeme dönemi 1–90 gün olmalı (genelde 15).');
+        }
+        if (array_key_exists('hs_schedule', $d)) {
+            $d['hs_schedule'] = ch_fleet_hs_schedule_clean($d['hs_schedule'], $m);
         }
         if (!$before && !isset($d['sort'])) {
             $d['sort'] = (int) scalar('SELECT COALESCE(MAX(sort), 0) FROM ch_fleet') + 1;

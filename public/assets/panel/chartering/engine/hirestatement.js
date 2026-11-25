@@ -67,23 +67,76 @@ export function statementTitle(st) {
 // ------------------------------------------------------------ Hire periods and lines
 
 /**
- * Hire periods from delivery, `every` days each (15 / 30), in advance: [{ no, from, to, days, last }].
+ * The vessel's restart points (ch_fleet.hs_schedule): from statement `no` the periods run again from `from`, every
+ * `every` days (empty = unchanged) — after a long off-hire, a re-delivery or a shift agreed with charterers.
+ * → Map(no → { t (UTC minutes), every | null, reason })
+ */
+export function scheduleBreaks(list) {
+    const raw = typeof list === 'string' ? (() => { try { return JSON.parse(list); } catch { return []; } })() : list;
+    const out = new Map();
+    (Array.isArray(raw) ? raw : []).forEach((b) => {
+        const no = Math.trunc(n(b?.no));
+        const t = b?.from ? utcMin(toUtc(b.from)) : null;
+        if (no >= 2 && t !== null) out.set(no, { t, every: n(b.every) > 0 ? n(b.every) : null, reason: String(b.reason ?? '') });
+    });
+    return out;
+}
+
+/**
+ * Hire periods from delivery, `every` days each (15 / 30), in advance: [{ no, from, to, days, last, restart, fixed }].
  * Generated up to `end` (estimated redelivery; the last period stops there) or, when it is unknown, until a period
  * starts after `until`.
+ *  · breaks: restart points (see scheduleBreaks) — period `no` starts at the given time; the period before it is cut
+ *    there if it would run past it, or ends as usual (the gap is off-hire, nothing to bill).
+ *  · fixed: Map(no → { from, to }) — periods already sent to charterers; the statement's own period is the period and
+ *    the next one runs from its end (a statement whose dates were corrected moves the ones after it).
  */
-export function hirePeriods({ start, end = null, every = 15, until = null, max = 200 }) {
-    const step = n(every) > 0 ? n(every) : 15;
+export function hirePeriods({ start, end = null, every = 15, until = null, max = 200, breaks = null, fixed = null }) {
+    let step = n(every) > 0 ? n(every) : 15;
     const s = utcMin(start);
     const e = end ? utcMin(end) : null;
     const u = until ? utcMin(until) : null;
     if (s === null || (e === null && u === null) || (e !== null && e <= s)) return [];
+    const brk = breaks instanceof Map ? breaks : scheduleBreaks(breaks);
     const out = [];
-    for (let t = s, i = 1; i <= max; t += step * DAY, i++) {
-        if (e !== null ? t >= e : t > u) break;
-        const to = e !== null ? Math.min(e, t + step * DAY) : t + step * DAY;
-        out.push({ no: i, from: fmtUtcMin(t), to: fmtUtcMin(to), days: (to - t) / DAY, last: e !== null && to === e });
+    let last = null;
+    for (let t = s, i = 1; i <= max; i++) {
+        // a restart that no longer comes after the previous period's start (delivery moved later) is ignored
+        const b = brk.get(i) && (last === null || brk.get(i).t > last) ? brk.get(i) : null;
+        if (b) {
+            t = b.t;
+            if (b.every) step = b.every;
+        }
+        const fx = fixed?.get(i);
+        const fa = fx ? utcMin(fx.from) : null;
+        const fb = fx ? utcMin(fx.to) : null;
+        // a sent statement that starts no later than the period before it is misnumbered (e.g. after the delivery was
+        // corrected) — it does not take this period's place
+        const isFixed = fa !== null && fb !== null && fb > fa && (last === null || fa > last);
+        const from = isFixed ? fa : t;
+        if (e !== null ? from >= e : from > u) break;
+        let to;
+        if (isFixed) to = fb;
+        else {
+            to = from + step * DAY;
+            const nb = brk.get(i + 1);
+            if (nb && nb.t > from && nb.t < to) to = nb.t;
+            if (e !== null) to = Math.min(e, to);
+        }
+        out.push({ no: i, from: fmtUtcMin(from), to: fmtUtcMin(to), days: (to - from) / DAY, last: e !== null && to === e,
+            restart: b ? { reason: b.reason, every: b.every } : null, fixed: isFixed });
+        last = from;
+        t = to;
     }
     return out;
+}
+
+/** Sent / paid interim statements as fixed periods: Map(no → { from, to }) */
+export function fixedPeriods(statements) {
+    const m = new Map();
+    (statements ?? []).filter((x) => x && x.kind !== 'final' && ['sent', 'paid'].includes(x.status) && n(x.stmt_no) > 0 && x.period_from && x.period_to)
+        .forEach((x) => { if (!m.has(Math.trunc(n(x.stmt_no)))) m.set(Math.trunc(n(x.stmt_no)), { from: x.period_from, to: x.period_to }); });
+    return m;
 }
 
 /**
@@ -350,9 +403,9 @@ export function periodStatus(period, stmt, now, { lead = 3, payDays = 3, doneUnt
 }
 
 /** Number of the last hire period that has started by `now` (0 before delivery). */
-export function startedPeriods({ start, end = null, every = 15, now }) {
+export function startedPeriods({ start, end = null, every = 15, now, breaks = null, statements = [] }) {
     const t = utcMin(now);
-    return hirePeriods({ start, end, every, until: now }).filter((p) => utcMin(p.from) <= t).length;
+    return hirePeriods({ start, end, every, until: now, breaks, fixed: fixedPeriods(statements) }).filter((p) => utcMin(p.from) <= t).length;
 }
 
 export const PERIOD_STATUS = {
@@ -364,10 +417,10 @@ export const PERIOD_STATUS = {
  * The statements of the current charter set against the expected hire periods:
  * [{ period, stmt, status }] — plus statements that match no period (e.g. extra / final) as { period: null, stmt }.
  */
-export function trackPeriods({ start, end, every, statements = [], now, lead, payDays, ahead = 2, doneUntil = 0 }) {
+export function trackPeriods({ start, end, every, statements = [], now, lead, payDays, ahead = 2, doneUntil = 0, breaks = null }) {
     const nowT = utcMin(now);
     const until = nowT === null ? null : fmtUtcMin(nowT + Math.max(1, n(every) || 15) * ahead * DAY);
-    const periods = hirePeriods({ start, end, every, until });
+    const periods = hirePeriods({ start, end, every, until, breaks, fixed: fixedPeriods(statements) });
     const interim = statements.filter((x) => x.kind !== 'final');
     const used = new Set();
     const out = periods.map((p) => {

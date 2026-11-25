@@ -1529,6 +1529,17 @@ table.hs-table tr.is-due td:first-child { box-shadow: inset 3px 0 0 var(--cat-ye
 table.hs-table tr.is-late td:first-child { box-shadow: inset 3px 0 0 var(--red); }
 table.hs-table tfoot td { font-weight: 600; border-top: 2px solid var(--line); }
 .hs-hint { margin: 8px 0 0; font-size: 12.5px; }
+.hs-restart { margin-left: 6px; font-size: 10.5px; }
+/* Periods & corrections */
+.modal.hs-ctl-modal { max-width: calc(100vw - 24px); }
+.hs-ctl { display: grid; gap: 10px; }
+.hs-ctl__block { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px 10px; background: var(--surface); overflow-x: auto; }
+.hs-ctl__block > h4 { margin: 0 0 6px; color: var(--navy); font-size: 13.5px; }
+.hs-ctl__block > h4 small { font-weight: 400; }
+.hs-ctl__note { margin: 4px 0 8px; font-size: 12px; line-height: 1.45; }
+.hs-ctl .ch-grid input, .hs-ctl .ch-grid select { width: 100%; min-width: 0; box-sizing: border-box; }
+.hs-ctl table.hs-edit input.hs-dt { width: 150px; }
+.hs-ctl table.hs-table tr.is-done td { color: var(--dim); }
 small.red, span.red { color: var(--red); } span.amber { color: var(--amber); }
 
 .modal.hs-modal { max-width: calc(100vw - 24px); }

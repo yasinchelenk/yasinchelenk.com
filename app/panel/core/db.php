@@ -151,6 +151,8 @@ function panel_migrations(): array
         134 => 'chartering_migrate_134',
         // Position Monitor: gemi olayları (ETA / ATA / NOR / ETB / ATB / ETC/S / ATS …), liman yerel saati veya UTC
         135 => 'chartering_migrate_135',
+        // Fleet · hire statements: dönemlerin yeniden başladığı noktalar (off-hire, yeniden teslim, charterers’la anlaşılan kayma)
+        136 => 'chartering_migrate_136',
     ];
 }
 
