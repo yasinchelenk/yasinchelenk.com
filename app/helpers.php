@@ -5,7 +5,7 @@ declare(strict_types=1);
 function config(string $key, mixed $default = null): mixed
 {
     // config.local.php (repoya girmez) sunucuya / makineye özel değerleri ezer
-    static $config = array_replace_recursive(
+    static $config = config_merge(
         require __DIR__ . '/config.php',
         is_file(__DIR__ . '/config.local.php') ? require __DIR__ . '/config.local.php' : [],
     );
@@ -19,6 +19,38 @@ function config(string $key, mixed $default = null): mixed
     }
 
     return $value;
+}
+
+/**
+ * config.local.php'yi varsayılanların üstüne yazar: iç içe anahtarlar tek tek ezilir ('agency' => ['phone' => …] yalnızca
+ * telefonu değiştirir), listeler ('langs', 'shortcuts') bütün olarak değişir — array_replace_recursive gibi sıra sıra karışmaz.
+ */
+function config_merge(array $base, array $over): array
+{
+    foreach ($over as $key => $value) {
+        $nested = is_array($value) && !array_is_list($value) && is_array($base[$key] ?? null) && !array_is_list($base[$key]);
+        $base[$key] = $nested ? config_merge($base[$key], $value) : $value;
+    }
+
+    return $base;
+}
+
+/** Yalnızca Chartering Desk kurulumu mu? (config → instance.mode = 'chartering'; kişisel site, Site Yönetimi ve panel kapalı) */
+function chartering_instance(): bool
+{
+    return config('instance.mode') === 'chartering';
+}
+
+/** Sitenin alan adı (site.url'den): "yasinchelenk.com" */
+function site_host(): string
+{
+    return (string) parse_url((string) config('site.url'), PHP_URL_HOST);
+}
+
+/** Chartering Desk'in tam adresi: "https://yasinchelenk.com/chartering" (dış servislere giden User-Agent'ta) */
+function desk_url(): string
+{
+    return rtrim((string) config('site.url'), '/') . '/chartering';
 }
 
 /** Sitenin içeriği (Site Yönetimi'nden düzenlenir, bkz. app/site/store.php). Anahtar yapısı config() ile aynı. */

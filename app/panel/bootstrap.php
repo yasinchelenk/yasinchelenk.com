@@ -35,18 +35,23 @@ function handle_panel(string $path, string $method): never
         dispatch_api($method, $path);
     }
 
-    if (str_starts_with($path, '/panel/belge/')) {
+    if (str_starts_with($path, '/panel/belge/') && !chartering_instance()) {
         if (!current_user()) {
             redirect('/panel');
         }
         panel_document(substr($path, strlen('/panel/belge/')));
     }
 
-    // Chartering Desk: aynı oturum ve API, ama operasyon panelinden ayrı, kendi sayfası (yasinchelenk.com/chartering)
+    // Chartering Desk: aynı oturum ve API, ama operasyon panelinden ayrı, kendi sayfası (/chartering)
     if ($path === '/chartering') {
         db();
         render('chartering/shell', []);
         exit;
+    }
+
+    // Yalnızca Chartering Desk kurulumu: operasyon paneli ve belgeleri yok
+    if (chartering_instance()) {
+        redirect('/chartering');
     }
 
     if ($path !== '/panel') {

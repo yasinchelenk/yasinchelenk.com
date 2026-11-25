@@ -23,6 +23,18 @@ return [
         // Desteklenen diller; ilki varsayılan ve "/" adresinde açılır, diğerleri "/en" gibi önekle.
         'langs' => ['tr', 'en'],
     ],
+    // Kurulum türü. 'full': kişisel site + Site Yönetimi + operasyon paneli + Chartering Desk (yasinchelenk.com).
+    // 'chartering': yalnızca Chartering Desk — "/" ve diğer adresler /chartering'e gider, /admin ve /panel kapalı,
+    // yönetici dahil herkes yalnızca Chartering API'sini kullanır (ikinci kurulum; app/config.local.php ile seçilir).
+    'instance' => [
+        'mode' => 'full',
+    ],
+    // Chartering Desk'in adı ve görselleri (sekme başlığı, üst çubuk, giriş ekranı). Boş logo → ad yazı olarak görünür.
+    'desk' => [
+        'title'   => 'Chartering Desk',
+        'logo'    => '',                       // ör. '/uploads/logo.svg' ya da tam adres
+        'favicon' => '',                       // boşsa /assets/img/favicon.svg
+    ],
     // Footer'daki geliştirici künyesi (mdkurumsal ve bySecaattin ile aynı)
     'developer' => [
         'name'   => 'HD Yazılım',

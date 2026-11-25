@@ -12,6 +12,7 @@ if (PHP_SAPI === 'cli-server') {
 
 require dirname(__DIR__) . '/app/helpers.php';
 require dirname(__DIR__) . '/app/contact.php';
+require dirname(__DIR__) . '/app/seo.php';
 
 date_default_timezone_set('Europe/Istanbul');
 ini_set('display_errors', config('debug') ? '1' : '0');
@@ -34,6 +35,19 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 if ($path === '/panel' || str_starts_with($path, '/panel/') || str_starts_with($path, '/api/') || $path === '/chartering') {
     require dirname(__DIR__) . '/app/panel/bootstrap.php';
     handle_panel($path, $method);
+}
+
+if ($path === '/robots.txt') {
+    robots_txt();
+}
+
+// Yalnızca Chartering Desk kurulumu: kişisel site, Site Yönetimi ve iletişim formu yok; her adres Desk'e gider
+if (chartering_instance()) {
+    redirect('/chartering');
+}
+
+if ($path === '/sitemap.xml') {
+    sitemap_xml();
 }
 
 require dirname(__DIR__) . '/app/site/store.php';

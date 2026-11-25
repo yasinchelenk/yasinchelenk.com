@@ -99,8 +99,8 @@ export async function usersDialog(ctx) {
     };
 
     const pagesDialog = (u) => {
-        // Chartering hesabı (Chartering Desk'ten kayıt): yalnızca Chartering sayfaları verilebilir
-        const desk = u.origin === 'chartering';
+        // Chartering hesabı (Chartering Desk'ten kayıt) ve yalnızca Chartering Desk kurulumu: yalnızca Chartering sayfaları verilebilir
+        const desk = u.origin === 'chartering' || data.yalnizDesk;
         const all = desk ? data.sayfalar.filter((s) => (data.chSayfalar ?? []).includes(s.kod)) : data.sayfalar;
         const chosen = new Set((u.pages ?? all.map((s) => s.kod)).filter((k) => all.some((s) => s.kod === k)));
         const count = h('span.dim');
@@ -118,7 +118,7 @@ export async function usersDialog(ctx) {
                 h('button.tiny', { type: 'button', on: { click: () => { all.forEach((s) => chosen.add(s.kod)); sync(); } } }, 'Select all'),
                 h('button.tiny', { type: 'button', on: { click: () => { chosen.clear(); sync(); } } }, 'Clear'), count), warn,
                 h('small.dim', 'İşaretsiz sayfa yalnızca gizlenmez; o sayfanın verisine erişim de kapanır.'),
-                desk ? notice('info', 'Chartering Desk’ten açılmış hesap: yalnızca Chartering sayfaları verilebilir, operasyon panelini hiçbir zaman göremez.') : null],
+                desk && !data.yalnizDesk ? notice('info', 'Chartering Desk’ten açılmış hesap: yalnızca Chartering sayfaları verilebilir, operasyon panelini hiçbir zaman göremez.') : null],
             actions: [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: () => act(() => put(`kullanicilar/${u.id}`, { pages: chosen.size === all.length && !desk ? null : [...chosen] })) }],
         });
     };
@@ -159,7 +159,7 @@ export async function usersDialog(ctx) {
                     return h('tr', { class: u.status === 'bekliyor' ? 'is-pending' : '' },
                         h('td', h('span.dot', { style: { '--c': u.color } }), ' ', h('b', u.name), ' ', h('span.dim', '@' + u.username), ' ',
                             admin ? badge('yönetici', 'navy') : null, ' ', me ? badge('siz', 'info') : null,
-                            u.origin === 'chartering' && !admin ? badge('Chartering', 'info', 'Chartering Desk’ten kayıt oldu: yalnızca Chartering sayfalarını görebilir') : null),
+                            u.origin === 'chartering' && !admin && !data.yalnizDesk ? badge('Chartering', 'info', 'Chartering Desk’ten kayıt oldu: yalnızca Chartering sayfalarını görebilir') : null),
                         h('td', statusBadge(u.status)),
                         h('td', u.totp ? badge('açık', 'ok') : h('span.dim', 'yok')),
                         h('td.dim', fmtDate(u.created_at)),
@@ -173,15 +173,16 @@ export async function usersDialog(ctx) {
                             } } }, 'Approve') : null,
                             u.status === 'aktif' && !me ? h('button.tiny', { type: 'button', on: { click: () => act(() => put(`kullanicilar/${u.id}`, { status: 'kapali' })) } }, 'Deactivate') : null,
                             u.status === 'kapali' ? h('button.tiny', { type: 'button', on: { click: () => act(() => put(`kullanicilar/${u.id}`, { status: 'aktif' })) } }, 'Activate') : null,
-                            !me && (admin || u.origin !== 'chartering') ? h('button.tiny', { type: 'button', on: { click: () => act(() => put(`kullanicilar/${u.id}`, { role: admin ? 'uye' : 'yonetici' })) } }, admin ? 'Yöneticiliği al' : 'Yönetici yap') : null,
-                            !admin ? h('button.tiny', { type: 'button', on: { click: () => pagesDialog(u) } }, 'Pages (' + (u.pages === null ? 'all' : `${u.pages.length}/${u.origin === 'chartering' ? (data.chSayfalar ?? []).length : data.sayfalar.length}`) + ')') : null,
+                            !me && (admin || u.origin !== 'chartering' || data.yalnizDesk) ? h('button.tiny', { type: 'button', on: { click: () => act(() => put(`kullanicilar/${u.id}`, { role: admin ? 'uye' : 'yonetici' })) } }, admin ? 'Yöneticiliği al' : 'Yönetici yap') : null,
+                            !admin ? h('button.tiny', { type: 'button', on: { click: () => pagesDialog(u) } }, 'Pages (' + (u.pages === null ? 'all' : `${u.pages.length}/${u.origin === 'chartering' || data.yalnizDesk ? (data.chSayfalar ?? []).length : data.sayfalar.length}`) + ')') : null,
                             !me ? h('button.tiny', { type: 'button', on: { click: () => resetPassword(u) } }, 'Reset password') : null,
                             u.totp && !me ? h('button.tiny', { type: 'button', on: { click: async () => { if (await confirmBox(`${u.name} için iki adımlı doğrulama sıfırlansın mı? Bir sonraki girişte yeniden kurar.`, { yes: 'Sıfırla' })) act(() => post(`kullanicilar/${u.id}/iki-adim-sifirla`)); } } }, 'Reset 2FA') : null,
                             !me ? h('button.tiny.danger.ghost', { type: 'button', on: { click: async () => { if (await confirmBox(`${u.name} hesabı silinsin mi? Geçmişteki kayıtları adıyla kalır.`, { yes: u.status === 'bekliyor' ? 'Reddet' : 'Sil' })) act(() => del(`kullanicilar/${u.id}`)); } } }, u.status === 'bekliyor' ? 'Reddet' : 'Sil') : null,
                         )),
                     );
                 }))),
-            h('small.dim', 'Yeni hesap hiçbir sayfayı görmeden açılır; yönetici onaylayıp Pages ile sayfa verir. Yönetici her zaman bütün sayfaları görür. “Chartering” etiketli hesaplar Chartering Desk’ten (yasinchelenk.com/chartering) kayıt oldu: yalnızca Chartering sayfaları alabilir, paneli göremez.'),
+            h('small.dim', 'Yeni hesap hiçbir sayfayı görmeden açılır; yönetici onaylayıp Pages ile sayfa verir. Yönetici her zaman bütün sayfaları görür.'
+                + (data.yalnizDesk ? '' : ` “Chartering” etiketli hesaplar Chartering Desk’ten (${data.deskAdres}) kayıt oldu: yalnızca Chartering sayfaları alabilir, paneli göremez.`)),
         );
     };
     draw();

@@ -124,9 +124,13 @@ function izinli(array $user, string $page): bool
 /**
  * Yalnızca Chartering Desk sayfalarına yetkili kullanıcı (ör. broker'a açılan hesap): operasyon panelinin
  * hiçbir verisini — "her oturum okuyabilir" uçları dahil — göremez; yalnızca /api/chartering/*, oturum ve canlı akış.
+ * Yalnızca Chartering Desk kurulumunda (config → instance.mode) yönetici dahil herkes böyledir.
  */
 function chartering_only(array $user): bool
 {
+    if (chartering_instance()) {
+        return true;
+    }
     if ($user['role'] === 'yonetici') {
         return false;
     }
@@ -144,6 +148,19 @@ function chartering_only(array $user): bool
     }
 
     return true;
+}
+
+/**
+ * chartering_only() kullanıcının açabileceği API yolları. Yalnızca Chartering Desk kurulumunda yönetici ayrıca
+ * kullanıcıları yönetir (Chartering Desk → Users: onay, rol, sayfa yetkileri, şifre / 2FA sıfırlama).
+ */
+function chartering_api_allowed(array $user, string $path): bool
+{
+    if (preg_match('#^/api/(chartering/|oturum/|live$)#', $path)) {
+        return true;
+    }
+
+    return chartering_instance() && $user['role'] === 'yonetici' && (bool) preg_match('#^/api/(kullanicilar(/|$)|guvenlik/iki-adim$)#', $path);
 }
 
 function public_user(array $u): array
@@ -248,7 +265,7 @@ function auth_me(): never
     }
 
     // Chartering Desk giriş ekranı ve Chartering hesapları: panelin firma bilgisi ve sayfa adları gönderilmez
-    $desk = ($_GET['ctx'] ?? '') === 'chartering' || ($user && chartering_only($user));
+    $desk = ($_GET['ctx'] ?? '') === 'chartering' || ($user && chartering_only($user)) || chartering_instance();
 
     json_response([
         'user'           => $user ? public_user($user) : null,
@@ -374,7 +391,8 @@ function auth_register(array $p, array $in): never
 {
     $kurulum = !scalar('SELECT COUNT(*) FROM users');
     $desk = ($in['kaynak'] ?? '') === 'chartering';
-    if ($kurulum && $desk) {
+    // İlk (yönetici) hesap panelden açılır; yalnızca Chartering Desk kurulumunda panel olmadığı için Desk'ten
+    if ($kurulum && $desk && !chartering_instance()) {
         api_error('Henüz kayıt açılmadı.');
     }
     if ($kurulum) {
@@ -418,7 +436,7 @@ function auth_register(array $p, array $in): never
         'role'          => $kurulum ? 'yonetici' : 'uye',
         'status'        => $status,
         'pages'         => $kurulum ? null : '[]',
-        'origin'        => $desk ? 'chartering' : null,
+        'origin'        => $desk && !$kurulum ? 'chartering' : null,
         'created_at'    => now(),
     ]);
     gecmis_log('user', $id, $name, null, 'insert', null, $username, null, ['id' => $id, 'name' => $name]);
@@ -625,10 +643,14 @@ function users_list(): never
         'last_login' => $u['last_login'],
     ], rows("SELECT * FROM users ORDER BY status = 'bekliyor' DESC, name COLLATE NOCASE"));
 
+    // Yalnızca Chartering Desk kurulumunda panel sayfaları hiç listelenmez
+    $pages = chartering_instance() ? array_intersect_key(PAGES, array_flip(chartering_pages())) : PAGES;
     json_response([
         'rows'           => $rows,
-        'sayfalar'       => array_map(fn($k, $v) => ['kod' => $k, 'ad' => $v], array_keys(PAGES), PAGES),
+        'sayfalar'       => array_map(fn($k, $v) => ['kod' => $k, 'ad' => $v], array_keys($pages), $pages),
         'chSayfalar'     => chartering_pages(),
+        'yalnizDesk'     => chartering_instance(),
+        'deskAdres'      => preg_replace('#^https?://#', '', desk_url()),
         'ikiAdimZorunlu' => setting('iki_adim_zorunlu') === '1',
     ]);
 }
@@ -654,14 +676,15 @@ function users_update(array $p, array $in, array $me): never
         if ((int) $u['id'] === (int) $me['id'] && $in['role'] !== 'yonetici') {
             api_error('Kendi yöneticiliğinizi alamazsınız.');
         }
-        if ($in['role'] === 'yonetici' && ($u['origin'] ?? null) === 'chartering') {
+        // Yalnızca Chartering Desk kurulumunda panel olmadığından Chartering hesabı da yönetici olabilir
+        if ($in['role'] === 'yonetici' && ($u['origin'] ?? null) === 'chartering' && !chartering_instance()) {
             api_error('Chartering hesabı yönetici yapılamaz (yönetici paneli de görür).');
         }
         $changes['role'] = $in['role'];
     }
     if (array_key_exists('pages', $in)) {
-        // Chartering hesabı: "hepsi" bile olsa yalnızca Chartering sayfaları (panel sayfası verilemez)
-        $allowed = ($u['origin'] ?? null) === 'chartering' ? chartering_pages() : array_keys(PAGES);
+        // Chartering hesabı (ve Chartering Desk kurulumunda herkes): "hepsi" bile olsa yalnızca Chartering sayfaları
+        $allowed = ($u['origin'] ?? null) === 'chartering' || chartering_instance() ? chartering_pages() : array_keys(PAGES);
         $changes['pages'] = $in['pages'] === null && $allowed === array_keys(PAGES) ? null : json_encode(array_values(array_intersect($allowed, $in['pages'] === null ? $allowed : (array) $in['pages'])));
     }
 

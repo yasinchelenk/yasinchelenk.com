@@ -1,4 +1,4 @@
-// Chartering Desk (yasinchelenk.com/chartering): standalone shell around the chartering tabs.
+// Chartering Desk (/chartering): standalone shell around the chartering tabs.
 // Same login and API as the operations panel, but none of the panel's tabs, data or branding.
 import { h, store, toast } from '../core/dom.js';
 import { post } from '../core/api.js';
@@ -24,9 +24,10 @@ export const TABS = [
     { code: 'ch-kb', label: 'Knowledge', tip: 'Glossary, regions, CP forms, vessel sizes, stowage factors, handybulk lessons' },
     { code: 'ch-contacts', label: 'Contacts', tip: 'Owners, operators, charterers, brokers, agents, surveyors, bunker suppliers' },
 ];
-const BRAND = { ad: 'Chartering Desk', kisa: 'Chartering Desk', footer: 'yasinchelenk.com', logo: null };
-
 const root = document.getElementById('app');
+// Name, logo and footer come from the server config (desk.*, site.url) — see templates/chartering/shell.php
+const BRAND = { ad: 'Chartering Desk', kisa: 'Chartering Desk', footer: '', logo: null, ...JSON.parse(root.dataset.brand || '{}') };
+const brandMark = () => (BRAND.logo ? h('img', { src: BRAND.logo, alt: BRAND.kisa }) : BRAND.kisa);
 const mounted = new Map();
 let info = null;
 let ctx = null;
@@ -37,7 +38,7 @@ let menuBtn;
 let meWrap;
 
 async function boot() {
-    root.replaceChildren(h('div.splash', h('div.splash__logo', BRAND.kisa)));
+    root.replaceChildren(h('div.splash', h('div.splash__logo', brandMark())));
     try {
         info = await loadSession('chartering');
     } catch {
@@ -66,7 +67,7 @@ function start() {
         user: info.user, info, firma: BRAND, open: (code, param) => show(code, param), allowed, setUser: (u) => { Object.assign(ctx.user, u); drawMe(); },
         refreshMe: async () => { info.bekleyen = (await loadSession('chartering')).bekleyen; drawMe(); },
     };
-    document.title = 'Chartering Desk';
+    document.title = BRAND.ad;
     root.replaceChildren(buildShell());
     live.start(info.user);
 
@@ -86,7 +87,7 @@ function buildShell() {
     host = h('main.host');
     drawTabs();
     drawMe();
-    return h('div.app', h('header.topbar', h('span.topbar__logo', BRAND.kisa), menuBtn, tabsNav, h('div.topbar__right', meWrap)), host);
+    return h('div.app', h('header.topbar', h('span.topbar__logo', brandMark()), menuBtn, tabsNav, h('div.topbar__right', meWrap)), host);
 }
 
 function drawTabs() {

@@ -16,7 +16,7 @@ const PETITION_FIELDS = [
     'GIDECEGI_LIMAN' => ['Gideceği liman', 'BRAILA'], 'GELIS_TARIHI' => ['Geliş tarihi (ETA)', '15.10.2026'], 'DEMIR_YERI' => ['İkmal mevkii', 'AHIRKAPI'],
     'TEDARIKCI' => ['Tedarikçi unvanı', 'THE SHELL COMPANY OF TURKEY LTD'], 'URUN' => ['Ürünler (alt alta)', '50 MT MGO'], 'URUN_SATIR' => ['Ürünler (tek satır)', '50 MT MGO'],
     'TANK_MGO' => ['Tank kapasitesi MGO', '288 MT'], 'TANK_FO' => ['Tank kapasitesi FO', '350 MT'], 'ROB_MGO' => ['Mevcut yakıt MGO', '46 MT'], 'ROB_FO' => ['Mevcut yakıt FO', '50 MT'],
-    'FO_CINSI' => ['İkinci yakıtın cinsi', 'ULSFO'], 'ACENTE_ADI' => ['Acente adı', 'ÇELENK SHIPPING'],
+    'FO_CINSI' => ['İkinci yakıtın cinsi', 'ULSFO'], 'ACENTE_ADI' => ['Acente adı', ''],   // örnek: Firma Ayarları, yoksa config → agency.short_name
 ];
 const PETITION_SAMPLE = ['tarih' => '2026-10-14', 'gemi_adi' => 'AYANA SEA', 'bayrak' => 'SIERRA LEONE', 'imo' => '9118276', 'cagri_isareti' => '9LU2088', 'grt' => '4107', 'nrt' => '2370',
     'gemi_tipi' => 'GENERAL CARGO', 'donatan' => 'MIRA SEA LTD.', 'geldigi_liman' => 'TEKIRDAG', 'gidecegi_liman' => 'BRAILA', 'gelis_tarihi' => '2026-10-15', 'demir_yeri' => 'AHIRKAPI',
@@ -90,7 +90,7 @@ function petition_data(): never
         'tedarikciler' => petition_supplier_rows(),
         'barclar'      => rows('SELECT * FROM barges ORDER BY name'),
         'ek1'          => petition_ek1(),
-        'alanlar'      => array_map(fn($k, $v) => ['kod' => $k, 'ad' => $v[0], 'ornek' => $k === 'ACENTE_ADI' ? (setting('firma_acente_adi') ?: $v[1]) : $v[1]], array_keys(PETITION_FIELDS), PETITION_FIELDS),
+        'alanlar'      => array_map(fn($k, $v) => ['kod' => $k, 'ad' => $v[0], 'ornek' => $k === 'ACENTE_ADI' ? (setting('firma_acente_adi') ?: tr_upper((string) config('agency.short_name'))) : $v[1]], array_keys(PETITION_FIELDS), PETITION_FIELDS),
         'urunler'      => PETITION_PRODUCTS,
         'mevkiler'     => PETITION_PLACES,
         'ornek'        => PETITION_SAMPLE,

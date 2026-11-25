@@ -120,7 +120,7 @@ function ch_holidays_sync(string $cc, int $year, bool $force): array
     if ($own) {
         return $record('own', 0, "{$cc} {$year}: " . implode(' + ', array_map(fn($s) => CH_HOLIDAY_SOURCES[$s] ?? $s, explode(',', $own))) . ' calendar is used; public holidays are not mixed in');
     }
-    [$code, $body, $err] = HbFetcher::curl("https://date.nager.at/api/v3/PublicHolidays/{$year}/{$cc}", 'ChartDesk/1.0 (+https://yasinchelenk.com/chartering)');
+    [$code, $body, $err] = HbFetcher::curl("https://date.nager.at/api/v3/PublicHolidays/{$year}/{$cc}", 'ChartDesk/1.0 (+' . desk_url() . ')');
     if ($code === 204 || $code === 404) {
         return $record('unsupported', 0, "{$cc} is not covered by Nager.Date — import BIMCO or add the holidays by hand");
     }

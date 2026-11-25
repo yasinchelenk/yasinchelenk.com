@@ -26,6 +26,7 @@ if (is_file($root . '/storage/panel.sqlite')) {
     require $root . '/app/panel/bootstrap.php';
     register_shutdown_function(fn() => array_map(fn($x) => @unlink($x), glob("{$tmp}/*") ?: []));   // best effort (Windows keeps the open file)
 } else {
+    require_once $root . '/app/helpers.php';   // config(): the User-Agent carries site.url
     require_once $root . '/app/panel/lib/handybulk_parse.php';
     require_once $root . '/app/panel/lib/handybulk_fetch.php';
     require_once $root . '/app/panel/lib/handybulk_normalize.php';

@@ -39,7 +39,7 @@ final class HbFetcher
 
     public static function userAgent(?string $contact): string
     {
-        return 'ChartDesk/1.0 (+https://yasinchelenk.com/chartering' . (trim((string) $contact) !== '' ? '; ' . trim((string) $contact) : '') . ')';
+        return 'ChartDesk/1.0 (+' . desk_url() . (trim((string) $contact) !== '' ? '; ' . trim((string) $contact) : '') . ')';
     }
 
     /**

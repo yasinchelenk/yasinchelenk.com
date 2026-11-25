@@ -343,7 +343,7 @@ function ch_fleet_export(): never
     $fleet = rows('SELECT * FROM ch_fleet ORDER BY sort, vessel');
     $summary = [
         [['v' => 'FLEET — EMPLOYMENT SUMMARY', 's' => 'title']],
-        [['v' => 'Days left as of ' . date('d.m.Y') . ' · exported from yasinchelenk.com/chartering', 's' => 'dim']],
+        [['v' => 'Days left as of ' . date('d.m.Y') . ' · exported from ' . site_host() . '/chartering', 's' => 'dim']],
         [],
         $head(['VESSEL', 'EX NAME', 'TEU', 'CHARTERERS', 'CP DATE', 'DELIVERY', 'PERIOD', 'MIN REDEL', 'DAYS LEFT', 'MAX REDEL', 'DAYS LEFT', 'RATE (USD/DAY)', 'NEXT DD', 'DAYS LEFT', 'NOTES']),
     ];
