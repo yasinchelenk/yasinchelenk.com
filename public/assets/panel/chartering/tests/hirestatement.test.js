@@ -1,7 +1,7 @@
 // Fleet · hire statements (engine/hirestatement.js). Example figures only — commercial data stays in the database.
 import { test, eq, near } from './harness.js';
 import { computeStatement, statementRows, hirePeriods, hireLines, statementTitle, ordinalShort, parseOffHireText, periodStatus, trackPeriods,
-    nextInterim, finalFrom, toUtc, startedPeriods } from '../engine/hirestatement.js';
+    nextInterim, finalFrom, toUtc, startedPeriods, fixedPeriods } from '../engine/hirestatement.js';
 
 const example = () => ({
     owners: 'EXAMPLE SHIPPING LTD', charterersName: 'Example Charterers',
@@ -133,4 +133,31 @@ test('Periods marked done (handled outside the system)', () => {
     eq(periodStatus({ no: 2, from: '2026-01-16 00:00' }, { status: 'sent' }, '2026-03-10 00:00', { doneUntil: 4 }), 'done', 'a sent one inside “done” counts as done');
     eq(startedPeriods({ start: '2026-01-01 00:00', every: 15, now: '2026-03-10 00:00' }), 5, 'five periods started by 10 March');
     eq(startedPeriods({ start: '2026-01-01 00:00', end: '2027-01-01 00:00', every: 15, now: '2026-03-10 00:00' }), 5, '… also when the redelivery is known');
+});
+
+test('Restart points and corrected statements move the periods', () => {
+    const span = (p) => p.map((x) => [x.no, x.from, x.to]);
+    const base = { start: '2026-01-01 00:00', every: 15, until: '2026-03-20 00:00' };
+    // Off-hire: hire resumes and the 4th period runs from 20 Feb 08:00 (gap after the 3rd = off-hire)
+    const off = hirePeriods({ ...base, breaks: [{ no: 4, from: '2026-02-20 08:00', reason: 'Off-hire, restart agreed' }] });
+    eq(span(off).slice(2, 5), [[3, '2026-01-31 00:00', '2026-02-15 00:00'], [4, '2026-02-20 08:00', '2026-03-07 08:00'], [5, '2026-03-07 08:00', '2026-03-22 08:00']], 'gap, then every 15 days from the restart');
+    eq(off[3].restart, { reason: 'Off-hire, restart agreed', every: null }, 'restart marked on its period');
+    // A restart inside the running period cuts it
+    const cut = hirePeriods({ ...base, breaks: [{ no: 3, from: '2026-01-25 00:00', every: 30 }] });
+    eq(span(cut).slice(1, 4), [[2, '2026-01-16 00:00', '2026-01-25 00:00'], [3, '2026-01-25 00:00', '2026-02-24 00:00'], [4, '2026-02-24 00:00', '2026-03-26 00:00']], 'previous period cut, then every 30 days');
+    // A restart that no longer comes after the previous period (delivery moved later) is ignored
+    eq(span(hirePeriods({ ...base, start: '2026-01-20 00:00', breaks: [{ no: 2, from: '2026-01-10 00:00' }] })).slice(0, 2),
+        [[1, '2026-01-20 00:00', '2026-02-04 00:00'], [2, '2026-02-04 00:00', '2026-02-19 00:00']], 'stale restart ignored');
+    // The 1st statement was sent with a corrected period → the 2nd runs from its end; drafts move nothing
+    const sent = [{ id: 1, stmt_no: 1, kind: 'interim', status: 'sent', period_from: '2026-01-01 00:00', period_to: '2026-01-16 12:00' }];
+    eq(span(hirePeriods({ ...base, fixed: fixedPeriods(sent) })).slice(0, 2), [[1, '2026-01-01 00:00', '2026-01-16 12:00'], [2, '2026-01-16 12:00', '2026-01-31 12:00']], 'next period from the sent statement’s end');
+    eq(fixedPeriods([{ ...sent[0], status: 'draft' }]).size, 0, 'a draft is not a fixed period');
+    // Delivery corrected to the start of a statement sent as no. 2 → it matches period 1, period 2 is not duplicated
+    const mis = trackPeriods({ start: '2026-11-23 16:30', every: 15, now: '2026-11-25 09:00',
+        statements: [{ id: 2, stmt_no: 2, kind: 'interim', status: 'sent', period_from: '2026-11-23 16:30', period_to: '2026-12-08 16:30' }] });
+    eq(mis.map((x) => [x.period.no, x.period.from.slice(5), x.stmt?.stmt_no ?? null]), [[1, '11-23 16:30', 2], [2, '12-08 16:30', null], [3, '12-23 16:30', null]], 'misnumbered sent statement: matched by date, no duplicate period');
+    const t = trackPeriods({ start: '2026-01-01 00:00', every: 15, now: '2026-02-21 00:00', statements: sent, breaks: JSON.stringify([{ no: 4, from: '2026-02-20 08:00' }]) });
+    eq(t.map((x) => [x.period.no, x.period.from.slice(5), x.status]), [[1, '01-01 00:00', 'unpaid'], [2, '01-16 12:00', 'missing'], [3, '01-31 12:00', 'missing'],
+        [4, '02-20 08:00', 'missing'], [5, '03-07 08:00', 'upcoming'], [6, '03-22 08:00', 'upcoming']], 'tracking follows both');
+    eq(startedPeriods({ start: '2026-01-01 00:00', every: 15, now: '2026-02-19 00:00', breaks: [{ no: 4, from: '2026-02-20 08:00' }] }), 3, 'in the off-hire gap only 3 periods have started');
 });

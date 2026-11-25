@@ -80,6 +80,39 @@ eq(array_column(ch_fleet_hs_due(['hs_done_until' => 2] + $fleet, '2026-10-02 09:
 eq(ch_fleet_hs_due(['hs_off' => 1] + $fleet, '2026-10-02 09:00'), [], 'statements prepared by another desk: nothing due');
 eq(ch_fleet_hs_started($fleet, strtotime('2026-10-02 09:00 UTC')), 2, 'two periods started by 2 October');
 eq(ch_fleet_hs_started(['redel_max' => '2026-09-25'] + $fleet, strtotime('2026-12-01 00:00 UTC')), 2, '… none after redelivery');
+
+echo "Restart points (off-hire / re-delivery) and corrected statements\n";
+$g = ent_insert('ch_fleet', ['vessel' => 'SECOND EXAMPLE', 'charterers' => 'Example Charterers', 'delivery_date' => '2026-11-20', 'hire_days' => 15, 'hire_rate' => 12000]);
+// Hire assumed from 20 Nov; a draft was made on that basis
+$old = ent_insert('ch_fleet_hire_statement', ['fleet_id' => $g['id'], 'period_from' => '2026-11-20 00:00', 'period_to' => '2026-12-05 00:00']);
+// Actual delivery 23 Nov 16:30 GMT: the old draft falls outside the current charter, numbering starts again
+ent_update('ch_fleet', $g['id'], ['delivery_date' => '2026-11-23', 'delivery_time' => '16:30']);
+$n1 = ent_insert('ch_fleet_hire_statement', ['fleet_id' => $g['id'], 'period_from' => '2026-11-23 16:30', 'period_to' => '2026-12-08 16:30', 'status' => 'sent']);
+eq($n1['stmt_no'], 1, 'after the delivery is corrected the new statement is no. 1 again');
+$gf = row('SELECT * FROM ch_fleet WHERE id = ?', [$g['id']]);
+eq(array_map(fn($p) => [$p['no'], gmdate('Y-m-d H:i', $p['from'])], ch_fleet_hs_periods($gf, null, strtotime('2026-12-10 00:00 UTC'))),
+    [[1, '2026-11-23 16:30'], [2, '2026-12-08 16:30']], 'periods from the actual delivery time');
+eq(array_column(ch_fleet_hs_due($gf, '2026-11-25 09:00'), 'no'), [2], 'only the next period is due (old draft ignored)');
+ent_delete('ch_fleet_hire_statement', (int) $old['id']);
+eq(scalar('SELECT COUNT(*) FROM ch_fleet_hire_statements WHERE fleet_id = ?', [$g['id']]), 1, 'old draft deleted');
+// The 1st statement corrected to end 12 hours later → the 2nd period follows it
+ent_update('ch_fleet_hire_statement', $n1['id'], ['period_to' => '2026-12-09 04:30']);
+$gf = row('SELECT * FROM ch_fleet WHERE id = ?', [$g['id']]);
+eq(gmdate('Y-m-d H:i', ch_fleet_hs_periods($gf, null, strtotime('2026-12-20 00:00 UTC'))[1]['from']), '2026-12-09 04:30', 'next period from the sent statement’s end');
+// Off-hire: periods restart from no. 3 on 30 Dec 08:00, every 30 days
+$u = ent_update('ch_fleet', $g['id'], ['hs_schedule' => [['no' => '3', 'from' => '30.12.2026 08:00', 'every' => '30', 'reason' => 'Off-hire — restart agreed']]]);
+eq(json_decode($u['hs_schedule'], true), [['no' => 3, 'from' => '2026-12-30 08:00', 'every' => 30, 'reason' => 'Off-hire — restart agreed']], 'restart point stored clean');
+$gf = row('SELECT * FROM ch_fleet WHERE id = ?', [$g['id']]);
+eq(array_map(fn($p) => [$p['no'], gmdate('d.m H:i', $p['from']), gmdate('d.m H:i', $p['to'])], ch_fleet_hs_periods($gf, null, strtotime('2027-02-01 00:00 UTC'))),
+    [[1, '23.11 16:30', '09.12 04:30'], [2, '09.12 04:30', '24.12 04:30'], [3, '30.12 08:00', '29.01 08:00'], [4, '29.01 08:00', '28.02 08:00']], 'gap after no. 2, then every 30 days');
+eq(array_column(ch_fleet_hs_due($gf, '2026-12-26 09:00'), 'no'), [1, 2, 3], 'in the gap: hire of no. 1 not received, no. 2 to prepare, no. 3 next');
+eq(ch_fleet_hs_started($gf, strtotime('2026-12-26 00:00 UTC')), 2, 'two periods started before the restart');
+refused(['_entity' => 'ch_fleet', '_id' => $g['id'], 'data' => ['hs_schedule' => [['no' => 1, 'from' => '2026-12-01 00:00']]]], 'restart of no. 1 refused (that is the delivery)');
+refused(['_entity' => 'ch_fleet', '_id' => $g['id'], 'data' => ['hs_schedule' => [['no' => 2, 'from' => '2026-11-01 00:00']]]], 'restart before the delivery refused');
+refused(['_entity' => 'ch_fleet', '_id' => $g['id'], 'data' => ['hs_schedule' => [['no' => 2, 'from' => '2026-12-20 00:00'], ['no' => 3, 'from' => '2026-12-10 00:00']]]], 'restarts out of order refused');
+$u = ent_update('ch_fleet', $g['id'], ['hs_schedule' => []]);
+eq($u['hs_schedule'], null, 'restart points cleared');
+ent_delete('ch_fleet', $g['id']);
 $u = ent_update('ch_fleet', $f['id'], ['hs_done_until' => 5, 'hs_off' => true]);
 eq([(int) $u['hs_done_until'], (int) $u['hs_off']], [5, 1], 'saved on the vessel');
 ent_update('ch_fleet', $f['id'], ['hs_done_until' => null, 'hs_off' => false]);

@@ -43,7 +43,7 @@ function chartering_migrate_131(PDO $pdo): void
     // statement still a draft / awaiting hire in the system
     $now = time();
     foreach ($pdo->query('SELECT * FROM ch_fleet WHERE delivery_date IS NOT NULL')->fetchAll() as $f) {
-        $n = ch_fleet_hs_started($f, $now);
+        $n = ch_fleet_hs_started($f, $now, []); // inside a migration: no query through db()
         $open = $pdo->prepare("SELECT MIN(stmt_no) FROM ch_fleet_hire_statements WHERE fleet_id = ? AND kind = 'interim' AND status IN ('draft', 'sent') AND period_from >= ?");
         $open->execute([$f['id'], $f['delivery_date']]);
         $first = $open->fetchColumn();
@@ -57,24 +57,165 @@ function chartering_migrate_131(PDO $pdo): void
 }
 
 /** Number of the vessel's hire periods that have started by $now (unix time), stopping at max redelivery. */
-function ch_fleet_hs_started(array $f, int $now): int
+function ch_fleet_hs_started(array $f, int $now, ?array $stmts = null): int
 {
-    if (empty($f['delivery_date'])) {
-        return 0;
-    }
-    $every = max(1, (int) ($f['hire_days'] ?? 0) ?: 15) * 86400;
-    $time = ch_fleet_hhmm($f['delivery_time'] ?? null) ?: '00:00';
-    $start = strtotime("{$f['delivery_date']} {$time} UTC");
-    $end = !empty($f['redel_max']) ? strtotime("{$f['redel_max']} 00:00 UTC") : PHP_INT_MAX;
-    if ($now < $start) {
-        return 0;
-    }
-    $n = intdiv($now - $start, $every) + 1;
-    while ($n > 0 && $start + ($n - 1) * $every >= $end) {
-        $n--;
+    $n = 0;
+    foreach (ch_fleet_hs_periods($f, $stmts, $now) as $p) {
+        if ($p['from'] <= $now) {
+            $n++;
+        }
     }
 
     return min($n, 200);
+}
+
+/**
+ * Migration 136: hs_schedule = restart points of the hire periods, JSON [{no, from, every, reason}] — from statement
+ * `no` the periods run again from `from` (GMT), every `every` days (empty = unchanged): after a long off-hire, a
+ * re-delivery or a shift agreed with charterers.
+ */
+function chartering_migrate_136(PDO $pdo): void
+{
+    $have = array_column($pdo->query('PRAGMA table_info(ch_fleet)')->fetchAll(), 'name');
+    if (!in_array('hs_schedule', $have, true)) {
+        $pdo->exec('ALTER TABLE ch_fleet ADD COLUMN hs_schedule TEXT');
+    }
+}
+
+/** Restart points as given (JSON / array) → [no => ['t' => unix, 'every' => seconds|null, 'reason' => string]], by no. */
+function ch_fleet_hs_breaks(mixed $v): array
+{
+    $list = is_string($v) ? (json_decode($v, true) ?: []) : (is_array($v) ? $v : []);
+    $out = [];
+    foreach ($list as $b) {
+        if (!is_array($b) || (int) ($b['no'] ?? 0) < 2 || empty($b['from'])) {
+            continue;
+        }
+        $t = ch_fleet_time((string) $b['from']);
+        if (!is_string($t)) {
+            continue;
+        }
+        $every = (int) ($b['every'] ?? 0);
+        $out[(int) $b['no']] = ['t' => strtotime((strlen($t) === 10 ? "{$t} 00:00" : $t) . ' UTC'), 'every' => $every > 0 ? $every * 86400 : null,
+            'reason' => (string) ($b['reason'] ?? '')];
+    }
+    ksort($out);
+
+    return $out;
+}
+
+/** Validates the restart points typed on the vessel (prepare of ch_fleet) → clean JSON, or null when there are none. */
+function ch_fleet_hs_schedule_clean(?string $json, array $fleet): ?string
+{
+    if ($json === null || trim($json) === '') {
+        return null;
+    }
+    $list = json_decode($json, true);
+    is_array($list) || api_error('Dönem düzeltmeleri okunamadı.');
+    $time = ch_fleet_hhmm($fleet['delivery_time'] ?? null) ?: '00:00';
+    $delivery = !empty($fleet['delivery_date']) ? "{$fleet['delivery_date']} {$time}" : null;
+    $out = [];
+    foreach (array_slice(array_values(array_filter($list, 'is_array')), 0, 50) as $b) {
+        if (($b['no'] ?? '') === '' && trim((string) ($b['from'] ?? '')) === '') {
+            continue;
+        }
+        $no = (int) ($b['no'] ?? 0);
+        $no >= 2 || api_error('Yeniden başlatma 2. statement’tan itibaren olabilir — 1. dönemin başı delivery’dir (delivery tarih-saatini düzeltin).');
+        isset($out[$no]) && api_error("#{$no} için iki ayrı yeniden başlatma girilmiş.");
+        $t = ch_fleet_time((string) ($b['from'] ?? ''));
+        is_string($t) || api_error("#{$no}: yeni dönem başlangıcı okunamadı (ör. 20.12.2026 08:00, GMT).");
+        $t = strlen($t) === 10 ? "{$t} 00:00" : $t;
+        if ($delivery !== null && $t <= $delivery) {
+            api_error("#{$no}: yeni dönem başlangıcı delivery’den ({$delivery} GMT) sonra olmalı.");
+        }
+        $every = ($b['every'] ?? '') === '' || $b['every'] === null ? null : (int) $b['every'];
+        if ($every !== null && ($every < 1 || $every > 90)) {
+            api_error("#{$no}: ödeme dönemi 1–90 gün olmalı.");
+        }
+        $out[$no] = ['no' => $no, 'from' => $t, 'every' => $every, 'reason' => mb_substr(trim((string) ($b['reason'] ?? '')), 0, 200)];
+    }
+    ksort($out);
+    $prev = null;
+    foreach ($out as $b) {
+        if ($prev !== null && $b['from'] <= $prev['from']) {
+            api_error("#{$b['no']}: başlangıç #{$prev['no']}’in başlangıcından sonra olmalı.");
+        }
+        $prev = $b;
+    }
+
+    return $out ? json_encode(array_values($out), JSON_UNESCAPED_UNICODE) : null;
+}
+
+/**
+ * The hire periods of the vessel's current charter (unix times), same rules as hirePeriods() in hirestatement.js:
+ * from delivery every hire_days; a restart point moves the start of its period (the one before is cut there if it
+ * would run past it); a statement already sent / paid keeps its own period and the next one runs from its end.
+ * Stops at max redelivery or, when it is unknown, at the first period starting after $untilT.
+ * $stmts: the charter's interim statements (null = read them).
+ * @return list<array{no: int, from: int, to: int}>
+ */
+function ch_fleet_hs_periods(array $f, ?array $stmts = null, ?int $untilT = null, int $max = 200): array
+{
+    if (empty($f['delivery_date'])) {
+        return [];
+    }
+    $step = max(1, (int) ($f['hire_days'] ?? 0) ?: 15) * 86400;
+    $time = ch_fleet_hhmm($f['delivery_time'] ?? null) ?: '00:00';
+    $start = strtotime("{$f['delivery_date']} {$time} UTC");
+    $end = !empty($f['redel_max']) ? strtotime("{$f['redel_max']} 00:00 UTC") : null;
+    if (($end === null && $untilT === null) || ($end !== null && $end <= $start)) {
+        return [];
+    }
+    if ($stmts === null) {
+        $stmts = isset($f['id']) ? rows("SELECT stmt_no, kind, status, period_from, period_to FROM ch_fleet_hire_statements WHERE fleet_id = ? AND kind = 'interim' AND period_from >= ?",
+            [$f['id'], $f['delivery_date']]) : [];
+    }
+    $fixed = [];
+    foreach ($stmts as $s) {
+        $no = (int) ($s['stmt_no'] ?? 0);
+        if (($s['kind'] ?? 'interim') === 'final' || !in_array($s['status'] ?? '', ['sent', 'paid'], true) || $no < 1 || isset($fixed[$no])
+            || empty($s['period_from']) || empty($s['period_to'])) {
+            continue;
+        }
+        $a = strtotime("{$s['period_from']} UTC");
+        $b = strtotime("{$s['period_to']} UTC");
+        if ($a !== false && $b !== false && $b > $a) {
+            $fixed[$no] = [$a, $b];
+        }
+    }
+    $breaks = ch_fleet_hs_breaks($f['hs_schedule'] ?? null);
+    $out = [];
+    $last = null;
+    for ($i = 1, $t = $start; $i <= $max; $i++) {
+        $br = $breaks[$i] ?? null;
+        if ($br && ($last === null || $br['t'] > $last)) {
+            $t = $br['t'];
+            $step = $br['every'] ?? $step;
+        }
+        // A sent statement starting no later than the period before it is misnumbered: it does not take this period's place
+        $fx = isset($fixed[$i]) && ($last === null || $fixed[$i][0] > $last) ? $fixed[$i] : null;
+        $from = $fx ? $fx[0] : $t;
+        if ($end !== null ? $from >= $end : $from > $untilT) {
+            break;
+        }
+        if ($fx) {
+            $to = $fx[1];
+        } else {
+            $to = $from + $step;
+            $nb = $breaks[$i + 1] ?? null;
+            if ($nb && $nb['t'] > $from && $nb['t'] < $to) {
+                $to = $nb['t'];
+            }
+            if ($end !== null) {
+                $to = min($end, $to);
+            }
+        }
+        $out[] = ['no' => $i, 'from' => $from, 'to' => $to];
+        $last = $from;
+        $t = $to;
+    }
+
+    return $out;
 }
 
 function chartering_migrate_130(PDO $pdo): void
@@ -228,21 +369,19 @@ function ch_fleet_hs_due(array $f, ?string $now = null, int $payDays = 3): array
     }
     $doneUntil = (int) ($f['hs_done_until'] ?? 0);
     $now ??= gmdate('Y-m-d H:i');
-    $every = max(1, (int) ($f['hire_days'] ?? 0) ?: 15) * 86400;
-    $time = ch_fleet_hhmm($f['delivery_time'] ?? null) ?: '00:00';
-    $start = strtotime("{$f['delivery_date']} {$time} UTC");
-    $end = !empty($f['redel_max']) ? strtotime("{$f['redel_max']} 00:00 UTC") : null;
     $nowT = strtotime("{$now} UTC");
-    $stmts = rows("SELECT stmt_no, kind, status, period_from FROM ch_fleet_hire_statements WHERE fleet_id = ? AND kind = 'interim' AND period_from >= ?", [$f['id'], $f['delivery_date']]);
+    $stmts = rows("SELECT stmt_no, kind, status, period_from, period_to FROM ch_fleet_hire_statements WHERE fleet_id = ? AND kind = 'interim' AND period_from >= ?", [$f['id'], $f['delivery_date']]);
     $byNo = [];
     foreach ($stmts as $s) {
         $byNo[(int) $s['stmt_no']] = $s;
     }
     $out = [];
     $future = 0;
-    for ($i = 1, $t = $start; $i <= 200; $i++, $t += $every) {
+    foreach (ch_fleet_hs_periods($f, $stmts, $nowT + 200 * 86400) as $p) {
+        $i = $p['no'];
+        $t = $p['from'];
         // Every period already started, and the next one
-        if (($end !== null && $t >= $end) || ($t > $nowT && $future++ >= 1)) {
+        if ($t > $nowT && $future++ >= 1) {
             break;
         }
         $s = $byNo[$i] ?? null;

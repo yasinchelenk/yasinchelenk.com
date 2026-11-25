@@ -8,7 +8,7 @@ import { modal, confirmPop } from '../core/ui.js';
 import { fmt, usd, numInput, textInput } from '../chartering/ui.js';
 import {
     computeStatement, statementRows, statementTitle, ordinalShort, parseOffHireText, trackPeriods, nextInterim, finalFrom, blankStatement, toUtc, dayDiff,
-    fmtStamp, fmtNum, emailText, offHireSummarised, PERIOD_STATUS, BUNKER_GRADES, startedPeriods,
+    fmtStamp, fmtNum, emailText, offHireSummarised, PERIOD_STATUS, BUNKER_GRADES, startedPeriods, scheduleBreaks,
 } from '../chartering/engine/hirestatement.js';
 
 /** Now in GMT, 'YYYY-MM-DD HH:MM' */
@@ -28,7 +28,16 @@ const currentOf = (f) => statementsOf(f).filter((s) => !f.delivery_date || Strin
 /** Hire periods of the current charter set against its statements: [{ period, stmt, status }] */
 export function track(f, now = nowUtc()) {
     if (!f.delivery_date || !f.charterers || ['open', 'idle'].includes(f.status) || Number(f.hs_off)) return [];
-    return trackPeriods({ start: startOf(f), end: endOf(f), every: Number(f.hire_days) || 15, statements: currentOf(f), now, doneUntil: Number(f.hs_done_until) || 0 });
+    return trackPeriods({ start: startOf(f), end: endOf(f), every: Number(f.hire_days) || 15, statements: currentOf(f), now, doneUntil: Number(f.hs_done_until) || 0,
+        breaks: f.hs_schedule });
+}
+
+/** The vessel's restart points as editable rows: [{ no, from, every, reason }] */
+function scheduleRows(v) {
+    let a = v;
+    if (typeof v === 'string') { try { a = JSON.parse(v); } catch { a = []; } }
+    return (Array.isArray(a) ? a : []).filter((x) => x && typeof x === 'object')
+        .map((x) => ({ no: x.no ?? null, from: x.from ?? '', every: x.every ?? null, reason: x.reason ?? '' }));
 }
 
 /** Sets “periods 1…n handled outside the system” on the vessel. */
@@ -111,7 +120,8 @@ export function hireSection(f, opts) {
     };
     const rowEl = ({ period: p, stmt: s, status }) => h('tr' + (status === 'missing' || status === 'unpaid' || (status === 'draft_due' && started(p)) ? '.is-late' : URGENT.includes(status) ? '.is-due' : status === 'done' ? '.is-done' : ''),
         h('td', h('b', s?.kind === 'final' ? 'Final' : `#${p?.no ?? s?.stmt_no ?? ''}`)),
-        h('td.nowrap', p ? `${ui(p.from)} – ${ui(p.to)}` : s ? `${ui(s.period_from)} – ${ui(s.period_to)}` : '', p?.last ? h('small.dim', ' to redelivery') : null),
+        h('td.nowrap', p ? `${ui(p.from)} – ${ui(p.to)}` : s ? `${ui(s.period_from)} – ${ui(s.period_to)}` : '', p?.last ? h('small.dim', ' to redelivery') : null,
+            p?.restart ? h('span.ch-badge.blue.hs-restart', { title: `Dönemler burada yeniden başlıyor${p.restart.every ? ` (her ${p.restart.every} gün)` : ''}${p.restart.reason ? ' — ' + p.restart.reason : ''}` }, '↻ restart') : null),
         h('td.r', p ? fmt(p.days, p.days % 1 ? 2 : 0) : ''),
         h('td', s ? h('button.ch-link', { type: 'button', on: { click: () => openStatement(f, s, opts) } }, statementTitle(s).replace(' HIRE STATEMENT', ''), s.stmt_date ? h('small.dim', ` · ${fmtDate(s.stmt_date)}`) : null)
             : h('span.dim', status === 'done' ? 'outside the system' : p && status === 'upcoming' ? `starts ${inDays(p.from, now)}` : '—')),
@@ -135,14 +145,18 @@ export function hireSection(f, opts) {
     const ready = f.delivery_date && f.charterers;
     const off = !!Number(f.hs_off);
     const toggleOff = (v) => async () => { await put(`chartering/fleet/${f.id}`, { hs_off: v }); toast(v ? 'Bu geminin hire statement takibi kapatıldı.' : 'Takip yeniden açıldı.'); await reload(); };
-    const lastStarted = ready ? startedPeriods({ start: startOf(f), end: endOf(f), every, now }) : 0;
+    const lastStarted = ready ? startedPeriods({ start: startOf(f), end: endOf(f), every, now, breaks: f.hs_schedule, statements: all }) : 0;
+    const restarts = scheduleRows(f.hs_schedule).filter((b) => b.no && b.from);
     return h('section.ch-sec.cat-green.hs-sec' + (off ? '.is-off' : ''),
         h('header.ch-sec__head.is-static', h('span.ch-sec__title', 'Hire statements'), h('span.ch-sec__badge', String(all.length)),
-            h('span.dim.fl-hint', off ? 'Not tracked — another desk prepares this vessel’s statements' : ready ? `Hire every ${every} days from delivery ${ui(startOf(f))} GMT · reminder 3 days before each period` : 'Enter charterers and the delivery date to track hire statements'),
+            h('span.dim.fl-hint', off ? 'Not tracked — another desk prepares this vessel’s statements' : ready ? `Hire every ${every} days from delivery ${ui(startOf(f))} GMT · reminder 3 days before each period` : 'Enter charterers and the delivery date to track hire statements',
+                !off && ready && restarts.length ? ` · restart${restarts.length > 1 ? 's' : ''}: ${restarts.map((b) => `#${b.no} ${d5(toUtc(b.from))}`).join(', ')}` : ''),
             h('span.spacer'),
             opts.canEdit && !off && missing.length ? h('button', { type: 'button', title: 'Başlamış ve statement’ı olmayan tüm dönemler sistem dışında yapıldı say', on: { click: (e) => confirmPop(e.currentTarget, {
                 text: `Mark #1–#${lastStarted} as done (handled outside the system)?`, yes: 'Yes, done', danger: false, onYes: () => setDone(f, lastStarted, reload) }) } }, `✓ Mark past periods done (${missing.length})`) : null,
             opts.canEdit ? h('button', { type: 'button', title: off ? 'Hire statement’ları yeniden biz takip edelim' : 'Bu geminin hire statement’larını başka biri hazırlıyor: hatırlatma ve uyarı çıkmasın', on: { click: toggleOff(!off) } }, off ? 'Track again' : 'Not tracked by us') : null,
+            opts.canEdit && !off ? h('button', { type: 'button', title: 'Delivery’yi düzelt, off-hire / yeniden teslim sonrası dönemleri yeniden başlat, statement’ların dönemini düzenle veya sil (eski charter’dakiler dahil)',
+                on: { click: () => periodsDialog(f, opts) } }, 'Periods & corrections…') : null,
             h('button', { type: 'button', title: 'Owners (letterhead), charterers’ address, bank details, hire period, delivery time', on: { click: () => settingsDialog(f, reload) } }, 'Statement settings…'),
             opts.canEdit && ready && !off ? h('button', { type: 'button', title: 'Statement for a period of your choice (e.g. a balance or an extra statement)', on: { click: () => openStatement(f, null, { ...opts, period: null, free: true }) } }, '+ Statement') : null,
             opts.canEdit && ready && !off ? h('button' + (fin ? '' : '.primary'), { type: 'button', title: fin ? 'Open the final statement' : 'Final statement: delivery → redelivery, every off-hire and item, less the hire received',
@@ -151,6 +165,136 @@ export function hireSection(f, opts) {
             off ? h('p.dim', all.length ? `${all.length} statement kayıtlı; açmak için “Track again”.` : 'Bu geminin hire statement’ları burada takip edilmiyor.')
                 : [ready ? earlierBox : null, ready ? (rows.length ? table : h('p.dim', 'No hire period yet.')) : null,
                     ready && !f.delivery_time ? h('p.dim.hs-hint', 'Tip: enter the delivery time (GMT) in the charter above — periods run from the exact time of delivery (e.g. 04-09-2026 01:45 → 19-09-2026 01:45).') : null]));
+}
+
+// ------------------------------------------------------------ Periods & corrections
+
+/**
+ * The control desk for a vessel's hire periods: the actual delivery (period 1 starts there), restart points (after a
+ * long off-hire, a re-delivery or a shift agreed with charterers the periods run again from a given time), and every
+ * statement of the vessel — also those of an earlier charter or made on an old assumption — to renumber, re-date or
+ * delete. A statement already sent keeps its own period and the next period runs from its end.
+ */
+export function periodsDialog(f, opts) {
+    const reload = opts.reload;
+    const w = { delivery_date: f.delivery_date ?? '', delivery_time: f.delivery_time ?? '', hire_days: Number(f.hire_days) || 15, hs_done_until: Number(f.hs_done_until) || 0 };
+    const schedule = scheduleRows(f.hs_schedule);
+    let stmts = statementsOf(f).map((s) => ({ ...s }));
+    let touched = false;
+    const box = h('div.hs-ctl');
+    const previewEl = h('div');
+    const now = nowUtc();
+    const later = debounce(() => drawPreview(), 250);
+
+    const startW = () => (w.delivery_date ? toUtc(w.delivery_date, w.delivery_time) : null);
+    const inCharter = (s) => !w.delivery_date || String(s.period_from ?? '') >= w.delivery_date;
+    const preview = () => (w.delivery_date ? trackPeriods({ start: startW(), end: endOf(f), every: Number(w.hire_days) || 15, statements: stmts.filter(inCharter), now,
+        doneUntil: Number(w.hs_done_until) || 0, breaks: schedule.filter((b) => b.no && b.from)
+            .map((b) => ({ ...b, from: String(b.from).replace('T', ' ') })) }) : []);
+    const dt = (obj, k, after) => h('input.hs-dt', { type: 'datetime-local', value: (obj[k] ?? '').replace(' ', 'T').slice(0, 16), on: { change: (e) => { obj[k] = e.target.value ? e.target.value.replace('T', ' ') : ''; after?.(); } } });
+    const field = (label, control, span = 1) => h('label.ch-field', { style: span > 1 ? { gridColumn: `span ${span}` } : null }, h('span.ch-field__label', label), control);
+    const block = (title, note, ...body) => h('section.hs-ctl__block', h('h4', title, note ? h('small.dim', ` ${note}`) : null), ...body);
+    // the period the next restart most likely belongs to: the one after the last period already started
+    const nextNo = () => {
+        const rows = preview().filter((r) => r.period);
+        const startedNo = rows.filter((r) => dayDiff(now, r.period.from) <= 0).at(-1)?.period.no ?? 1;
+        return Math.max(2, startedNo + 1, ...schedule.map((b) => (Number(b.no) || 0) + 1));
+    };
+
+    function stmtRow(s) {
+        const e = { stmt_no: s.stmt_no, period_from: s.period_from ?? '', period_to: s.period_to ?? '' };
+        const dirty = () => String(e.stmt_no ?? '') !== String(s.stmt_no ?? '') || e.period_from !== (s.period_from ?? '') || e.period_to !== (s.period_to ?? '');
+        const saveBtn = h('button.tiny.primary', { type: 'button', hidden: true, on: { click: async () => {
+            const body = { period_from: e.period_from, period_to: e.period_to };
+            if (s.kind !== 'final') body.stmt_no = e.stmt_no;
+            const row = await put(`chartering/fleet-hire-statements/${s.id}`, body);
+            const moved = row.period_from !== s.period_from || row.period_to !== s.period_to;
+            Object.assign(s, row);
+            touched = true;
+            toast(moved && s.status === 'draft' ? 'Kaydedildi. Hire satırları için statement’ı açıp “↻ From the period & CP / addenda” deyin.' : 'Kaydedildi.', moved && s.status === 'draft' ? 'warn' : undefined, 7000);
+            draw();
+        } } }, 'Save');
+        const upd = () => { saveBtn.hidden = !dirty(); };
+        const old = !inCharter(s);
+        return h('tr' + (old ? '.is-done' : ''),
+            h('td', s.kind === 'final' ? h('b', 'Final') : numInput(e, 'stmt_no', upd, { small: true, width: '52px' })),
+            h('td', dt(e, 'period_from', upd)), h('td', dt(e, 'period_to', upd)),
+            h('td.r', s.period_from && s.period_to ? fmt(dayDiff(s.period_from, s.period_to), 2) : ''),
+            h('td', badge(s.status === 'paid' ? 'paid' : s.status === 'sent' ? 'sent' : 'draft'), s.sent_date ? h('small.dim', ` ${fmtDate(s.sent_date)}`) : null),
+            h('td', old ? h('span.ch-badge.gray', { title: 'Dönemi delivery’den önce: önceki charter ya da eski bir varsayımla hazırlanmış. Takipte sayılmaz.' }, 'before delivery') : h('span.dim', 'current charter')),
+            h('td.nowrap', saveBtn, ' ',
+                h('button.tiny', { type: 'button', on: { click: () => openStatement({ ...f, ...w }, s, { ...opts, reload: async () => { touched = true; await reload(); } }) } }, 'Open'), ' ',
+                h('button.tiny.ghost.danger', { type: 'button', title: 'Statement’ı sil (History ile geri alınabilir)', on: { click: (ev) => confirmPop(ev.currentTarget, {
+                    text: `Delete ${statementTitle(s)}${s.status !== 'draft' ? ' (already sent!)' : ''}?`, onYes: async () => {
+                        await del(`chartering/fleet-hire-statements/${s.id}`);
+                        stmts = stmts.filter((x) => x.id !== s.id);
+                        touched = true;
+                        toast('Silindi (History ile geri alınabilir).');
+                        draw();
+                    } }) } }, '✕')));
+    }
+
+    function drawPreview() {
+        const rows = preview();
+        fill(previewEl,
+                rows.length ? h('table.ch-table.hs-table',
+                    h('thead', h('tr', ['No', 'Period (GMT)', 'Days', 'Statement', 'Status', ''].map((x, i) => h(i === 2 ? 'th.r' : 'th', x)))),
+                    h('tbody', rows.map(({ period: p, stmt: s, status }) => h('tr',
+                        h('td', h('b', s?.kind === 'final' ? 'Final' : `#${p?.no ?? s?.stmt_no ?? ''}`)),
+                        h('td.nowrap', p ? `${ui(p.from)} – ${ui(p.to)}` : s ? `${ui(s.period_from)} – ${ui(s.period_to)}` : ''),
+                        h('td.r', p ? fmt(p.days, p.days % 1 ? 2 : 0) : ''),
+                        h('td', s ? statementTitle(s).replace(' HIRE STATEMENT', '') : h('span.dim', '—')),
+                        h('td', badge(status)),
+                        h('td', p && s && s.kind !== 'final' && Number(s.stmt_no) !== p.no ? h('span.ch-badge.amber', { title: 'Statement numarası bu dönemin numarasıyla aynı değil — aşağıdan düzeltin' }, `No. ${s.stmt_no} → renumber to ${p.no}`) : null,
+                            p?.restart ? h('span.ch-badge.blue', '↻ restart' + (p.restart.reason ? ` · ${p.restart.reason}` : '')) : p?.fixed ? h('small.dim', 'as sent') : null))))) : h('p.dim', 'No period.'));
+    }
+
+    function draw() {
+        const sorted = [...stmts].sort((a, b) => String(b.period_from ?? '').localeCompare(String(a.period_from ?? '')) || (Number(b.stmt_no) || 0) - (Number(a.stmt_no) || 0));
+        fill(box,
+            block('Delivery & hire periods', 'period 1 starts at the actual delivery (GMT)',
+                h('div.ch-grid', { style: { '--cols': 4 } },
+                    field('Delivery date (GMT)', h('input', { type: 'date', value: w.delivery_date ?? '', on: { change: (e) => { w.delivery_date = e.target.value || ''; draw(); } } })),
+                    field('Delivery time (GMT)', textInput(w, 'delivery_time', later, { placeholder: 'e.g. 16:30' })),
+                    field('Hire paid every', h('select', { on: { change: (e) => { w.hire_days = Number(e.target.value); drawPreview(); } } },
+                        [15, 30, 14, 7].map((d) => h('option', { value: d, selected: Number(w.hire_days) === d }, `${d} days`)))),
+                    field('Done outside the system up to no.', numInput(w, 'hs_done_until', later, { small: true, placeholder: '0' }))),
+                h('p.dim.hs-ctl__note', 'Teslim beklenenden farklı olduysa buradan gerçek delivery tarih-saatini girin: dönemler ve numaralar oradan yeniden kurulur. Delivery’den önceki dönemli statement’lar aşağıda “before delivery” olarak kalır — gerekmiyorsa silin.')),
+            block('Restart points', 'off-hire · re-delivery · agreed shift',
+                h('p.dim.hs-ctl__note', 'Normal off-hire ödeme takvimini kaydırmaz: süresi bir sonraki statement’ta düşülür. Takvimin kendisi değiştiyse (uzun off-hire / dry dock sonrası hire yeniden başladı, gemi yeniden teslim edildi, charterers’la yeni tarih anlaşıldı) buraya ekleyin: o numaradan itibaren dönemler verilen saatten yeniden başlar. Önceki dönem o saatten önce bitmiyorsa orada kesilir; arada boşluk kalırsa o süre faturalanmaz.'),
+                schedule.length ? h('table.ch-table.ch-edit.hs-edit',
+                    h('thead', h('tr', h('th', 'From no.'), h('th', 'New period start (GMT)'), h('th', 'Every (days)'), h('th', 'Reason'), h('th'))),
+                    h('tbody', schedule.map((b, i) => h('tr',
+                        h('td', numInput(b, 'no', later, { small: true, width: '52px' })),
+                        h('td', dt(b, 'from', drawPreview)),
+                        h('td', numInput(b, 'every', later, { small: true, width: '60px', placeholder: 'same' })),
+                        h('td', textInput(b, 'reason', null, { width: '260px', placeholder: 'e.g. Off-hire 10–20 Dec, restart agreed' })),
+                        h('td', h('button.tiny.ghost', { type: 'button', title: 'Kaldır', on: { click: () => { schedule.splice(i, 1); draw(); } } }, '✕')))))) : null,
+                h('button.tiny', { type: 'button', on: { click: () => { schedule.push({ no: nextNo(), from: '', every: null, reason: '' }); draw(); } } }, '+ Restart point')),
+            block('Resulting periods', w.delivery_date ? 'preview — saved with “Save”' : '— enter the delivery date', previewEl),
+            block(`Statements of ${f.vessel}`, `${stmts.length} — every charter`,
+                stmts.length ? h('table.ch-table.ch-edit.hs-edit.hs-table',
+                    h('thead', h('tr', ['No', 'Hire from (GMT)', 'Hire to (GMT)', 'Days', 'Status', 'Charter', ''].map((x, i) => h(i === 3 ? 'th.r' : 'th', x)))),
+                    h('tbody', sorted.map(stmtRow))) : h('p.dim', 'No statement yet.')));
+        drawPreview();
+    }
+
+    draw();
+    modal({ title: `Periods & corrections · ${f.vessel}`, width: 1040, className: 'hs-ctl-modal', body: box,
+        onClose: () => { if (touched) reload(); },
+        actions: [{ label: 'Close' }, { label: 'Save', title: 'Kaydet, pencere açık kalsın (ör. ardından eski statement’ları silmek / numaralamak için)', onClick: async () => { await save(); return false; } },
+            { label: 'Save & close', primary: true, onClick: save }] });
+
+    async function save() {
+        const clean = schedule.filter((b) => (b.no !== null && b.no !== '') || b.from).map((b) => ({ no: b.no, from: String(b.from ?? '').replace('T', ' '), every: b.every || null, reason: b.reason || '' }));
+        const row = await put(`chartering/fleet/${f.id}`, { delivery_date: w.delivery_date || null, delivery_time: w.delivery_time || null, hire_days: w.hire_days,
+            hs_done_until: Number(w.hs_done_until) || 0, hs_schedule: clean.length ? JSON.stringify(clean) : null });
+        // the page reloads when the dialog closes; until then the dialog works on the saved values
+        Object.assign(f, { delivery_date: row.delivery_date, delivery_time: row.delivery_time, hire_days: row.hire_days, hs_done_until: row.hs_done_until, hs_schedule: row.hs_schedule });
+        touched = true;
+        toast('Dönemler kaydedildi.');
+        draw();
+    }
 }
 
 function receivedDialog(s, reload) {
