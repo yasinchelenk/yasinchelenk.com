@@ -151,12 +151,13 @@ function chartering_only(array $user): bool
 }
 
 /**
- * chartering_only() kullanıcının açabileceği API yolları. Yalnızca Chartering Desk kurulumunda yönetici ayrıca
- * kullanıcıları yönetir (Chartering Desk → Users: onay, rol, sayfa yetkileri, şifre / 2FA sıfırlama).
+ * chartering_only() kullanıcının açabileceği API yolları. History ve hücre notları ortaktır ama yalnızca yetkili olduğu
+ * Chartering bölümlerininkiler gelir (entity_visible). Yalnızca Chartering Desk kurulumunda yönetici ayrıca kullanıcıları
+ * yönetir (Chartering Desk → Users: onay, rol, sayfa yetkileri, şifre / 2FA sıfırlama).
  */
 function chartering_api_allowed(array $user, string $path): bool
 {
-    if (preg_match('#^/api/(chartering/|oturum/|live$)#', $path)) {
+    if (preg_match('#^/api/(chartering/|oturum/|live$|gecmis(/|$)|notlar$)#', $path)) {
         return true;
     }
 
@@ -278,6 +279,7 @@ function auth_me(): never
         'ikiAdimZorunlu' => setting('iki_adim_zorunlu') === '1',
         'sayfalar'       => $desk ? array_intersect_key(PAGES, array_flip(chartering_pages())) : PAGES,
         'firma'          => $desk ? null : firma_public(),
+        'yalnizDesk'     => chartering_instance(),
         'csrf'           => csrf_token(),
     ]);
 }

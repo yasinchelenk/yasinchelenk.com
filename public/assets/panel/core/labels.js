@@ -9,6 +9,14 @@ export const SECTION_LABELS = {
     sp1_mail: 'POLICE SP1', user: 'Kullanıcılar', price_row: 'Tariffs · Price List', price_section: 'Tariffs · Price List · Section',
     petition_template: 'Petitions · Template', petition_supplier: 'Petitions · Supplier', petition_ek1: 'Petitions · Ek1', barge: 'Petitions · Barge',
     tariff: 'Tariffs · Formulas', petition: 'Petitions', talepname: 'Petitions · Talepname',
+    // Chartering Desk
+    ch_market: 'Market', ch_rate: 'Market · Rates', ch_note: 'Market · Notes', ch_watch: 'Position Monitor', ch_watch_event: 'Position Monitor · Events',
+    ch_tonnage: 'Tonnage & Cargo · Tonnage', ch_order: 'Tonnage & Cargo · Cargo orders', ch_distance: 'Distances',
+    ch_estimate: 'Voyage Estimator', ch_vessel_profile: 'Voyage Estimator · Vessel profiles', ch_fixture: 'Fixtures', ch_task: 'Fixtures · Tasks',
+    ch_template: 'Fixtures · Templates', ch_voyage: 'Operations', ch_voyage_milestone: 'Operations · Milestones', ch_ledger: 'Accounts',
+    ch_sof: 'SOF', ch_sof_template: 'SOF · Templates', ch_sof_event: 'SOF · Event dictionary', ch_laytime: 'Laytime & Demurrage', ch_holiday: 'Laytime · Holidays',
+    ch_fleet: 'Fleet', ch_fleet_voyage: 'Fleet · Voyages', ch_fleet_addendum: 'Fleet · CP addenda', ch_fleet_hire_statement: 'Fleet · Hire statements',
+    ch_port_call: 'Fleet · Port calls', ch_port_call_log: 'Fleet · Agent log', ch_tc: 'TC Desk', ch_port: 'Ports', ch_kb: 'Knowledge', ch_contact: 'Contacts',
 };
 
 const F = {
@@ -98,6 +106,12 @@ export const NOT_UNDOABLE = {
 export const TAB_ENTITIES = {
     positions: ['position'], customs: ['customs'], cash: ['cash'], supply: ['supply'], tasks: ['task'], transits: ['transit'],
     vessels: ['vessel'], da: ['transit'], tariffs: ['price_row'], talepname: ['barge', 'petition_supplier'],
+    // Chartering Desk
+    'ch-market': ['ch_rate', 'ch_note'], 'ch-monitor': ['ch_watch', 'ch_watch_event'], 'ch-board': ['ch_tonnage', 'ch_order', 'ch_distance'],
+    'ch-voyage': ['ch_estimate', 'ch_vessel_profile'], 'ch-fixtures': ['ch_fixture', 'ch_task'], 'ch-ops': ['ch_voyage', 'ch_voyage_milestone'],
+    'ch-accounts': ['ch_ledger'], 'ch-sof': ['ch_sof'], 'ch-laytime': ['ch_laytime', 'ch_holiday'], 'ch-tc': ['ch_tc'], 'ch-ports': ['ch_port', 'ch_distance'],
+    'ch-kb': ['ch_kb'], 'ch-contacts': ['ch_contact'],
+    'ch-fleet': ['ch_fleet', 'ch_fleet_voyage', 'ch_fleet_addendum', 'ch_fleet_hire_statement', 'ch_port_call', 'ch_port_call_log'],
 };
 
 export const CATEGORY_LABELS = {

@@ -15,6 +15,8 @@ export async function mount(el, ctx, param) {
     const f = { user: '', entity: '', field: '', action: '', entity_id: '', label: '', search: '', period: '30', page: 1 };
     let ozet = { users: [], entities: [], fields: [] };
     let total = 0;
+    // Chartering Desk: only the Chartering sections (the server filters by ?ch=1)
+    const scope = ctx.desk ? { ch: 1 } : {};
 
     const grid = new Grid({
         key: 'gecmis', emptyText: 'Bu filtreye uyan kayıt yok.',
@@ -103,7 +105,7 @@ export async function mount(el, ctx, param) {
     async function load() {
         const days = PERIODS.find((p) => p[0] === f.period)?.[2];
         const from = days === null || days === undefined ? '' : isoDate(new Date(Date.now() - days * 86400000));
-        const res = await get('gecmis', { user: f.user, entity: f.entity, field: f.field, action: f.action, entity_id: f.entity_id, search: f.search, from, page: f.page, limit: 100 });
+        const res = await get('gecmis', { ...scope, user: f.user, entity: f.entity, field: f.field, action: f.action, entity_id: f.entity_id, search: f.search, from, page: f.page, limit: 100 });
         total = res.total;
         grid.setRows(res.rows);
         counter.textContent = `${total} kayıt`;
@@ -115,10 +117,11 @@ export async function mount(el, ctx, param) {
     }
 
     async function loadFoot() {
-        const s = await get('gecmis/boyut');
+        const s = await get('gecmis/boyut', scope);
         fill(foot, 
-            `Defter: ${s.rows.toLocaleString('tr-TR')} satır · ~${fmtBytes(s.bytes)} · en eski kayıt ${s.ilk ? fmtDateTime(s.ilk, true) : '—'} · veritabanı ${fmtBytes(s.dbBytes)}`,
-            ctx.user.role === 'yonetici' ? h('button.tiny.ghost', { type: 'button', on: { click: (e) => clearOld(e.currentTarget) } }, 'clear old…') : null);
+            `Defter: ${s.rows.toLocaleString('tr-TR')} satır · ~${fmtBytes(s.bytes)} · en eski kayıt ${s.ilk ? fmtDateTime(s.ilk, true) : '—'}${s.dbBytes === null ? '' : ` · veritabanı ${fmtBytes(s.dbBytes)}`}`,
+            // clearing deletes every section's history: not from the Desk, unless this install is the Desk alone
+            ctx.user.role === 'yonetici' && (!ctx.desk || ctx.info?.yalnizDesk) ? h('button.tiny.ghost', { type: 'button', on: { click: (e) => clearOld(e.currentTarget) } }, 'clear old…') : null);
     }
 
     function clearOld(anchor) {
@@ -151,7 +154,7 @@ export async function mount(el, ctx, param) {
         foot,
     );
 
-    ozet = await get('gecmis/ozet');
+    ozet = await get('gecmis/ozet', scope);
     drawFilters();
     if (param) applyParam(param);
     else load();

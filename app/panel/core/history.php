@@ -19,10 +19,49 @@ function history_routes(): void
     route('DELETE', '/api/gecmis', 'history_clear', 'admin');
 }
 
-function history_list(array $p, array $in): never
+/** Kayıt tanımı (entity_define) olmadan geçmişe yazılan Chartering bölümlerinin sayfası */
+const HISTORY_EXTRA_PAGES = ['ch_market' => 'ch-market', 'ch_template' => 'ch-fixtures', 'ch_sof_template' => 'ch-sof', 'ch_sof_event' => 'ch-sof'];
+
+function entity_page(string $entity): ?string
 {
-    $where = ['1 = 1'];
+    return ent_exists($entity) ? (ent($entity)['page'] ?? null) : (HISTORY_EXTRA_PAGES[$entity] ?? null);
+}
+
+/**
+ * Bölümün geçmişini / notlarını görebilir mi? Yalnızca Chartering'e yetkili kullanıcı (chartering_only) yalnızca
+ * yetkili olduğu Chartering sayfalarının bölümlerini görür; panelin geçmişi ve notları ona hiç gelmez. Diğerleri hepsini.
+ * $desk: Chartering Desk'teki History (?ch=1) — herkese yalnızca Chartering bölümleri.
+ */
+function entity_visible(array $user, string $entity, bool $desk = false): bool
+{
+    if (!chartering_only($user) && !$desk) {
+        return true;
+    }
+    $page = entity_page($entity);
+
+    return $page !== null && str_starts_with($page, 'ch-') && izinli($user, $page);
+}
+
+/** history_* sorgularına eklenecek bölüm kısıtı ("1 = 1" ya da "entity IN (…)") */
+function history_scope(array $user, array &$params, array $in = []): string
+{
+    $desk = !empty($in['ch']);
+    if (!chartering_only($user) && !$desk) {
+        return '1 = 1';
+    }
+    $entities = array_values(array_filter(array_column(rows('SELECT DISTINCT entity FROM gecmis'), 'entity'), fn($e) => entity_visible($user, (string) $e, $desk)));
+    if (!$entities) {
+        return '0 = 1';
+    }
+    array_push($params, ...$entities);
+
+    return 'entity IN (' . implode(',', array_fill(0, count($entities), '?')) . ')';
+}
+
+function history_list(array $p, array $in, array $user): never
+{
     $params = [];
+    $where = [history_scope($user, $params, $in)];
     $eq = ['user' => 'actor_name', 'entity' => 'entity', 'field' => 'field', 'action' => 'action', 'entity_id' => 'entity_id'];
     foreach ($eq as $key => $col) {
         if (($in[$key] ?? '') !== '') {
@@ -60,23 +99,28 @@ function history_undoable(array $h): bool
         && ($h['action'] !== 'update' || isset(ent($h['entity'])['fields'][$h['field']]));
 }
 
-function history_summary(): never
+function history_summary(array $p, array $in, array $user): never
 {
+    $params = [];
+    $scope = history_scope($user, $params, $in);
     json_response([
-        'users'    => rows('SELECT actor_name AS name, COUNT(*) AS c FROM gecmis GROUP BY actor_name ORDER BY c DESC'),
-        'entities' => array_column(rows('SELECT DISTINCT entity FROM gecmis ORDER BY entity'), 'entity'),
-        'fields'   => rows('SELECT entity, field, COUNT(*) AS c FROM gecmis WHERE field IS NOT NULL GROUP BY entity, field'),
+        'users'    => rows("SELECT actor_name AS name, COUNT(*) AS c FROM gecmis WHERE {$scope} GROUP BY actor_name ORDER BY c DESC", $params),
+        'entities' => array_column(rows("SELECT DISTINCT entity FROM gecmis WHERE {$scope} ORDER BY entity", $params), 'entity'),
+        'fields'   => rows("SELECT entity, field, COUNT(*) AS c FROM gecmis WHERE {$scope} AND field IS NOT NULL GROUP BY entity, field", $params),
     ]);
 }
 
-function history_size(): never
+function history_size(array $p, array $in, array $user): never
 {
+    $params = [];
+    $scope = history_scope($user, $params, $in);
     $file = panel_storage('panel.sqlite');
     json_response([
-        'rows'    => (int) scalar('SELECT COUNT(*) FROM gecmis'),
-        'bytes'   => (int) scalar('SELECT SUM(LENGTH(COALESCE(old_value, \'\')) + LENGTH(COALESCE(new_value, \'\')) + LENGTH(COALESCE(snapshot, \'\')) + 80) FROM gecmis'),
-        'ilk'     => scalar('SELECT MIN(at) FROM gecmis'),
-        'dbBytes' => (is_file($file) ? filesize($file) : 0) + (is_file($file . '-wal') ? filesize($file . '-wal') : 0),
+        'rows'    => (int) scalar("SELECT COUNT(*) FROM gecmis WHERE {$scope}", $params),
+        'bytes'   => (int) scalar("SELECT SUM(LENGTH(COALESCE(old_value, '')) + LENGTH(COALESCE(new_value, '')) + LENGTH(COALESCE(snapshot, '')) + 80) FROM gecmis WHERE {$scope}", $params),
+        'ilk'     => scalar("SELECT MIN(at) FROM gecmis WHERE {$scope}", $params),
+        // veritabanı dosyasının boyutu panelin verisini de içerir: yalnızca Chartering'e yetkili kullanıcıya gösterilmez
+        'dbBytes' => (chartering_only($user) || !empty($in['ch'])) && !chartering_instance() ? null : (is_file($file) ? filesize($file) : 0) + (is_file($file . '-wal') ? filesize($file . '-wal') : 0),
     ]);
 }
 
@@ -87,9 +131,13 @@ function history_size(): never
  */
 function history_undo_target(array $p, array $in, array $user): never
 {
-    $entities = array_filter(explode(',', (string) ($in['entity'] ?? '')));
+    $entities = array_values(array_filter(explode(',', (string) ($in['entity'] ?? ''))));
     if (!$entities) {
         api_error('Bölüm belirtilmedi.');
+    }
+    $entities = array_values(array_filter($entities, fn($e) => entity_visible($user, $e)));
+    if (!$entities) {
+        json_response(['varMi' => false]);
     }
     $marks = implode(',', array_fill(0, count($entities), '?'));
     if (($in['entity_id'] ?? '') !== '') {
@@ -116,15 +164,22 @@ function history_current_value(array $h): array
     return ['kayitVar' => (bool) $raw, 'deger' => $raw && $h['field'] ? $raw[$h['field']] ?? null : null];
 }
 
-function history_current(array $p): never
+/** Geçmiş satırı; kullanıcının göremediği bölümünkiler yokmuş gibi */
+function history_row(array $user, int|string $id, string $notFound): array
 {
-    $h = row('SELECT * FROM gecmis WHERE id = ?', [$p['id']]) ?? api_error('Kayıt bulunamadı.', 404);
-    json_response(history_current_value($h));
+    $h = row('SELECT * FROM gecmis WHERE id = ?', [$id]);
+
+    return $h && entity_visible($user, (string) $h['entity']) ? $h : api_error($notFound, 404);
+}
+
+function history_current(array $p, array $in, array $user): never
+{
+    json_response(history_current_value(history_row($user, $p['id'], 'Kayıt bulunamadı.')));
 }
 
 function history_undo(array $p, array $in, array $user): never
 {
-    $h = row('SELECT * FROM gecmis WHERE id = ?', [$p['id']]) ?? api_error('Geçmiş kaydı bulunamadı.', 404);
+    $h = history_row($user, $p['id'], 'Geçmiş kaydı bulunamadı.');
     if (!history_undoable($h)) {
         api_error($h['undone_at'] ? 'Bu değişiklik zaten geri alınmış.' : 'Bu değişiklik geri alınamaz.');
     }

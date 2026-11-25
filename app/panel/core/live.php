@@ -53,7 +53,9 @@ function live_poll(array $p, array $in, array $user): never
             'count'  => $c['count'] === null ? null : (int) $c['count'],
             'by'     => $c['user_name'],
             'byId'   => $c['user_id'] === null ? null : (int) $c['user_id'],
-        ], rows('SELECT c.*, u.name AS user_name FROM changes c LEFT JOIN users u ON u.id = c.user_id WHERE c.id > ?' . ($chOnly ? " AND c.entity LIKE 'ch\\_%' ESCAPE '\\'" : '') . ' ORDER BY c.id LIMIT 500', [$since]));
+        ], rows('SELECT c.*, u.name AS user_name FROM changes c LEFT JOIN users u ON u.id = c.user_id WHERE c.id > ?' . ($chOnly ? " AND (c.entity LIKE 'ch\\_%' ESCAPE '\\' OR c.entity = 'cell_note')" : '') . ' ORDER BY c.id LIMIT 500', [$since]));
+        // Hücre notlarından yalnızca görebildiği bölümlerinkiler
+        $changes = array_values(array_filter($changes, fn($c) => $c['entity'] !== 'cell_note' || entity_visible($user, (string) ($c['row']['entity'] ?? ''))));
     }
 
     json_response([
@@ -74,9 +76,9 @@ function live_poll(array $p, array $in, array $user): never
 
 const NOTE_COLORS = ['kirmizi', 'turuncu', 'sari', 'yesil', 'mavi'];
 
-function notes_list(): never
+function notes_list(array $p, array $in, array $user): never
 {
-    json_response(rows('SELECT * FROM cell_notes ORDER BY id'));
+    json_response(array_values(array_filter(rows('SELECT * FROM cell_notes ORDER BY id'), fn($n) => entity_visible($user, (string) $n['entity']))));
 }
 
 function notes_save(array $p, array $in, array $user): never
@@ -86,6 +88,9 @@ function notes_save(array $p, array $in, array $user): never
     $field = (string) ($in['field'] ?? '');
     if ($entity === '' || $id === '' || $field === '') {
         api_error('Not için hücre belirtilmedi.');
+    }
+    if (!entity_visible($user, $entity)) {
+        api_error('Bu bölüme yetkiniz yok.', 403);
     }
     $note = mb_substr(trim((string) ($in['note'] ?? '')), 0, 1000);
     $old = row('SELECT * FROM cell_notes WHERE entity = ? AND entity_id = ? AND field = ?', [$entity, $id, $field]);
@@ -104,8 +109,11 @@ function notes_save(array $p, array $in, array $user): never
     json_response($row);
 }
 
-function notes_delete(array $p, array $in): never
+function notes_delete(array $p, array $in, array $user): never
 {
+    if (!entity_visible($user, (string) ($in['entity'] ?? ''))) {
+        api_error('Bu bölüme yetkiniz yok.', 403);
+    }
     notes_remove(row('SELECT * FROM cell_notes WHERE entity = ? AND entity_id = ? AND field = ?', [(string) ($in['entity'] ?? ''), (string) ($in['entity_id'] ?? ''), (string) ($in['field'] ?? '')]));
     json_response(['ok' => true]);
 }

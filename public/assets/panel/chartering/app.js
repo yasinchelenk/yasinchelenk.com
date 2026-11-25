@@ -6,6 +6,8 @@ import { live } from '../core/live.js';
 import { popover } from '../core/ui.js';
 import { renderLogin, renderForcedTotp, loadSession } from '../auth.js';
 import { changePassword, twoStep, usersDialog } from '../account.js';
+import { notes } from '../core/notes.js';
+import { undoTab } from '../core/undo.js';
 
 export const TABS = [
     { code: 'ch-market', label: 'Market', tip: 'Baltic indices, TC earnings, charter rates, period TC, bunker prices' },
@@ -23,6 +25,8 @@ export const TABS = [
     { code: 'ch-ports', label: 'Ports', tip: 'Port database (limits, density, time zone, NOR rules, agent) and the distance matrix' },
     { code: 'ch-kb', label: 'Knowledge', tip: 'Glossary, regions, CP forms, vessel sizes, stowage factors, handybulk lessons' },
     { code: 'ch-contacts', label: 'Contacts', tip: 'Owners, operators, charterers, brokers, agents, surveyors, bunker suppliers' },
+    // Shared History tab: the server only lists the Chartering sections this account may see
+    { code: 'gecmis', label: 'History', tip: 'Who changed what and when; deleted records and undo' },
 ];
 const root = document.getElementById('app');
 // Name, logo and footer come from the server config (desk.*, site.url) — see templates/chartering/shell.php
@@ -56,7 +60,8 @@ async function afterLogin() {
     start();
 }
 
-const allowed = (code) => info.user.role === 'yonetici' || info.user.pages === null || info.user.pages.includes(code);
+const allowed = (code) => (code === 'gecmis' && hasPages()) || info.user.role === 'yonetici' || info.user.pages === null || info.user.pages.includes(code);
+const hasPages = () => TABS.some((t) => t.code !== 'gecmis' && allowed(t.code));
 
 function start() {
     if (info.ikiAdimZorunlu && !info.user.totp) return renderForcedTotp(root, info, info.user, afterLogin);
@@ -64,12 +69,13 @@ function start() {
     mounted.clear();
     current = null;
     ctx = {
-        user: info.user, info, firma: BRAND, open: (code, param) => show(code, param), allowed, setUser: (u) => { Object.assign(ctx.user, u); drawMe(); },
+        desk: true, user: info.user, info, firma: BRAND, open: (code, param) => show(code, param), allowed, setUser: (u) => { Object.assign(ctx.user, u); drawMe(); },
         refreshMe: async () => { info.bekleyen = (await loadSession('chartering')).bekleyen; drawMe(); },
     };
     document.title = BRAND.ad;
     root.replaceChildren(buildShell());
     live.start(info.user);
+    notes.load().catch(() => {});
 
     const visible = TABS.filter((t) => allowed(t.code));
     if (!visible.length) {
@@ -177,5 +183,16 @@ window.addEventListener('ops:oturum-dustu', () => {
     setTimeout(() => location.reload(), 900);
 });
 window.addEventListener('ops:iki-adim', () => afterLogin());
+// 🕘 Show changes (cell menu) opens History with that cell's filter
+window.addEventListener('ops:gecmis', (e) => show('gecmis', e.detail));
+
+// Ctrl+Z: undo my last change on this tab
+document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'z' || !current) return;
+    if (e.target.closest?.('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]')) return;
+    if (document.querySelector('.modal-back, .cell-float, .tpl-editor')) return;
+    e.preventDefault();
+    undoTab(current).catch(() => {});
+});
 
 boot();
